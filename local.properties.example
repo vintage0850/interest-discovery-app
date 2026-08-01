@@ -1,0 +1,18 @@
+# local.properties のサンプルファイル
+#
+# このファイルをコピーして `local.properties` を作成してください。
+#   Windows (PowerShell): Copy-Item local.properties.example local.properties
+#   Git Bash:             cp local.properties.example local.properties
+#
+# `local.properties` は .gitignore 済みです。絶対にコミットしないでください。
+
+# Android SDK のインストール先。
+# Android Studio でプロジェクトを開くと自動生成されます。
+# 手動で書く場合はバックスラッシュをエスケープしてください。
+sdk.dir=C\:\\Users\\<ユーザー名>\\AppData\\Local\\Android\\Sdk
+
+# Google Calendar API 用の OAuth 2.0 クライアント ID（Android アプリ用）。
+# 取得手順は SETUP.md を参照してください。
+# 形式: <数字>-<英数字>.apps.googleusercontent.com
+# 未設定（空）のままでもビルドは通りますが、カレンダー連携機能は動作しません。
+GOOGLE_OAUTH_CLIENT_ID=

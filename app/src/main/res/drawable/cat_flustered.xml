@@ -1,0 +1,90 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="120dp"
+    android:height="120dp"
+    android:viewportWidth="100"
+    android:viewportHeight="100">
+
+    <!-- 耳（ぴんと立つ） -->
+    <path
+        android:fillColor="#EFA05B"
+        android:pathData="M23,40 L18,10 L47,27 Z" />
+    <path
+        android:fillColor="#EFA05B"
+        android:pathData="M77,40 L82,10 L53,27 Z" />
+    <path
+        android:fillColor="#FFD5C2"
+        android:pathData="M28,36 L24,19 L41,29 Z" />
+    <path
+        android:fillColor="#FFD5C2"
+        android:pathData="M72,36 L76,19 L59,29 Z" />
+
+    <!-- 顔 -->
+    <path
+        android:fillColor="#EFA05B"
+        android:pathData="M50,28 C69,28 84,42 84,58 C84,75 69,88 50,88 C31,88 16,75 16,58 C16,42 31,28 50,28 Z" />
+
+    <!-- 目（見開き） -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M37,57 m-8,0 a8,8.5 0,1 0,16 0 a8,8.5 0,1 0,-16 0" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M63,57 m-8,0 a8,8.5 0,1 0,16 0 a8,8.5 0,1 0,-16 0" />
+    <path
+        android:fillColor="#3B2412"
+        android:pathData="M37,58 m-3.5,0 a3.5,3.5 0,1 0,7 0 a3.5,3.5 0,1 0,-7 0" />
+    <path
+        android:fillColor="#3B2412"
+        android:pathData="M63,58 m-3.5,0 a3.5,3.5 0,1 0,7 0 a3.5,3.5 0,1 0,-7 0" />
+
+    <!-- ほっぺ（あせり） -->
+    <path
+        android:fillColor="#F2879B"
+        android:fillAlpha="0.6"
+        android:pathData="M27,70 m-6,0 a6,4 0,1 0,12 0 a6,4 0,1 0,-12 0" />
+    <path
+        android:fillColor="#F2879B"
+        android:fillAlpha="0.6"
+        android:pathData="M73,70 m-6,0 a6,4 0,1 0,12 0 a6,4 0,1 0,-12 0" />
+
+    <!-- 鼻 -->
+    <path
+        android:fillColor="#E76F51"
+        android:pathData="M50,68 L53.5,71.5 L50,74.5 L46.5,71.5 Z" />
+
+    <!-- 口（あわあわ） -->
+    <path
+        android:fillColor="#8C3B2E"
+        android:pathData="M50,80 m-7,0 a7,5 0,1 0,14 0 a7,5 0,1 0,-14 0" />
+
+    <!-- 汗 -->
+    <path
+        android:fillColor="#5FB0E5"
+        android:pathData="M84,30 C86.5,34.5 89,37 89,40.5 C89,43.5 86.8,45.5 84,45.5 C81.2,45.5 79,43.5 79,40.5 C79,37 81.5,34.5 84,30 Z" />
+    <path
+        android:fillColor="#5FB0E5"
+        android:fillAlpha="0.75"
+        android:pathData="M17,36 C19,39.5 21,41.5 21,44.2 C21,46.6 19.3,48.2 17,48.2 C14.7,48.2 13,46.6 13,44.2 C13,41.5 15,39.5 17,36 Z" />
+
+    <!-- ひげ -->
+    <path
+        android:strokeColor="#5B3A21"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M11,62 L27,64" />
+    <path
+        android:strokeColor="#5B3A21"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M11,72 L27,70" />
+    <path
+        android:strokeColor="#5B3A21"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M89,62 L73,64" />
+    <path
+        android:strokeColor="#5B3A21"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M89,72 L73,70" />
+</vector>
