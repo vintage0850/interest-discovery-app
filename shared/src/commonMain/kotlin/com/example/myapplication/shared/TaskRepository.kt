@@ -6,6 +6,7 @@ import com.example.myapplication.shared.db.DatabaseDriverFactory
 import com.example.myapplication.shared.db.SharedDatabase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 
@@ -34,6 +35,10 @@ class TaskRepository(driverFactory: DatabaseDriverFactory) {
                     )
                 }
             }
+            // mapToList()のflowOnは自分より上流しか守らないため、末尾に追加したこの.mapは
+            // 収集側（例: ViewModelのDispatchers.Main.immediate）のコンテキストで動いてしまう。
+            // サブタスクのDB取得もDispatchers.Default上で行われるよう明示的にシールドする。
+            .flowOn(Dispatchers.Default)
 
     val categories: Flow<List<Category>> =
         categoryQueries.selectAll(::toCategory).asFlow().mapToList(Dispatchers.Default)
