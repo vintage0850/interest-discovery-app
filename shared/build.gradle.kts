@@ -30,6 +30,7 @@ kotlin {
         }
         commonTest.dependencies {
             implementation(libs.junit)
+            implementation(kotlin("test"))
         }
         androidMain.dependencies {
             implementation(libs.sqldelight.android.driver)
