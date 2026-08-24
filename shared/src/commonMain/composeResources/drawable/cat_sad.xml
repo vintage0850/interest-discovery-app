@@ -1,0 +1,90 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="120dp"
+    android:height="120dp"
+    android:viewportWidth="100"
+    android:viewportHeight="100">
+
+    <!-- 耳（垂れ気味） -->
+    <path
+        android:fillColor="#E0954F"
+        android:pathData="M22,44 L14,20 L45,29 Z" />
+    <path
+        android:fillColor="#E0954F"
+        android:pathData="M78,44 L86,20 L55,29 Z" />
+    <path
+        android:fillColor="#F0C4B4"
+        android:pathData="M27,39 L21,27 L39,31 Z" />
+    <path
+        android:fillColor="#F0C4B4"
+        android:pathData="M73,39 L79,27 L61,31 Z" />
+
+    <!-- 顔 -->
+    <path
+        android:fillColor="#E0954F"
+        android:pathData="M50,28 C69,28 84,42 84,58 C84,75 69,88 50,88 C31,88 16,75 16,58 C16,42 31,28 50,28 Z" />
+
+    <!-- 眉（ハの字） -->
+    <path
+        android:strokeColor="#5B3A21"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:pathData="M29,46 L43,51" />
+    <path
+        android:strokeColor="#5B3A21"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:pathData="M71,46 L57,51" />
+
+    <!-- 目（うるうる） -->
+    <path
+        android:fillColor="#5B3A21"
+        android:pathData="M37,60 m-5.5,0 a5.5,6 0,1 0,11 0 a5.5,6 0,1 0,-11 0" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M35,57 m-2,0 a2,2 0,1 0,4 0 a2,2 0,1 0,-4 0" />
+    <path
+        android:fillColor="#5B3A21"
+        android:pathData="M63,60 m-5.5,0 a5.5,6 0,1 0,11 0 a5.5,6 0,1 0,-11 0" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M61,57 m-2,0 a2,2 0,1 0,4 0 a2,2 0,1 0,-4 0" />
+
+    <!-- 涙 -->
+    <path
+        android:fillColor="#5FB0E5"
+        android:pathData="M69,68 C71,72 73,74 73,77 C73,79.5 71.2,81 69,81 C66.8,81 65,79.5 65,77 C65,74 67,72 69,68 Z" />
+
+    <!-- 鼻 -->
+    <path
+        android:fillColor="#E76F51"
+        android:pathData="M50,67 L54,71 L50,74 L46,71 Z" />
+
+    <!-- 口（への字） -->
+    <path
+        android:strokeColor="#5B3A21"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:pathData="M42,81 C45,76 55,76 58,81" />
+
+    <!-- ひげ -->
+    <path
+        android:strokeColor="#5B3A21"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M11,63 L27,65" />
+    <path
+        android:strokeColor="#5B3A21"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M11,73 L27,71" />
+    <path
+        android:strokeColor="#5B3A21"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M89,63 L73,65" />
+    <path
+        android:strokeColor="#5B3A21"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M89,73 L73,71" />
+</vector>
