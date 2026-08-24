@@ -5,7 +5,9 @@ import com.example.myapplication.shared.SubTask
 import com.example.myapplication.shared.Task
 import com.example.myapplication.shared.TaskRepository
 import com.example.myapplication.shared.TaskWithSubTasks
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -23,6 +25,15 @@ class AppState(
     private val repository: TaskRepository,
     private val coroutineScope: CoroutineScope
 ) {
+    /**
+     * `coroutineScope` から派生した、`SupervisorJob` 付きの内部スコープ。
+     * これを使わずに `coroutineScope.launch` で起動した子コルーチンが例外を投げると、
+     * 親の `Job` ごとキャンセルされ、`stateIn` の内部コレクターも停止し、
+     * それ以降のすべての `launch` が静かに no-op になってしまう。
+     * `SupervisorJob` を挟むことで、1つの操作の失敗が他に波及しないようにする。
+     */
+    private val supervisedScope = CoroutineScope(coroutineScope.coroutineContext + SupervisorJob())
+
     val allTasks: StateFlow<List<TaskWithSubTasks>> = repository.allTasks.stateIn(
         scope = coroutineScope,
         started = SharingStarted.WhileSubscribed(5000),
@@ -48,11 +59,17 @@ class AppState(
     fun addCategory(name: String) {
         val trimmed = name.trim()
         if (trimmed.isEmpty()) return
-        coroutineScope.launch {
-            if (repository.addCategory(trimmed)) {
-                _messages.tryEmit("「$trimmed」を追加しました")
-            } else {
-                _messages.tryEmit("「$trimmed」はすでにあります")
+        supervisedScope.launch {
+            try {
+                if (repository.addCategory(trimmed)) {
+                    _messages.tryEmit("「$trimmed」を追加しました")
+                } else {
+                    _messages.tryEmit("「$trimmed」はすでにあります")
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _messages.tryEmit("操作に失敗しました")
             }
         }
     }
@@ -60,11 +77,17 @@ class AppState(
     fun renameCategory(category: Category, newName: String) {
         val trimmed = newName.trim()
         if (trimmed.isEmpty() || trimmed == category.name) return
-        coroutineScope.launch {
-            if (repository.renameCategory(category, trimmed)) {
-                _messages.tryEmit("「$trimmed」に変更しました")
-            } else {
-                _messages.tryEmit("「$trimmed」はすでにあります")
+        supervisedScope.launch {
+            try {
+                if (repository.renameCategory(category, trimmed)) {
+                    _messages.tryEmit("「$trimmed」に変更しました")
+                } else {
+                    _messages.tryEmit("「$trimmed」はすでにあります")
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _messages.tryEmit("操作に失敗しました")
             }
         }
     }
@@ -74,16 +97,22 @@ class AppState(
      * （tasks.categoryId の外部キーが ON DELETE SET NULL のため DB 側で処理される）。
      */
     fun deleteCategory(category: Category) {
-        coroutineScope.launch {
-            val moved = repository.countTasksInCategory(category.id)
-            repository.deleteCategory(category)
-            _messages.tryEmit(
-                if (moved > 0) {
-                    "「${category.name}」を削除しました（${moved}件を未分類に移動）"
-                } else {
-                    "「${category.name}」を削除しました"
-                }
-            )
+        supervisedScope.launch {
+            try {
+                val moved = repository.countTasksInCategory(category.id)
+                repository.deleteCategory(category)
+                _messages.tryEmit(
+                    if (moved > 0) {
+                        "「${category.name}」を削除しました（${moved}件を未分類に移動）"
+                    } else {
+                        "「${category.name}」を削除しました"
+                    }
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _messages.tryEmit("操作に失敗しました")
+            }
         }
     }
 
@@ -93,6 +122,7 @@ class AppState(
 
     // ---- タスク ----
 
+    @OptIn(kotlin.time.ExperimentalTime::class)
     fun addTask(
         title: String,
         deadline: Long,
@@ -104,52 +134,83 @@ class AppState(
         val trimmed = title.trim()
         if (trimmed.isEmpty()) return
 
-        coroutineScope.launch {
-            val task = Task(
-                title = trimmed,
-                deadline = deadline,
-                importance = importance,
-                urgency = urgency,
-                categoryId = categoryId
-            )
-            val id = repository.insert(task)
+        supervisedScope.launch {
+            try {
+                val task = Task(
+                    title = trimmed,
+                    deadline = deadline,
+                    importance = importance,
+                    urgency = urgency,
+                    categoryId = categoryId,
+                    createdAt = kotlin.time.Clock.System.now().toEpochMilliseconds()
+                )
+                val id = repository.insert(task)
 
-            val subTasks = subTaskTitles
-                .map { it.trim() }
-                .filter { it.isNotEmpty() }
-                .mapIndexed { index, subTitle ->
-                    SubTask(taskId = id, title = subTitle, sortOrder = index)
-                }
-            if (subTasks.isNotEmpty()) repository.insertSubTasks(subTasks)
+                val subTasks = subTaskTitles
+                    .map { it.trim() }
+                    .filter { it.isNotEmpty() }
+                    .mapIndexed { index, subTitle ->
+                        SubTask(taskId = id, title = subTitle, sortOrder = index)
+                    }
+                if (subTasks.isNotEmpty()) repository.insertSubTasks(subTasks)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _messages.tryEmit("保存に失敗しました")
+            }
         }
     }
 
     fun toggleCompleted(task: Task) {
-        coroutineScope.launch {
-            repository.update(task.copy(isCompleted = !task.isCompleted))
+        supervisedScope.launch {
+            try {
+                repository.update(task.copy(isCompleted = !task.isCompleted))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _messages.tryEmit("保存に失敗しました")
+            }
         }
     }
 
     fun renameTask(task: Task, newTitle: String) {
         val trimmed = newTitle.trim()
         if (trimmed.isEmpty() || trimmed == task.title) return
-        coroutineScope.launch {
-            repository.update(task.copy(title = trimmed))
+        supervisedScope.launch {
+            try {
+                repository.update(task.copy(title = trimmed))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _messages.tryEmit("保存に失敗しました")
+            }
         }
     }
 
     fun toggleSubTaskCompleted(subTask: SubTask) {
-        coroutineScope.launch {
-            repository.updateSubTask(subTask.copy(isCompleted = !subTask.isCompleted))
+        supervisedScope.launch {
+            try {
+                repository.updateSubTask(subTask.copy(isCompleted = !subTask.isCompleted))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _messages.tryEmit("保存に失敗しました")
+            }
         }
     }
 
     fun deleteTask(task: Task) {
-        coroutineScope.launch {
-            // 取り消しに備えて、削除前にサブタスクも読み出しておく
-            val subTasks = repository.getSubTasksFor(task.id)
-            repository.delete(task)
-            lastDeleted = DeletedTask(task, subTasks)
+        supervisedScope.launch {
+            try {
+                // 取り消しに備えて、削除前にサブタスクも読み出しておく
+                val subTasks = repository.getSubTasksFor(task.id)
+                repository.delete(task)
+                lastDeleted = DeletedTask(task, subTasks)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _messages.tryEmit("保存に失敗しました")
+            }
         }
     }
 
@@ -160,10 +221,16 @@ class AppState(
     fun undoDelete() {
         val deleted = lastDeleted ?: return
         lastDeleted = null
-        coroutineScope.launch {
-            val id = repository.insert(deleted.task)
-            if (deleted.subTasks.isNotEmpty()) {
-                repository.insertSubTasks(deleted.subTasks.map { it.copy(id = 0, taskId = id) })
+        supervisedScope.launch {
+            try {
+                val id = repository.insert(deleted.task)
+                if (deleted.subTasks.isNotEmpty()) {
+                    repository.insertSubTasks(deleted.subTasks.map { it.copy(id = 0, taskId = id) })
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _messages.tryEmit("保存に失敗しました")
             }
         }
     }

@@ -90,7 +90,7 @@ private data class TaskTab(val filter: Int, val title: String)
 private const val TASK_TITLE_MAX_LENGTH = 50
 
 private fun formatDate(epochMillis: Long): String {
-    val date = Instant.fromEpochMilliseconds(epochMillis).toLocalDateTime(TimeZone.UTC).date
+    val date = Instant.fromEpochMilliseconds(epochMillis).toLocalDateTime(TimeZone.currentSystemDefault()).date
     return "${date.year}年${date.monthNumber}月${date.dayOfMonth}日"
 }
 

@@ -98,6 +98,10 @@ private fun formatDate(utcMillis: Long): String {
     return "${date.year}年${date.monthNumber}月${date.dayOfMonth}日"
 }
 
+@OptIn(kotlin.time.ExperimentalTime::class)
+private fun currentTimeMillis(): Long =
+    kotlin.time.Clock.System.now().toEpochMilliseconds()
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun AddTaskScreen(
@@ -145,7 +149,9 @@ fun AddTaskScreen(
         )
     ) { mutableStateListOf<String>() }
 
-    val datePickerState = rememberDatePickerState()
+    val datePickerState = rememberDatePickerState(
+        initialSelectedDateMillis = currentTimeMillis()
+    )
     val keyboardController = LocalSoftwareKeyboardController.current
 
     val isTitleEmpty = title.isBlank()
