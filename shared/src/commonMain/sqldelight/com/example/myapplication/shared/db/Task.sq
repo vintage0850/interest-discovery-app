@@ -1,0 +1,39 @@
+CREATE TABLE Task (
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    deadline INTEGER NOT NULL,
+    importance INTEGER NOT NULL,
+    urgency INTEGER NOT NULL,
+    categoryId INTEGER REFERENCES Category(id) ON DELETE SET NULL,
+    isCompleted INTEGER AS kotlin.Boolean NOT NULL DEFAULT 0,
+    progress INTEGER NOT NULL DEFAULT 0,
+    notificationTime INTEGER,
+    calendarEventId TEXT,
+    createdAt INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'TODO'
+);
+
+selectAll:
+SELECT * FROM Task ORDER BY isCompleted ASC, (importance * 3 + urgency) DESC, deadline ASC;
+
+selectById:
+SELECT * FROM Task WHERE id = ?;
+
+insert:
+INSERT INTO Task(title, deadline, importance, urgency, categoryId, isCompleted, progress, notificationTime, calendarEventId, createdAt, status)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+lastInsertRowId:
+SELECT last_insert_rowid();
+
+update:
+UPDATE Task
+SET title = :title, deadline = :deadline, importance = :importance, urgency = :urgency,
+    categoryId = :categoryId, isCompleted = :isCompleted, progress = :progress
+WHERE id = :id;
+
+delete:
+DELETE FROM Task WHERE id = ?;
+
+countByCategoryId:
+SELECT COUNT(*) FROM Task WHERE categoryId = ?;

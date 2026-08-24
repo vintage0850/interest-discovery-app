@@ -1,0 +1,27 @@
+CREATE TABLE Category (
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    sortOrder INTEGER NOT NULL
+);
+
+selectAll:
+SELECT * FROM Category ORDER BY sortOrder ASC, id ASC;
+
+selectByName:
+SELECT * FROM Category WHERE name = ?;
+
+-- リネーム先の名前が「自分以外の」カテゴリと衝突していないか調べるためのクエリ
+selectConflictingName:
+SELECT * FROM Category WHERE name = :name AND id != :excludingId;
+
+selectMaxSortOrder:
+SELECT MAX(sortOrder) FROM Category;
+
+insert:
+INSERT INTO Category(name, sortOrder) VALUES (?, ?);
+
+updateName:
+UPDATE Category SET name = ? WHERE id = ?;
+
+delete:
+DELETE FROM Category WHERE id = ?;

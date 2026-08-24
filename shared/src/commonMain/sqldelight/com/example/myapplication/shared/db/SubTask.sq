@@ -1,0 +1,19 @@
+CREATE TABLE SubTask (
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    taskId INTEGER NOT NULL REFERENCES Task(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    isCompleted INTEGER AS kotlin.Boolean NOT NULL DEFAULT 0,
+    sortOrder INTEGER NOT NULL DEFAULT 0
+);
+
+selectForTask:
+SELECT * FROM SubTask WHERE taskId = ? ORDER BY sortOrder ASC;
+
+insert:
+INSERT INTO SubTask(taskId, title, isCompleted, sortOrder) VALUES (?, ?, ?, ?);
+
+update:
+UPDATE SubTask SET title = :title, isCompleted = :isCompleted, sortOrder = :sortOrder WHERE id = :id;
+
+delete:
+DELETE FROM SubTask WHERE id = ?;
