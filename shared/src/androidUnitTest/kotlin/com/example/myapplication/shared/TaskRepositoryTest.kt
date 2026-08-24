@@ -105,6 +105,36 @@ class TaskRepositoryTest {
     }
 
     @Test
+    fun `サブタスクの変更がallTasksのprogressに反映される`() = runTest {
+        val repo = newRepository()
+        val id = repo.insert(sampleTask())
+
+        repo.insertSubTasks(listOf(SubTask(taskId = id, title = "下書き", sortOrder = 0)))
+
+        val afterInsert = repo.allTasks.first().single { it.task.id == id }
+        assertEquals(1, afterInsert.subTasks.size)
+        assertEquals("下書き", afterInsert.subTasks.single().title)
+        assertEquals(0, afterInsert.progress)
+
+        val subTask = afterInsert.subTasks.single()
+        repo.updateSubTask(subTask.copy(isCompleted = true))
+
+        val afterUpdate = repo.allTasks.first().single { it.task.id == id }
+        assertEquals(100, afterUpdate.progress)
+    }
+
+    @Test
+    fun `タスク削除でサブタスクもCASCADEで消える`() = runTest {
+        val repo = newRepository()
+        val id = repo.insert(sampleTask())
+        repo.insertSubTasks(listOf(SubTask(taskId = id, title = "下書き")))
+
+        repo.delete(repo.getTaskById(id)!!)
+
+        assertTrue(repo.getSubTasksFor(id).isEmpty())
+    }
+
+    @Test
     fun `同名カテゴリの追加はfalseを返し追加されない`() = runTest {
         val repo = newRepository()
         assertTrue(repo.addCategory("仕事"))

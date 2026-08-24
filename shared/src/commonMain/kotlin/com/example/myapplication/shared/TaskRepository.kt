@@ -6,8 +6,7 @@ import com.example.myapplication.shared.db.DatabaseDriverFactory
 import com.example.myapplication.shared.db.SharedDatabase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flowOn
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.withContext
 
 /**
@@ -20,25 +19,23 @@ class TaskRepository(driverFactory: DatabaseDriverFactory) {
     private val subTaskQueries = database.subTaskQueries
     private val categoryQueries = database.categoryQueries
 
+    // Task/SubTaskどちらの変化にも反応する必要があるため、両テーブルをそれぞれ
+    // observe queryで流し、combineでメモリ上だけで突き合わせる（DB I/Oなしの純粋処理）。
+    // 以前は末尾の.mapでサブタスクを命令的に引いていたが、それはSQLDelightの
+    // クエリ無効化の監視対象外のため、subTaskへの変更がallTasksに反映されなかった。
     val allTasks: Flow<List<TaskWithSubTasks>> =
-        taskQueries.selectAll(::toTask)
-            .asFlow()
-            .mapToList(Dispatchers.Default)
-            // サブタスクは1件ずつ引くとN+1になるため、タスク一覧の変化のたびに
-            // まとめて引き直す。件数が多くない前提（Room版も同様の設計）。
-            .map { tasks ->
-                tasks.map { task ->
-                    TaskWithSubTasks(
-                        task = task,
-                        subTasks = subTaskQueries.selectForTask(task.id.toLong(), ::toSubTask)
-                            .executeAsList()
-                    )
-                }
+        combine(
+            taskQueries.selectAll(::toTask).asFlow().mapToList(Dispatchers.Default),
+            subTaskQueries.selectAllOrdered(::toSubTask).asFlow().mapToList(Dispatchers.Default)
+        ) { tasks, subTasks ->
+            val byTaskId = subTasks.groupBy { it.taskId }
+            tasks.map { task ->
+                TaskWithSubTasks(
+                    task = task,
+                    subTasks = byTaskId[task.id].orEmpty()
+                )
             }
-            // mapToList()のflowOnは自分より上流しか守らないため、末尾に追加したこの.mapは
-            // 収集側（例: ViewModelのDispatchers.Main.immediate）のコンテキストで動いてしまう。
-            // サブタスクのDB取得もDispatchers.Default上で行われるよう明示的にシールドする。
-            .flowOn(Dispatchers.Default)
+        }
 
     val categories: Flow<List<Category>> =
         categoryQueries.selectAll(::toCategory).asFlow().mapToList(Dispatchers.Default)

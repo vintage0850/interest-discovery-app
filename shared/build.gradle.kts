@@ -29,7 +29,6 @@ kotlin {
             implementation(libs.sqldelight.coroutines.extensions)
         }
         commonTest.dependencies {
-            implementation(libs.junit)
             implementation(kotlin("test"))
         }
         androidMain.dependencies {
@@ -66,6 +65,8 @@ sqldelight {
     databases {
         create("SharedDatabase") {
             packageName.set("com.example.myapplication.shared.db")
+            schemaOutputDirectory.set(file("src/commonMain/sqldelight/databases"))
+            verifyMigrations.set(true)
         }
     }
 }

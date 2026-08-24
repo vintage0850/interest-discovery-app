@@ -13,6 +13,8 @@ CREATE TABLE Task (
     status TEXT NOT NULL DEFAULT 'TODO'
 );
 
+CREATE INDEX task_categoryId ON Task(categoryId);
+
 selectAll:
 SELECT * FROM Task ORDER BY isCompleted ASC, (importance * 3 + urgency) DESC, deadline ASC;
 
