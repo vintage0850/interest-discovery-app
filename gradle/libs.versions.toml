@@ -23,6 +23,7 @@ sqldelight = "2.3.2"
 kotlinxCoroutinesCore = "1.10.2"
 composeMultiplatform = "1.11.1"
 navigationComposeMultiplatform = "2.9.2"
+kotlinxDatetime = "0.7.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -69,6 +70,7 @@ sqldelight-native-driver = { group = "app.cash.sqldelight", name = "native-drive
 # androidUnitTest（ホストJVM）でDBを使ったテストを実機/エミュレータ無しで動かすためのJDBCドライバ
 sqldelight-sqlite-driver = { group = "app.cash.sqldelight", name = "sqlite-driver", version.ref = "sqldelight" }
 navigation-compose-multiplatform = { group = "org.jetbrains.androidx.navigation", name = "navigation-compose", version.ref = "navigationComposeMultiplatform" }
+kotlinx-datetime = { group = "org.jetbrains.kotlinx", name = "kotlinx-datetime", version.ref = "kotlinxDatetime" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

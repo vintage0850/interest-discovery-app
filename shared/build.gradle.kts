@@ -35,6 +35,7 @@ kotlin {
             implementation(compose.materialIconsExtended)
             implementation(compose.components.resources)
             implementation(libs.navigation.compose.multiplatform)
+            implementation(libs.kotlinx.datetime)
         }
         commonTest.dependencies {
             implementation(kotlin("test"))
