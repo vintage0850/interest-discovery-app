@@ -7,6 +7,7 @@ import com.example.myapplication.shared.TaskRepository
 import com.example.myapplication.shared.TaskWithSubTasks
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -32,7 +33,9 @@ class AppState(
      * それ以降のすべての `launch` が静かに no-op になってしまう。
      * `SupervisorJob` を挟むことで、1つの操作の失敗が他に波及しないようにする。
      */
-    private val supervisedScope = CoroutineScope(coroutineScope.coroutineContext + SupervisorJob())
+    private val supervisedScope = CoroutineScope(
+        coroutineScope.coroutineContext + SupervisorJob(parent = coroutineScope.coroutineContext[Job])
+    )
 
     val allTasks: StateFlow<List<TaskWithSubTasks>> = repository.allTasks.stateIn(
         scope = coroutineScope,
