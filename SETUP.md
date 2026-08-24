@@ -403,3 +403,42 @@ Google Play の Target API レベル要件により、2026-08-31 以降の新規
 - [Google Calendar API リファレンス](https://developers.google.com/calendar/api/v3/reference)
 - [Android での認可（AuthorizationClient）](https://developers.google.com/identity/authorization/android)
 - [OAuth 2.0 スコープ一覧](https://developers.google.com/identity/protocols/oauth2/scopes#calendar)
+
+## iOSアプリのセットアップ（Mac環境で実施）
+
+`:shared` モジュールをiOSシミュレータで動かすための `iosApp` Xcodeプロジェクトは、
+Windows環境では作成・ビルドできない（Kotlin/NativeのiOSターゲットも同様）。
+以下の手順はMacで実施すること。
+
+### 前提
+
+- Xcode（最新の安定版）
+- このリポジトリを `git pull` 済みであること（`iosApp/iosApp/iOSApp.swift` と
+  `iosApp/iosApp/ContentView.swift` が含まれている）
+
+### 手順
+
+1. `./gradlew :shared:compileKotlinIosSimulatorArm64` を実行し、`:shared` がiOSシミュレータ向けに
+   コンパイルできることを確認する（Windowsでは実行できなかった検証）。エラーが出た場合はここで解消する。
+2. Xcodeで「Create a new Xcode project」→「iOS」→「App」を選択する。
+   - Product Name: `iosApp`
+   - Interface: SwiftUI
+   - Language: Swift
+   - 保存先: このリポジトリの `iosApp/` 直下（既存の `iosApp/iosApp/*.swift` を上書きしないよう、
+     プロジェクト作成後に生成された `ContentView.swift`/`iOSApp.swift`（またはApp名と同名のファイル）を
+     このリポジトリのファイルで置き換える）
+3. `:shared` が生成するフレームワークをXcodeプロジェクトにリンクする。
+   Kotlin Multiplatformの公式ドキュメント（"Connect the framework to your iOS project"）に従い、
+   ビルドフェーズに `:shared` のGradleタスクを呼ぶRun Scriptを追加する方法が最も簡単
+   （`kotlinlang.org/docs/multiplatform/multiplatform-integrate-in-existing-app.html` 等を参照）。
+4. Xcodeでシミュレータを選択してビルド・実行し、タスク一覧画面が表示されることを確認する。
+5. 確認できたら `git add iosApp/ && git commit` でXcodeプロジェクトファイル一式をコミットする
+   （`.xcodeproj/project.pbxproj` を含む。これはWindows側では生成できないためMacでのコミットが必須）。
+
+### 既知の制約
+
+- `IosDatabaseDriverFactory`（`shared/src/iosMain/.../DatabaseDriverFactory.ios.kt`）が
+  `PRAGMA foreign_keys=ON` を明示していない点はKMP Phase 1 Aの最終レビューで指摘済み。
+  `NativeSqliteDriver` のデフォルト挙動を確認し、外部キー制約（`ON DELETE SET NULL`/`CASCADE`）が
+  期待通り効くか確認すること。効いていない場合は `androidMain` 版と同様に明示的な
+  `PRAGMA foreign_keys=ON;` の実行が必要。
