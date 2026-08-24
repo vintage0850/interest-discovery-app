@@ -21,6 +21,8 @@ kotlinxSerializationJson = "1.9.0"
 kotlinxCoroutinesTest = "1.10.2"
 sqldelight = "2.3.2"
 kotlinxCoroutinesCore = "1.10.2"
+composeMultiplatform = "1.11.1"
+navigationComposeMultiplatform = "2.9.2"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -66,6 +68,7 @@ sqldelight-android-driver = { group = "app.cash.sqldelight", name = "android-dri
 sqldelight-native-driver = { group = "app.cash.sqldelight", name = "native-driver", version.ref = "sqldelight" }
 # androidUnitTest（ホストJVM）でDBを使ったテストを実機/エミュレータ無しで動かすためのJDBCドライバ
 sqldelight-sqlite-driver = { group = "app.cash.sqldelight", name = "sqlite-driver", version.ref = "sqldelight" }
+navigation-compose-multiplatform = { group = "org.jetbrains.androidx.navigation", name = "navigation-compose", version.ref = "navigationComposeMultiplatform" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
@@ -76,3 +79,4 @@ kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", versi
 kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
 android-library = { id = "com.android.library", version.ref = "agp" }
 sqldelight = { id = "app.cash.sqldelight", version.ref = "sqldelight" }
+compose-multiplatform = { id = "org.jetbrains.compose", version.ref = "composeMultiplatform" }
