@@ -20,3 +20,6 @@ local.properties
 # リリース署名鍵（絶対にコミットしない。紛失時は SETUP.md の手順でしか復旧できない）
 *.jks
 *.keystore
+
+# superpowers subagent-driven-development の作業用worktree
+.worktrees/
