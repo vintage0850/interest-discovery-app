@@ -5,6 +5,9 @@ import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
+/** タスクの進行状態。「完了したまま進行中」という状態は持たせない。 */
+enum class TaskStatus { TODO, IN_PROGRESS }
+
 @Entity(
     tableName = "tasks",
     foreignKeys = [
@@ -34,7 +37,12 @@ data class Task(
      * Calendar REST API のイベント ID は文字列（例: "abc123def456"）なので String で持つ。
      */
     val calendarEventId: String? = null,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    /**
+     * 「始めさせる」通知の始めるボタンで IN_PROGRESS になる。
+     * 完了操作（isCompleted を true にする）が行われたら強制的に TODO に戻す。
+     */
+    val status: TaskStatus = TaskStatus.TODO
 ) {
     /** 並び順・色分けに使う優先度スコア。4（低）〜12（高）。 */
     val priorityScore: Int

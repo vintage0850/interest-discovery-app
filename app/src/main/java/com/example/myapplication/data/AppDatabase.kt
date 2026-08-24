@@ -137,6 +137,24 @@ private val MIGRATION_3_4 = object : Migration(3, 4) {
     }
 }
 
+/**
+ * v4 -> v5: 「空き時間検知による『始めさせる』通知」機能のためのテーブル追加。
+ *
+ * - tasks.status（TEXT, デフォルト 'TODO'）: Room の enum ネイティブサポートにより TEXT 列として
+ *   マッピングされる（TypeConverter 不要）。既存行はすべて未着手（TODO）として扱う
+ * - notified_slots テーブル: 同じ空き時間帯に何度も通知しないための重複防止レコード
+ */
+private val MIGRATION_4_5 = object : Migration(4, 5) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `tasks` ADD COLUMN `status` TEXT NOT NULL DEFAULT 'TODO'")
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `notified_slots` (" +
+                "`startMillis` INTEGER PRIMARY KEY NOT NULL, " +
+                "`endMillis` INTEGER NOT NULL )"
+        )
+    }
+}
+
 /** 新規インストール時は移行が走らないので、初期カテゴリはここで入れる。 */
 private val SEED_CALLBACK = object : RoomDatabase.Callback() {
     override fun onCreate(db: SupportSQLiteDatabase) {
@@ -150,10 +168,10 @@ private val SEED_CALLBACK = object : RoomDatabase.Callback() {
 }
 
 @Database(
-    entities = [Task::class, SubTask::class, Category::class],
-    version = 4,
+    entities = [Task::class, SubTask::class, Category::class, NotifiedSlot::class],
+    version = 5,
     // スキーマ JSON を app/schemas/ に書き出す。
-    // マイグレーションテスト（MigrationTest）が v3 -> v4 の検証に使うので必須。
+    // マイグレーションテスト（MigrationTest）が各バージョン間の検証に使うので必須。
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -170,7 +188,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "task_database"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                     .addCallback(SEED_CALLBACK)
                     .build()
                 INSTANCE = instance

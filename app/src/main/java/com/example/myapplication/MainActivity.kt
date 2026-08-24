@@ -1,14 +1,22 @@
 package com.example.myapplication
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -20,13 +28,39 @@ private const val ROUTE_ADD = "add"
 private const val ROUTE_CATEGORIES = "categories"
 
 class MainActivity : ComponentActivity() {
-    private val viewModel: TaskViewModel by viewModels()
+    // TaskViewModel はテスト用に repository/authManager/calendarSync を注入できるよう
+    // デフォルト引数付きのコンストラクタを持つため、標準の AndroidViewModelFactory が
+    // 前提とする「Application 型 1 引数のみのコンストラクタ」に一致せず、
+    // リフレクションでのインスタンス化に失敗する（実機で "Cannot create an instance of
+    // class TaskViewModel" として即クラッシュする）。そのため専用の Factory を明示する。
+    private val viewModel: TaskViewModel by viewModels {
+        object : ViewModelProvider.Factory {
+            @Suppress("UNCHECKED_CAST")
+            override fun <T : ViewModel> create(modelClass: Class<T>): T =
+                TaskViewModel(application) as T
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
             MyApplicationTheme {
+                // 「空き時間です」通知の送信に必要な実行時権限（API 33+）。初回起動時に一度だけ求める
+                val notificationPermissionLauncher = rememberLauncherForActivityResult(
+                    ActivityResultContracts.RequestPermission()
+                ) { /* 拒否されても機能を隠さない。通知が出ないだけ */ }
+                LaunchedEffect(Unit) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                        ContextCompat.checkSelfPermission(
+                            this@MainActivity,
+                            Manifest.permission.POST_NOTIFICATIONS
+                        ) != PackageManager.PERMISSION_GRANTED
+                    ) {
+                        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                }
+
                 val navController = rememberNavController()
                 // バックグラウンドでは収集を止める（StateFlow の WhileSubscribed と揃える）
                 val tasks by viewModel.allTasks.collectAsStateWithLifecycle()
@@ -62,6 +96,7 @@ class MainActivity : ComponentActivity() {
                             onSubTaskToggle = viewModel::toggleSubTaskCompleted,
                             onTaskDelete = viewModel::deleteTask,
                             onUndoDelete = viewModel::undoDelete,
+                            onTaskRename = viewModel::renameTask,
                             authState = authState,
                             onCalendarLinkChange = viewModel::setCalendarLinked,
                             onSignOut = viewModel::signOut

@@ -210,6 +210,63 @@ class MigrationTest {
         )
     }
 
+    /**
+     * v4 -> v5 でスキーマ検証を通り、既存タスクの status が全て 'TODO' になり、
+     * notified_slots テーブルが使える状態になっていること。
+     */
+    @Test
+    fun v4からv5へ移行してもスキーマ検証を通りstatus列がTODOで追加される() {
+        createV4DatabaseWithData()
+
+        val db = AppDatabase.getDatabase(context)
+        // ここでマイグレーション＋スキーマ検証が実行される（失敗すれば例外で落ちる）
+        db.openHelper.writableDatabase
+
+        val dao = db.taskDao()
+        runBlocking {
+            val task1 = dao.getTaskById(1)
+            assertNotNull("id=1 のタスクが消えている", task1)
+            assertEquals(TaskStatus.TODO, task1!!.status)
+            // 既存の列は巻き戻っていないこと
+            assertEquals("レポート提出", task1.title)
+            assertEquals(true, task1.isCompleted)
+
+            val task2 = dao.getTaskById(2)
+            assertNotNull("id=2 のタスクが消えている", task2)
+            assertEquals(TaskStatus.TODO, task2!!.status)
+
+            // notified_slots が使えること（挿入・重複チェック・削除）
+            assertEquals(false, dao.isSlotNotified(1_000L))
+            dao.insertNotifiedSlot(NotifiedSlot(startMillis = 1_000L, endMillis = 2_000L))
+            assertEquals(true, dao.isSlotNotified(1_000L))
+            dao.deleteNotifiedSlotsOlderThan(2_000L)
+            assertEquals(false, dao.isSlotNotified(1_000L))
+        }
+    }
+
+    private fun createV4DatabaseWithData() {
+        helper.createDatabase(DB_NAME, 4).use { db ->
+            Category.DEFAULTS.forEachIndexed { index, name ->
+                db.execSQL(
+                    "INSERT INTO `categories` (`id`, `name`, `sortOrder`) VALUES (?, ?, ?)",
+                    arrayOf<Any>(index + 1, name, index)
+                )
+            }
+            db.execSQL(
+                "INSERT INTO `tasks` (" +
+                    "`id`, `title`, `deadline`, `importance`, `urgency`, `categoryId`, " +
+                    "`isCompleted`, `progress`, `notificationTime`, `calendarEventId`, `createdAt`) " +
+                    "VALUES (1, 'レポート提出', 1700000000000, 3, 2, 1, 1, 40, NULL, NULL, 1600000000000)"
+            )
+            db.execSQL(
+                "INSERT INTO `tasks` (" +
+                    "`id`, `title`, `deadline`, `importance`, `urgency`, `categoryId`, " +
+                    "`isCompleted`, `progress`, `notificationTime`, `calendarEventId`, `createdAt`) " +
+                    "VALUES (2, '未分類のタスク', 1700000000000, 1, 1, NULL, 0, 0, NULL, NULL, 1600000000000)"
+            )
+        }
+    }
+
     // ---- ヘルパー ----
 
     /**

@@ -19,3 +19,26 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# ---- Google Calendar 連携（Retrofit + kotlinx.serialization）----
+# 依存ライブラリの consumer-proguard-rules で大半はカバーされるが、
+# リフレクション経由で生成される serializer が release ビルドで剥がれると
+# 実機でのみ CalendarEventRequest/Response のシリアライズが失敗する（ビルドは通ってしまう）ため、
+# 通信に使う DTO は明示的に温存する。
+-keepattributes *Annotation*, InnerClasses, Signature
+-keep,includedescriptorclasses class com.example.myapplication.data.calendar.**$$serializer { *; }
+-keepclassmembers class com.example.myapplication.data.calendar.** {
+    *** Companion;
+}
+-keepclasseswithmembers class com.example.myapplication.data.calendar.** {
+    kotlinx.serialization.KSerializer serializer(...);
+}
+-keep,allowobfuscation,allowshrinking interface com.example.myapplication.data.calendar.GoogleCalendarApi
+
+# ---- WorkManager（空き時間検知）----
+# WorkManager の既定 WorkerFactory は (Context, WorkerParameters) の2引数コンストラクタを
+# リフレクションで探す。@JvmOverloads で生成されるその2引数コンストラクタが release ビルドで
+# 剥がれると実機でのみ Worker の生成に失敗するため、明示的に温存する。
+-keep class com.example.myapplication.work.FreeTimeCheckWorker {
+    public <init>(android.content.Context, androidx.work.WorkerParameters);
+}

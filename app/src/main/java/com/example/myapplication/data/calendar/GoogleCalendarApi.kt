@@ -4,10 +4,12 @@ import kotlinx.serialization.Serializable
 import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.DELETE
+import retrofit2.http.GET
 import retrofit2.http.HTTP
 import retrofit2.http.Header
 import retrofit2.http.POST
 import retrofit2.http.Path
+import retrofit2.http.Query
 
 /**
  * Google Calendar API v3 の Events エンドポイント。
@@ -48,6 +50,16 @@ interface GoogleCalendarApi {
         @Header("Authorization") authorization: String,
         @Path("eventId") eventId: String
     ): Response<Unit>
+
+    /** 期間内の予定一覧を取得する。空き時間検知（FreeTimeCheckWorker）が使う。 */
+    @GET("calendars/primary/events")
+    suspend fun listEvents(
+        @Header("Authorization") authorization: String,
+        @Query("timeMin") timeMin: String,
+        @Query("timeMax") timeMax: String,
+        @Query("singleEvents") singleEvents: Boolean = true,
+        @Query("orderBy") orderBy: String = "startTime"
+    ): Response<CalendarEventListResponse>
 }
 
 /**
@@ -81,4 +93,28 @@ data class CalendarEventDate(
 @Serializable
 data class CalendarEventResponse(
     val id: String? = null
+)
+
+/**
+ * イベント一覧レスポンス。必要なのは各予定の開始・終了だけなので他のフィールドは読み飛ばす。
+ */
+@Serializable
+data class CalendarEventListResponse(
+    val items: List<CalendarEventListItem> = emptyList()
+)
+
+@Serializable
+data class CalendarEventListItem(
+    val start: CalendarEventDateTime? = null,
+    val end: CalendarEventDateTime? = null
+)
+
+/**
+ * 予定の開始・終了。終日予定は [date]（`YYYY-MM-DD`）、時刻指定予定は [dateTime]（RFC3339）を持つ。
+ * どちらか一方だけが入る。
+ */
+@Serializable
+data class CalendarEventDateTime(
+    val date: String? = null,
+    val dateTime: String? = null
 )

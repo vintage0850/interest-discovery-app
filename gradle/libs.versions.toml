@@ -6,6 +6,7 @@ junit = "4.13.2"
 junitVersion = "1.2.1"
 espressoCore = "3.6.1"
 testRunner = "1.6.2"
+testRules = "1.6.1"
 lifecycleRuntimeKtx = "2.8.7"
 activityCompose = "1.9.3"
 composeBom = "2024.11.00"
@@ -17,6 +18,7 @@ retrofit = "2.12.0"
 retrofitKotlinxSerialization = "1.0.0"
 okhttp = "4.12.0"
 kotlinxSerializationJson = "1.9.0"
+kotlinxCoroutinesTest = "1.10.2"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -41,7 +43,11 @@ androidx-room-compiler = { group = "androidx.room", name = "room-compiler", vers
 # マイグレーションテスト用（MigrationTestHelper）
 androidx-room-testing = { group = "androidx.room", name = "room-testing", version.ref = "room" }
 androidx-test-runner = { group = "androidx.test", name = "runner", version.ref = "testRunner" }
+# GrantPermissionRule（実行時権限ダイアログをテストで出さないようにする）
+androidx-test-rules = { group = "androidx.test", name = "rules", version.ref = "testRules" }
 androidx-work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "work" }
+# WorkManager のテスト用（TestListenableWorkerBuilder）
+androidx-work-testing = { group = "androidx.work", name = "work-testing", version.ref = "work" }
 androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigationCompose" }
 # Google Sign-In / AuthorizationClient（OAuth 認可コード取得用）
 play-services-auth = { group = "com.google.android.gms", name = "play-services-auth", version.ref = "playServicesAuth" }
@@ -51,6 +57,7 @@ retrofit-kotlinx-serialization-converter = { group = "com.jakewharton.retrofit",
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 okhttp-logging-interceptor = { group = "com.squareup.okhttp3", name = "logging-interceptor", version.ref = "okhttp" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerializationJson" }
+kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "kotlinxCoroutinesTest" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

@@ -2,12 +2,16 @@ package com.example.myapplication
 
 import android.app.Application
 import androidx.lifecycle.*
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
 import com.example.myapplication.data.*
 import com.example.myapplication.data.calendar.CalendarAuthState
 import com.example.myapplication.data.calendar.CalendarResult
 import com.example.myapplication.data.calendar.GoogleAuthManager
 import com.example.myapplication.data.calendar.GoogleCalendarSync
 import com.example.myapplication.data.calendar.SignOutResult
+import com.example.myapplication.work.FreeTimeCheckWorker
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -15,12 +19,42 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import java.util.concurrent.TimeUnit
 
-class TaskViewModel(application: Application) : AndroidViewModel(application) {
-    private val database = AppDatabase.getDatabase(application)
-    private val repository = TaskRepository(database.taskDao())
-    private val authManager = GoogleAuthManager.get(application)
-    private val calendarSync = GoogleCalendarSync(authManager)
+/**
+ * 「空き時間です」通知チェックの定期実行登録を抽象化する。
+ * WorkManager.getInstance() は初期化されていないと例外を投げるため、単体テストで
+ * TaskViewModel を作るたびに実行されないよう差し替え可能にする。
+ */
+fun interface FreeTimeCheckScheduler {
+    fun schedule()
+}
+
+private class WorkManagerFreeTimeCheckScheduler(
+    private val application: Application
+) : FreeTimeCheckScheduler {
+    override fun schedule() {
+        val request = PeriodicWorkRequestBuilder<FreeTimeCheckWorker>(1, TimeUnit.HOURS).build()
+        WorkManager.getInstance(application).enqueueUniquePeriodicWork(
+            FreeTimeCheckWorker.WORK_NAME,
+            ExistingPeriodicWorkPolicy.KEEP,
+            request
+        )
+    }
+}
+
+class TaskViewModel(
+    application: Application,
+    private val repository: TaskRepository = TaskRepository(
+        AppDatabase.getDatabase(application).taskDao()
+    ),
+    private val authManager: GoogleAuthManager = GoogleAuthManager.get(application),
+    private val calendarSync: GoogleCalendarSync = GoogleCalendarSync(authManager),
+    private val freeTimeCheckScheduler: FreeTimeCheckScheduler =
+        WorkManagerFreeTimeCheckScheduler(application)
+) : AndroidViewModel(application) {
 
     val allTasks: StateFlow<List<TaskWithSubTasks>> = repository.allTasks.stateIn(
         scope = viewModelScope,
@@ -59,9 +93,17 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     /** 直前に削除したタスク。取り消し（元に戻す）用にサブタスクごと保持する。 */
     private var lastDeleted: DeletedTask? = null
 
+    /**
+     * タスク ID ごとのカレンダー操作排他用 Mutex。
+     * 素早く連携トグルを 2 回操作しても、同じタスクの予定が 2 件作られないようにする。
+     */
+    private val calendarMutexes = mutableMapOf<Int, Mutex>()
+
     init {
         // 起動時に一度だけ、ユーザー操作なしで認可済みかを確認しておく
         viewModelScope.launch { authManager.refreshAuthState() }
+        // 「空き時間です」通知の1時間おきチェックを登録する（既に登録済みなら重複登録しない）
+        freeTimeCheckScheduler.schedule()
     }
 
     /** カレンダーの予定に書く分類名。カテゴリが消えたタスクは「未分類」とする。 */
@@ -182,7 +224,8 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 val saved = task.copy(id = id)
                 when (val result = calendarSync.insertEvent(saved, categoryNameOf(saved))) {
                     is CalendarResult.Success ->
-                        repository.update(saved.copy(calendarEventId = result.value))
+                        // 全列を上書きすると並行する別更新が失われる恐れがあるので、calendarEventId だけ更新
+                        repository.updateCalendarEventId(saved.id, result.value)
                     else -> notifyCalendarFailure(result)
                 }
             }
@@ -195,25 +238,35 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun setCalendarLinked(task: Task, enabled: Boolean) {
         viewModelScope.launch {
-            if (enabled) {
-                // すでに連携済みなら二重に予定を作らない
-                if (task.calendarEventId != null) return@launch
-                when (val result = calendarSync.insertEvent(task, categoryNameOf(task))) {
-                    is CalendarResult.Success -> {
-                        repository.update(task.copy(calendarEventId = result.value))
-                        _messages.tryEmit("「${task.title}」をカレンダーに登録しました")
+            // タスク ID ごとに Mutex を用意。同じタスクに対するカレンダー操作は同時に 1 つだけ実行される。
+            val mutex = synchronized(calendarMutexes) {
+                calendarMutexes.getOrPut(task.id) { Mutex() }
+            }
+            mutex.withLock {
+                // Mutex 取得後に最新のタスク状態を再取得。
+                // 待ち行列で他の処理が既に calendarEventId を書き換えていた場合、二重登録を防ぐため。
+                val current = repository.getTaskById(task.id) ?: return@withLock
+                if (enabled) {
+                    if (current.calendarEventId != null) return@withLock
+                    when (val result = calendarSync.insertEvent(current, categoryNameOf(current))) {
+                        is CalendarResult.Success -> {
+                            // calendarEventId だけを更新。Task 全列を上書きすると他の変更が巻き戻る恐れがある。
+                            repository.updateCalendarEventId(current.id, result.value)
+                            _messages.tryEmit("「${current.title}」をカレンダーに登録しました")
+                        }
+                        else -> notifyCalendarFailure(result)
                     }
-                    else -> notifyCalendarFailure(result)
-                }
-            } else {
-                val eventId = task.calendarEventId ?: return@launch
-                when (val result = calendarSync.deleteEvent(eventId)) {
-                    is CalendarResult.Success -> {
-                        repository.update(task.copy(calendarEventId = null))
-                        _messages.tryEmit("「${task.title}」の予定を削除しました")
+                } else {
+                    val eventId = current.calendarEventId ?: return@withLock
+                    when (val result = calendarSync.deleteEvent(eventId)) {
+                        is CalendarResult.Success -> {
+                            // 削除に成功したときだけ calendarEventId を外す。
+                            // 消せていないのに解除すると予定が迷子になる（ADR-001）。
+                            repository.updateCalendarEventId(current.id, null)
+                            _messages.tryEmit("「${current.title}」の予定を削除しました")
+                        }
+                        else -> notifyCalendarFailure(result)
                     }
-                    // 消せていないのに連携を解除すると予定が迷子になるので、リンクは残したままにする
-                    else -> notifyCalendarFailure(result)
                 }
             }
         }
@@ -221,9 +274,27 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
 
     fun toggleCompleted(task: Task) {
         viewModelScope.launch {
-            val updated = task.copy(isCompleted = !task.isCompleted)
+            val nowCompleted = !task.isCompleted
+            // 「進行中のまま完了」という状態は持たせない。完了にする操作では status を TODO に戻す
+            val updated = task.copy(
+                isCompleted = nowCompleted,
+                status = if (nowCompleted) TaskStatus.TODO else task.status
+            )
             repository.update(updated)
             syncToCalendar(updated)
+        }
+    }
+
+    /**
+     * タスク名を変更する。連携済み（calendarEventId != null）なら syncToCalendar が
+     * カレンダー側の予定タイトルも合わせて更新する。
+     */
+    fun renameTask(task: Task, newTitle: String) {
+        val trimmed = newTitle.trim()
+        if (trimmed.isEmpty() || trimmed == task.title) return
+        viewModelScope.launch {
+            repository.updateTitle(task.id, trimmed)
+            syncToCalendar(task.copy(title = trimmed))
         }
     }
 
@@ -266,10 +337,11 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             // 予定は確かに消えているので、連携を復活させるには作り直すしかない
             when (val result = calendarSync.insertEvent(task, categoryNameOf(task))) {
                 is CalendarResult.Success ->
-                    repository.update(task.copy(calendarEventId = result.value))
+                    // 作り直した予定の ID だけを更新。他の列は巻き戻さない。
+                    repository.updateCalendarEventId(task.id, result.value)
                 else -> {
                     // 作り直せなかったら未連携に戻す（古い ID は既に無効なため）
-                    repository.update(task.copy(calendarEventId = null))
+                    repository.updateCalendarEventId(task.id, null)
                     notifyCalendarFailure(result)
                 }
             }
@@ -288,9 +360,11 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             is CalendarResult.NotFound -> {
                 when (val recreated = calendarSync.insertEvent(task, name)) {
                     is CalendarResult.Success ->
-                        repository.update(task.copy(calendarEventId = recreated.value))
+                        // 予定を作り直したので、calendarEventId だけを新しい値に差し替える
+                        repository.updateCalendarEventId(task.id, recreated.value)
                     else -> {
-                        repository.update(task.copy(calendarEventId = null))
+                        // 作り直せなかったら未連携に戻す（古い ID は既に無効）
+                        repository.updateCalendarEventId(task.id, null)
                         notifyCalendarFailure(recreated)
                     }
                 }

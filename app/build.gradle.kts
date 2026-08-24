@@ -19,14 +19,26 @@ val localProperties = Properties().apply {
 }
 val googleOauthClientId: String = localProperties.getProperty("GOOGLE_OAUTH_CLIENT_ID") ?: ""
 
+// リリース署名設定。local.properties に RELEASE_STORE_FILE 等が無ければ null のままにし、
+// release ビルドは未署名になる（Play へは提出できないが、開発中のビルドは通す）。
+val releaseStoreFile: String? = localProperties.getProperty("RELEASE_STORE_FILE")
+val releaseStorePassword: String? = localProperties.getProperty("RELEASE_STORE_PASSWORD")
+val releaseKeyAlias: String? = localProperties.getProperty("RELEASE_KEY_ALIAS")
+val releaseKeyPassword: String? = localProperties.getProperty("RELEASE_KEY_PASSWORD")
+val hasReleaseSigningConfig: Boolean =
+    !releaseStoreFile.isNullOrBlank() &&
+        !releaseStorePassword.isNullOrBlank() &&
+        !releaseKeyAlias.isNullOrBlank() &&
+        !releaseKeyPassword.isNullOrBlank()
+
 android {
     namespace = "com.example.myapplication"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.example.myapplication"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 1
         versionName = "1.0"
 
@@ -37,13 +49,28 @@ android {
         buildConfigField("String", "GOOGLE_OAUTH_CLIENT_ID", "\"$googleOauthClientId\"")
     }
 
+    signingConfigs {
+        if (hasReleaseSigningConfig) {
+            create("release") {
+                storeFile = rootProject.file(releaseStoreFile!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            if (hasReleaseSigningConfig) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
     compileOptions {
@@ -106,13 +133,17 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
 
     testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.rules)
     // Room のマイグレーションテスト（MigrationTestHelper）
     androidTestImplementation(libs.androidx.room.testing)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+    // WorkManager のテスト用（TestListenableWorkerBuilder）。Robolectric を導入していないため androidTest 側に置く
+    androidTestImplementation(libs.androidx.work.testing)
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 }

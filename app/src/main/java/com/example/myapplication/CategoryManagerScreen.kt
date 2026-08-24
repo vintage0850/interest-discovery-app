@@ -174,14 +174,19 @@ fun CategoryManagerScreen(
     }
 }
 
-/** 追加・リネームで共通の入力ダイアログ。タスク登録画面からも使う。 */
+/**
+ * 追加・リネームで共通の入力ダイアログ。
+ * カテゴリ名だけでなくタスク名のリネームでも使うため、ラベルと文字数上限は呼び出し側から渡す。
+ */
 @Composable
 fun CategoryNameDialog(
     title: String,
     initialName: String,
     confirmLabel: String,
     onConfirm: (String) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    label: String = "カテゴリ名",
+    maxLength: Int = Category.MAX_NAME_LENGTH
 ) {
     var name by rememberSaveable { mutableStateOf(initialName) }
     val trimmed = name.trim()
@@ -193,12 +198,11 @@ fun CategoryNameDialog(
             OutlinedTextField(
                 value = name,
                 onValueChange = {
-                    if (it.length <= Category.MAX_NAME_LENGTH) name = it
+                    if (it.length <= maxLength) name = it
                 },
-                label = { Text("カテゴリ名") },
-                placeholder = { Text("例: 課題") },
+                label = { Text(label) },
                 singleLine = true,
-                supportingText = { Text("${name.length} / ${Category.MAX_NAME_LENGTH}") }
+                supportingText = { Text("${name.length} / $maxLength") }
             )
         },
         confirmButton = {

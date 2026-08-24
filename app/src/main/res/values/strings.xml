@@ -1,3 +1,9 @@
 <resources>
     <string name="app_name">My Application</string>
+
+    <!-- 空き時間検知による「始めさせる」通知 -->
+    <string name="free_time_notification_channel_name">空き時間の通知</string>
+    <string name="free_time_notification_title">空き時間です</string>
+    <string name="free_time_notification_body">%1$s を始めませんか？</string>
+    <string name="free_time_notification_start_action">始める</string>
 </resources>

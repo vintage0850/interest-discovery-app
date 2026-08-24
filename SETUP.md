@@ -8,13 +8,19 @@
 - 対象パッケージ名: `com.example.myapplication`
 - 使用スコープ: `https://www.googleapis.com/auth/calendar.events`
 
+> **この手順書は 2026-08 時点の Console 画面に合わせてあります。**
+> かつての「API とサービス → OAuth 同意画面」は **Google Auth Platform**
+> （左メニュー: 概要 / ブランディング / 対象 / クライアント / データアクセス / 検証センター / 設定）に
+> 置き換わりました。古い記事の手順とは画面構成が異なります。
+> 直リンク: <https://console.cloud.google.com/auth/overview>
+
 ---
 
 ## 全体の流れ
 
 1. Google Cloud プロジェクトを作る
 2. Google Calendar API を有効にする
-3. OAuth 同意画面を設定する（テストユーザー登録を忘れずに）
+3. Google Auth Platform（旧 OAuth 同意画面）を構成する（テストユーザー登録を忘れずに）
 4. SHA-1 フィンガープリントを取得する
 5. Android 用 OAuth クライアント ID を作る
 6. `local.properties` に書く
@@ -28,9 +34,15 @@
 2. 画面上部のプロジェクト選択メニュー（左上、ロゴの右）をクリックします。
 3. 「新しいプロジェクト」をクリックします。
 4. プロジェクト名を入力します（例: `MyApplication-Calendar`）。
-5. 「作成」をクリックします。
-6. 作成完了後、**上部のプロジェクト選択メニューで作ったプロジェクトが選択されている**ことを必ず確認してください。
+   - 入力すると、下に「プロジェクト ID: `myapplication-calendar`」のように**自動生成された ID** が表示されます。
+     この ID は後から変更できません。以降の URL で使うので控えておいてください。
+5. 「請求先アカウント」の選択を求められた場合は、既定のものを選んで構いません。
+   **Calendar API の利用に課金は発生しません**（このプロジェクトで有効にするのは Calendar API だけです）。
+6. 「作成」をクリックします。
+7. 作成完了後、**上部のプロジェクト選択メニューで作ったプロジェクトが選択されている**ことを必ず確認してください。
    別プロジェクトを選んだまま以降の作業を進めるのは、最もよくあるミスです。
+   - 作成直後は**元のプロジェクトが選択されたまま**になることがあります。切り替わっていなければ手動で選び直してください。
+   - 以降、URL の末尾に `?project=<プロジェクト ID>` を付けて開けば、選択ミスを確実に防げます。
 
 ---
 
@@ -48,36 +60,67 @@
 
 ---
 
-## 3. OAuth 同意画面を設定する
+## 3. Google Auth Platform を構成する（旧「OAuth 同意画面」）
 
-1. 左メニューから「API とサービス」→「OAuth 同意画面」を開きます。
-2. User Type（対象ユーザー）で **「外部」** を選択し、「作成」をクリックします。
-   - Google Workspace 組織アカウントの場合のみ「内部」が選べます。個人アカウントでは「外部」しか選べません。
-3. 「アプリ情報」を入力します。
-   - アプリ名: 任意（例: `MyApplication`）。同意画面にこの名前が表示されます。
-   - ユーザーサポートメール: 自分のメールアドレスを選択
-   - デベロッパーの連絡先情報: 自分のメールアドレスを入力
-4. 「保存して次へ」をクリックします。
+<https://console.cloud.google.com/auth/overview?project=＜プロジェクト ID＞> を開きます。
+左メニューの「API とサービス」→「OAuth 同意画面」からも、同じ画面にリダイレクトされます。
 
-### 3-1. スコープの追加
+未構成のプロジェクトでは「**Google Auth Platform はまだ構成されていません**」と表示されます。
+「**開始**」をクリックすると、4 ステップのウィザードが始まります。
 
-1. 「スコープを追加または削除」をクリックします。
-2. 右側に出るパネルの下部にあるフィルタ欄に `calendar.events` と入力して絞り込みます。
-3. **`https://www.googleapis.com/auth/calendar.events`** にチェックを入れます。
-   - このスコープは「制限付きスコープ」に分類されます。テスト段階（公開ステータスが「テスト」）では審査なしで使えます。
-   - `.../auth/calendar`（フルアクセス）は権限が過剰なので選ばないでください。
-4. 「更新」をクリックし、続いて「保存して次へ」をクリックします。
+| ステップ | 入力内容 |
+|---|---|
+| ① アプリ情報 | **アプリ名**: 任意（例: `MyApplication`）。同意画面にこの名前が表示されます<br>**ユーザー サポートメール**: プルダウンから自分のメールアドレスを選択 |
+| ② 対象 | **「外部」** を選択<br>個人 Google アカウントでは「内部」は選べません（Workspace 組織アカウント専用） |
+| ③ 連絡先情報 | 自分のメールアドレスを入力。Google からプロジェクト変更の通知が届きます |
+| ④ 終了 | 「Google API サービス: ユーザーデータに関するポリシーに同意します」にチェック |
 
-### 3-2. テストユーザーの登録（**必須・重要**）
+各ステップで「次へ」、最後に「**作成**」をクリックします。
 
-1. 「テストユーザー」の画面で「+ ADD USERS」をクリックします。
-2. **アプリで実際にログインする Google アカウントのメールアドレス**を入力します。
+作成が終わると左メニューが
+「概要 / ブランディング / 対象 / クライアント / データアクセス / 検証センター / 設定」の 7 項目に変わります。
+以降の作業はこのメニューから行います。
+
+> ウィザードの入力内容は後から「ブランディング」「対象」の各画面で変更できます。
+
+### 3-1. テストユーザーの登録（**必須・重要**）
+
+左メニュー「**対象**」を開きます（<https://console.cloud.google.com/auth/audience>）。
+
+1. 「公開ステータス: **テスト中**」「ユーザーの種類: **外部**」になっていることを確認します。
+2. 下へスクロールして「**テストユーザー**」セクションの「**+ Add users**」をクリックします。
+3. 右から出るパネルに、**アプリで実際にログインする Google アカウントのメールアドレス**を入力します。
    - 開発機で使うアカウント、実機で使うアカウントをすべて登録してください。
    - プロジェクトのオーナー自身も、ここに登録しないと弾かれます。
-3. 「保存」→「保存して次へ」をクリックします。
+4. 「**保存**」をクリックします。
+   - **1 回目のクリックで入力欄のテキストがチップ（丸囲みのタグ）に変わるだけのことがあります。**
+     カウンタが `1/100` になっていることを確認し、**もう一度「保存」を押してください。**
+   - 保存後、テストユーザー一覧にメールアドレスの行が現れれば成功です。
+     パネルのスピナーが回りっぱなしになる場合は、ページを再読み込みして一覧を確認してください
+     （実際には登録が完了していることがあります）。
 
 > ここを飛ばすと、アプリからのログイン時に **`403 access_denied`** になります。
 > 詳しくは末尾の「よくあるハマりどころ」を参照してください。
+
+テストユーザーは **最大 100 人**まで。この上限はアプリの全期間でカウントされます。
+
+### 3-2. スコープの追加
+
+左メニュー「**データアクセス**」を開きます（<https://console.cloud.google.com/auth/scopes>）。
+
+1. 「**スコープを追加または削除**」をクリックします。
+2. 右側に出るパネルのフィルタ欄に `calendar.events` と入力して絞り込みます。
+3. **`https://www.googleapis.com/auth/calendar.events`** にチェックを入れます。
+   - このスコープは「**制限付きのスコープ**」に分類されます。公開ステータスが「テスト中」の間は審査なしで使えます。
+   - `.../auth/calendar`（フルアクセス）は権限が過剰なので選ばないでください。
+4. 「更新」→「**Save**」をクリックします。
+
+> **この画面は必須ではありません。** Android アプリのスコープ要求は実行時の
+> `AuthorizationClient.authorize()` が行うため、ここに未登録でもテスト運用では動きます。
+> 登録しておく意味は、`403 insufficient_permissions` の予防と、将来の本番公開・審査への備えです。
+>
+> なお **この「データアクセス」画面はブラウザごと固まることがあります**（2026-08 時点で複数回再現）。
+> 固まったらタブを閉じて開き直してください。急ぎでなければ後回しで構いません。
 
 ---
 
@@ -172,18 +215,27 @@ release キーストアの SHA-1 は次で取得できます:
 
 ## 5. Android 用 OAuth クライアント ID を作る
 
-1. 左メニューから「API とサービス」→「認証情報」を開きます。
-2. 上部の「+ 認証情報を作成」→「OAuth クライアント ID」をクリックします。
-3. アプリケーションの種類で **「Android」** を選択します。
-   - 「ウェブ アプリケーション」ではありません。間違えやすいので注意してください。
-4. 以下を入力します。
-   - 名前: 任意（例: `MyApplication Android debug`）
-   - **パッケージ名: `com.example.myapplication`**
-   - **SHA-1 証明書のフィンガープリント: 手順 4 で取得した値**（コロン区切りのまま貼り付け可）
-5. 「作成」をクリックします。
-6. 表示された **クライアント ID**（`123456789012-xxxxxxxxxxxxxxxxxxxx.apps.googleusercontent.com` の形式）をコピーします。
-   - 後からでも「認証情報」一覧の該当行をクリックすれば確認できます。
+左メニュー「**クライアント**」を開きます（<https://console.cloud.google.com/auth/clients>）。
+旧「API とサービス」→「認証情報」に相当する画面です。
+
+1. 上部の「**+ クライアントを作成**」をクリックします。
+2. 「アプリケーションの種類」で **「Android」** を選択します。
+   - 「ウェブ アプリケーション」ではありません。一覧の先頭にあるので誤選択しやすい箇所です。
+   - 選択して初めて、名前・パッケージ名・SHA-1 の入力欄が現れます。
+3. 以下を入力します。
+   - **名前**: 任意（例: `MyApplication Android debug`）。既定値は `Android クライアント 1` です
+   - **パッケージ名**: `com.example.myapplication`
+   - **SHA-1 証明書のフィンガープリント**: 手順 4 で取得した値（コロン区切りのまま貼り付け可）
+4. 「**アプリの所有権を確認する（省略可）**」は**スキップして構いません**。開発・テストには不要です。
+5. 「**作成**」をクリックします。
+6. 「OAuth クライアントを作成しました」ダイアログに **クライアント ID**
+   （`123456789012-xxxxxxxxxxxxxxxxxxxx.apps.googleusercontent.com` の形式）が表示されるので、
+   右側のコピーアイコンでコピーします。
+   - 後からでも「クライアント」一覧の該当行から確認できます。
    - Android 用クライアントには**クライアント シークレットはありません**。これは正常です。
+     「JSON をダウンロード」も、このアプリでは使いません。
+7. 画面下部に「**設定が有効になるまで 5 分から数時間かかることがあります**」と表示されます。
+   作成直後に `10: DEVELOPER_ERROR` が出る場合は、しばらく待ってから再試行してください。
 
 ---
 
@@ -256,11 +308,11 @@ public static final String GOOGLE_OAUTH_CLIENT_ID = "123456789012-xxxx.apps.goog
 
 ### `403 access_denied` / 「このアプリは Google で確認されていません」で先に進めない
 
-**原因:** OAuth 同意画面の公開ステータスが「テスト」なのに、ログインしようとしているアカウントが**テストユーザーに登録されていない**。
+**原因:** 公開ステータスが「テスト中」なのに、ログインしようとしているアカウントが**テストユーザーに登録されていない**。
 
-**対処:** 「API とサービス」→「OAuth 同意画面」→「テストユーザー」に、そのアカウントのメールアドレスを追加してください。プロジェクトのオーナー本人であっても登録が必要です。追加後、アプリ側で一度ログアウトしてから再試行してください。
+**対処:** Google Auth Platform の「**対象**」→「テストユーザー」（<https://console.cloud.google.com/auth/audience>）に、そのアカウントのメールアドレスを追加してください。プロジェクトのオーナー本人であっても登録が必要です。追加後、アプリ側で一度ログアウトしてから再試行してください。
 
-なお、テストモードのテストユーザーは **最大 100 人**まで、また一度与えた認可も **7 日で失効**します（失効するとアプリから再度ログインが必要になります）。長期運用するには同意画面を「本番環境」に公開する必要があり、制限付きスコープ（`calendar.events`）を含むため Google の審査が必要になります。
+なお、テストモードのテストユーザーは **最大 100 人**まで、また一度与えた認可も **7 日で失効**します（失効するとアプリから再度ログインが必要になります）。長期運用するには「対象」画面の「**アプリを公開**」で本番環境に切り替える必要があり、制限付きのスコープ（`calendar.events`）を含むため Google の審査が必要になります。
 
 ### `10: DEVELOPER_ERROR` / `Status{statusCode=DEVELOPER_ERROR}`
 
@@ -272,8 +324,9 @@ public static final String GOOGLE_OAUTH_CLIENT_ID = "123456789012-xxxx.apps.goog
 - SHA-1 は今ビルドしている PC の `debug.keystore` のものか（別 PC の値ではないか）
 - release ビルドを debug 用のクライアント ID で動かそうとしていないか
 - Android 用（ウェブ用ではない）クライアントとして作成したか
+- **クライアントを作成した直後ではないか**（反映に 5 分〜数時間かかることがあります）
 
-`./gradlew signingReport` の出力と Cloud Console の登録値を並べて突き合わせてください。
+`./gradlew signingReport` の出力と、Google Auth Platform の「クライアント」画面の登録値を並べて突き合わせてください。
 
 ### `BuildConfig.GOOGLE_OAUTH_CLIENT_ID` が空文字のまま
 
@@ -284,9 +337,9 @@ public static final String GOOGLE_OAUTH_CLIENT_ID = "123456789012-xxxx.apps.goog
 
 ### `403 insufficient_permissions` / API 呼び出しだけ失敗する
 
-**原因:** 同意画面で `.../auth/calendar.events` スコープを追加していない、または既存アカウントが古いスコープのまま認可されている。
+**原因:** 「データアクセス」で `.../auth/calendar.events` スコープを追加していない、または既存アカウントが古いスコープのまま認可されている。
 
-**対処:** 同意画面にスコープを追加したうえで、[アカウントのアクセス権限ページ](https://myaccount.google.com/permissions) から該当アプリのアクセス権を削除し、再度アプリからログインし直してください。
+**対処:** 手順 3-2（<https://console.cloud.google.com/auth/scopes>）でスコープを追加したうえで、[アカウントのアクセス権限ページ](https://myaccount.google.com/permissions) から該当アプリのアクセス権を削除し、再度アプリからログインし直してください。
 
 ### `403 Google Calendar API has not been used in project ... before or it is disabled`
 
@@ -309,8 +362,44 @@ public static final String GOOGLE_OAUTH_CLIENT_ID = "123456789012-xxxx.apps.goog
 
 ---
 
+### `gcloud` コマンドでこの手順を自動化したい
+
+**できません。** プロジェクト作成（`gcloud projects create`）と API 有効化
+（`gcloud services enable calendar-json.googleapis.com`）までは CLI でできますが、
+**Android 用 OAuth クライアント ID の発行には API / CLI の口がありません。**
+Console の画面操作が必須です。
+
+- `gcloud alpha iam oauth-clients` は Workforce Identity 連携用で、別物です
+- `gcloud alpha iap oauth-clients` は IAP / ウェブ用で、Android クライアントは作れません
+
+---
+
+## リリース署名（Google Play 提出用）
+
+2026-08-21 に、Play Store 提出に必要なリリース署名設定を追加した。
+
+- `local.properties` に `RELEASE_STORE_FILE` / `RELEASE_STORE_PASSWORD` / `RELEASE_KEY_ALIAS` / `RELEASE_KEY_PASSWORD` の4項目を記入すると、
+  `./gradlew :app:assembleRelease` / `:app:bundleRelease` が自動的に署名される。未記入なら release ビルドは未署名のまま（開発用ビルドは通る）。
+- このリポジトリの `release.keystore.jks`（プロジェクトルート直下）は、開発機での動作確認用として自動生成したキーストア。`.gitignore` 済みでコミットされない。
+- **本番の Play Store 提出に使うキーストアは、この自動生成ファイルをそのまま使ってよいが、必ず以下を行うこと。**
+  1. `release.keystore.jks` と `local.properties` 内の4つのパスワード/エイリアスを、リポジトリ外（パスワードマネージャー、暗号化した外部ドライブ等）にバックアップする。
+  2. Play Console の初回アップロード時に **Play App Signing** を有効化する（Google 推奨・デフォルト）。有効化すると、万一このアップロード鍵を紛失しても Play Console の申請フォームからリセットできる。有効化しないまま紛失すると、このアプリは二度と更新できなくなる。
+  3. Google Calendar OAuth クライアント（Google Auth Platform の「クライアント」画面）に登録する SHA-1 は、**このアップロード鍵の SHA-1 ではなく**、Play Console「設定 → アプリの署名」に表示される **アプリ署名鍵証明書の SHA-1**（Play App Signing 有効化後にのみ表示される）を使うこと。手順4の「debug 用と release 用で SHA-1 は違います」の表を参照。
+
+## release ビルドの minify / シュリンク
+
+- `isMinifyEnabled = true` / `isShrinkResources = true` を有効化済み（2026-08-21）。R8 + `proguard-rules.pro` の追加ルールで、Retrofit・kotlinx.serialization・Room・Play Services Identity のリフレクション経由コードが壊れないことをエミュレータでの実機起動確認済み。
+- 依存ライブラリを追加・更新した場合は、`./gradlew :app:assembleRelease` の成功だけでなく、**実機/エミュレータでの起動確認**を必ず行うこと（ビルドが通っても実行時にクラスが見つからず落ちることがある。今回もこの経路で起動即クラッシュのバグを検出した）。
+
+## compileSdk / targetSdk 36（2026-08-21 変更）
+
+Google Play の Target API レベル要件により、2026-08-31 以降の新規アプリ・更新は Android 16（API 36）をターゲットにする必要があるため、35 から 36 へ引き上げた。要件は今後も定期的に変わるため、次回の大型更新時に [Meet Google Play's target API level requirement](https://developer.android.com/google/play/requirements/target-sdk) で最新の期限を確認すること。
+
+---
+
 ## 参考リンク
 
+- [Google Auth Platform（旧 OAuth 同意画面）](https://console.cloud.google.com/auth/overview)
 - [Google Calendar API リファレンス](https://developers.google.com/calendar/api/v3/reference)
 - [Android での認可（AuthorizationClient）](https://developers.google.com/identity/authorization/android)
 - [OAuth 2.0 スコープ一覧](https://developers.google.com/identity/protocols/oauth2/scopes#calendar)

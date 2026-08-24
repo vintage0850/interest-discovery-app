@@ -14,6 +14,7 @@ import com.google.android.gms.common.api.ApiException
 import com.google.android.gms.common.api.CommonStatusCodes
 import com.google.android.gms.common.api.Scope
 import com.google.android.gms.tasks.Task
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -82,7 +83,7 @@ enum class SignOutResult {
  *
  * 取得したトークンは短時間だけメモリに載せるだけで、永続化は一切しない。
  */
-class GoogleAuthManager(context: Context) {
+open class GoogleAuthManager(context: Context) {
 
     // Activity を握るとリークするので必ず Application context に落とす
     private val appContext = context.applicationContext
@@ -115,7 +116,7 @@ class GoogleAuthManager(context: Context) {
     private var cachedTokenExpiresAt = 0L
 
     /** 起動時などに、ユーザー操作なしで認可済みかを確認して [authState] を更新する。 */
-    suspend fun refreshAuthState() {
+    open suspend fun refreshAuthState() {
         if (!ensureConfigured()) return
         withContext(Dispatchers.IO) {
             requestMutex.withLock { authorizeInternal() }
@@ -126,7 +127,7 @@ class GoogleAuthManager(context: Context) {
      * アクセストークンを返す。未認可・未設定なら null。
      * ユーザー操作が必要な場合も null を返すだけで、同意画面は出さない。
      */
-    suspend fun getAccessToken(): String? {
+    open suspend fun getAccessToken(): String? {
         if (!ensureConfigured()) return null
         return withContext(Dispatchers.IO) {
             requestMutex.withLock {
@@ -173,7 +174,7 @@ class GoogleAuthManager(context: Context) {
         }
         return withContext(Dispatchers.IO) {
             requestMutex.withLock {
-                val result = runCatching {
+                val result = runCatchingPreserveCancellation {
                     authorizationClient.getAuthorizationResultFromIntent(data)
                 }.onFailure {
                     Log.w(TAG, "同意画面の結果の取得に失敗しました", it)
@@ -204,7 +205,7 @@ class GoogleAuthManager(context: Context) {
 
                 // 端末側にキャッシュされたトークンを破棄する
                 if (token != null) {
-                    runCatching {
+                    runCatchingPreserveCancellation {
                         authorizationClient.clearToken(
                             ClearTokenRequest.builder().setToken(token).build()
                         ).awaitOrNull()
@@ -212,7 +213,7 @@ class GoogleAuthManager(context: Context) {
                 }
 
                 // 付与済みスコープの同意そのものを取り消す
-                val revoked = runCatching {
+                val revoked = runCatchingPreserveCancellation {
                     authorizationClient.revokeAccess(
                         RevokeAccessRequest.builder()
                             .setScopes(listOf(Scope(CALENDAR_EVENTS_SCOPE)))
@@ -236,7 +237,7 @@ class GoogleAuthManager(context: Context) {
      * 必ず [requestMutex] を保持した状態で呼ぶこと。
      */
     private suspend fun authorizeInternal(): Result<AuthorizationResult> =
-        runCatching {
+        runCatchingPreserveCancellation {
             authorizationClient.authorize(buildRequest()).awaitOrNull()
                 ?: throw IllegalStateException("認可結果が取得できませんでした")
         }
@@ -277,7 +278,7 @@ class GoogleAuthManager(context: Context) {
      * ここで null になるのは異常ではない（UI は「連携中の Google アカウント」表示に落ちる）。
      */
     private fun emailOf(result: AuthorizationResult): String? =
-        runCatching { result.toGoogleSignInAccount()?.email }
+        runCatchingPreserveCancellation { result.toGoogleSignInAccount()?.email }
             .onFailure { Log.w(TAG, "アカウント情報の取得に失敗しました", it) }
             .getOrNull()
 
@@ -299,6 +300,23 @@ class GoogleAuthManager(context: Context) {
         cachedToken = null
         cachedTokenExpiresAt = 0L
     }
+
+    /**
+     * 今回の通信に使ったトークンがキャッシュと一致する場合だけ、キャッシュを破棄する。
+     *
+     * 並行して別の処理が新しいトークンを取得済みのとき、後から返ってきた古い 401 応答で
+     * 新トークンを巻き添えで消さないため。一致しなければ false を返す。
+     */
+    open suspend fun invalidateTokenIfMatches(token: String): Boolean =
+        requestMutex.withLock {
+            val current = cachedToken
+            if (current != null && current == token) {
+                clearCachedToken()
+                true
+            } else {
+                false
+            }
+        }
 
     /** クライアント ID 未設定なら状態を [CalendarAuthState.NotConfigured] にして false を返す。 */
     private fun ensureConfigured(): Boolean {
@@ -323,6 +341,20 @@ class GoogleAuthManager(context: Context) {
             }
         }
     }
+
+    /**
+     * コルーチンのキャンセル信号はそのまま呼び出し側へ伝える。
+     * 画面を閉じたときなどに、処理を中断すべき例外を握り潰して
+     * ユーザーに余計なエラーメッセージが出ないようにするため。
+     */
+    private inline fun <R> runCatchingPreserveCancellation(block: () -> R): Result<R> =
+        try {
+            Result.success(block())
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            Result.failure(e)
+        }
 
     companion object {
         private const val TAG = "GoogleAuthManager"

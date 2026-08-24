@@ -16,3 +16,7 @@ local.properties
 
 # Kotlin コンパイラの一時ログ
 .kotlin
+
+# リリース署名鍵（絶対にコミットしない。紛失時は SETUP.md の手順でしか復旧できない）
+*.jks
+*.keystore

@@ -6,6 +6,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -31,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import com.example.myapplication.data.Category
 import com.example.myapplication.data.SubTask
 import com.example.myapplication.data.Task
+import com.example.myapplication.data.TaskStatus
 import com.example.myapplication.data.TaskWithSubTasks
 import com.example.myapplication.data.calendar.AuthorizationStep
 import com.example.myapplication.data.calendar.CalendarAuthState
@@ -55,6 +57,9 @@ const val CALENDAR_NOT_CONFIGURED_MESSAGE =
 
 /** ユーザーが同意画面で拒否した / キャンセルしたときの案内。 */
 const val CALENDAR_NOT_AUTHORIZED_MESSAGE = "Google カレンダーとの連携が許可されていません"
+
+/** タスク名の文字数上限。AddTaskScreen の新規登録時と揃える。 */
+private const val TASK_TITLE_MAX_LENGTH = 50
 
 /**
  * 同意フローの結果。通信エラーと「ユーザーが拒否した」を混同しないよう区別する。
@@ -150,6 +155,7 @@ fun TaskListScreen(
     onSubTaskToggle: (SubTask) -> Unit,
     onTaskDelete: (Task) -> Unit,
     onUndoDelete: () -> Unit,
+    onTaskRename: (Task, String) -> Unit,
     authState: CalendarAuthState,
     onCalendarLinkChange: (Task, Boolean) -> Unit,
     onSignOut: () -> Unit
@@ -163,6 +169,8 @@ fun TaskListScreen(
     var pendingCalendarTask by remember { mutableStateOf<Task?>(null) }
     // アカウントメニュー（連携状況の確認とサインアウト）
     var showAccountMenu by remember { mutableStateOf(false) }
+    // リネーム対象のタスク。null ならダイアログを出さない
+    var taskToRename by remember { mutableStateOf<Task?>(null) }
 
     fun notify(message: String) {
         snackbarHostState.currentSnackbarData?.dismiss()
@@ -305,6 +313,7 @@ fun TaskListScreen(
                     onTaskToggle = onTaskToggle,
                     onSubTaskToggle = onSubTaskToggle,
                     onCalendarClick = ::toggleCalendarLink,
+                    onTaskTitleClick = { task -> taskToRename = task },
                     onTaskDelete = { task ->
                         onTaskDelete(task)
                         // 直前のスナックバーは畳んで、常に最新の削除に対する取り消しを出す
@@ -321,6 +330,21 @@ fun TaskListScreen(
                 )
             }
         }
+    }
+
+    taskToRename?.let { task ->
+        CategoryNameDialog(
+            title = "タスク名を変更",
+            initialName = task.title,
+            confirmLabel = "変更",
+            label = "タスク名",
+            maxLength = TASK_TITLE_MAX_LENGTH,
+            onConfirm = { newTitle ->
+                onTaskRename(task, newTitle)
+                taskToRename = null
+            },
+            onDismiss = { taskToRename = null }
+        )
     }
 }
 
@@ -385,6 +409,7 @@ private fun TaskList(
     onTaskToggle: (Task) -> Unit,
     onSubTaskToggle: (SubTask) -> Unit,
     onCalendarClick: (Task) -> Unit,
+    onTaskTitleClick: (Task) -> Unit,
     onTaskDelete: (Task) -> Unit
 ) {
     LazyColumn(
@@ -415,7 +440,8 @@ private fun TaskList(
                         ?: Category.UNCATEGORIZED_LABEL,
                     onToggle = { onTaskToggle(item.task) },
                     onSubTaskToggle = onSubTaskToggle,
-                    onCalendarClick = { onCalendarClick(item.task) }
+                    onCalendarClick = { onCalendarClick(item.task) },
+                    onTitleClick = { onTaskTitleClick(item.task) }
                 )
             }
         }
@@ -491,7 +517,8 @@ fun TaskItem(
     categoryName: String,
     onToggle: () -> Unit,
     onSubTaskToggle: (SubTask) -> Unit,
-    onCalendarClick: () -> Unit = {}
+    onCalendarClick: () -> Unit = {},
+    onTitleClick: () -> Unit = {}
 ) {
     val task = item.task
     // 優先度スコアは 4〜12。テーマ由来の色を使い、ダークテーマでも読めるようにする
@@ -526,7 +553,9 @@ fun TaskItem(
                 Text(
                     text = task.title,
                     style = MaterialTheme.typography.titleMedium,
-                    textDecoration = if (task.isCompleted) TextDecoration.LineThrough else null
+                    textDecoration = if (task.isCompleted) TextDecoration.LineThrough else null,
+                    // カード全体のタップ操作（スワイプ削除など）と競合しないよう、タイトルだけをタップ対象にする
+                    modifier = Modifier.clickable(onClick = onTitleClick)
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Row(
@@ -552,6 +581,13 @@ fun TaskItem(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    if (task.status == TaskStatus.IN_PROGRESS) {
+                        AssistChip(
+                            onClick = {},
+                            enabled = false,
+                            label = { Text("進行中", style = MaterialTheme.typography.labelSmall) }
+                        )
+                    }
                 }
             }
             val linked = task.calendarEventId != null
