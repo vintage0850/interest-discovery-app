@@ -17,6 +17,7 @@
 1. カレンダーに登録される予定に、サブタスクの内容を「メインタスク - サブタスク」的に分かるよう反映する
 2. カレンダー予定の日時（現在は締切日の終日予定固定）をユーザーが手動指定できるようにする
 3. タスクごとに指定した時刻に、空き時間検知を待たずに確実に通知を出す「手動通知時刻」機能と、その土台となるアプリ全体の通知有効時間帯の設定画面を追加する
+4. 上記②③は新規タスク作成時だけでなく、既存タスクに対しても事後編集できるようにする
 
 ## スコープ
 
@@ -31,7 +32,7 @@
 - サブタスクを個別のカレンダー予定として分割登録すること（1つの予定にまとめる）
 - 手動通知の繰り返し・スヌーズ
 - カレンダー予定の終了時刻のカスタマイズ（時刻指定時は開始時刻から1時間固定）
-- 一覧画面からの事後編集（時刻・通知設定の変更は今回は「タスク追加時」のみ。既存タスクの編集UIが無いため、既存の `renameTask` 相当の仕組みを流用する編集機能は別スコープ）
+- サブタスクの内容自体の事後編集（今回のスコープは②③の事後編集のみ）
 
 ## データモデルの変更
 
@@ -140,12 +141,38 @@ class TaskNotificationScheduler(context: Context) {
 - 保存時に `NotificationWindowPreferences.set()` を呼ぶ
 - `FreeTimeCheckWorker` は `doWork()` の冒頭で `NotificationWindowPreferences.get(context)` を読み、`WINDOW_START`/`WINDOW_END` の代わりに使う
 
+### ④ 既存タスクの事後編集
+
+現在のタイトル変更ダイアログ（タイトルタップ → `CategoryNameDialog` で `renameTask` を呼ぶ導線）を拡張し、1つのダイアログで以下3項目をまとめて編集できるようにする。別画面は作らない。
+
+- タスク名（既存のまま）
+- 予定の時刻指定（②と同じ「時刻を指定する」トグル＋時刻ピッカー部品を再利用）
+- 通知時刻（③と同じトグル＋時刻ピッカー部品を再利用）
+
+**`TaskViewModel` の追加関数:**
+
+```kotlin
+fun updateEventTime(task: Task, eventHasTime: Boolean, newDeadline: Long) {
+    // DB更新（deadline, eventHasTime）
+    // calendarEventId != null なら syncToCalendar 相当で予定を時刻付き/終日に更新
+}
+
+fun updateNotificationTime(task: Task, newNotificationTime: Long?) {
+    // DB更新（notificationTime）
+    // scheduler.cancel(task.id) の後、newNotificationTime != null なら scheduler.schedule(updated)
+}
+```
+
+- ダイアログの「変更」確定時に、変更があった項目だけ対応する関数を呼ぶ（タイトルのみ変更なら従来通り `renameTask` のみ呼ぶ）
+- `syncToCalendar` は現在 private のため、予定更新ロジックを再利用できるよう `internal` 化するか、`updateEventTime` 内から直接 `calendarSync.updateEvent` を呼ぶ形に整理する（実装時に既存コードとの重複を見て判断）
+
 ## テスト方針
 
 - `GoogleCalendarSync.toEventRequest()` 相当のロジック: サブタスクあり/なし、時刻指定あり/なしの組み合わせをユニットテストで検証（既存の `GoogleCalendarSyncTest` 相当があれば拡張）
 - `TaskNotificationScheduler`: `AlarmManager` は Robolectric shadow を使うか、インターフェース抽出してモック化する
 - `NotificationWindowPreferences`: 読み書きの単体テスト
 - 手動での実機確認: 実際に `AlarmManager` の発火・端末再起動後の再登録はエミュレータ/実機での動作確認が必要（ユニットテストでは再起動シナリオを完全には再現できないため）
+- `updateEventTime` / `updateNotificationTime`: DB更新・カレンダー再同期・アラームの再予約/解除がそれぞれ正しく呼ばれるかをユニットテストで検証
 
 ## 未決事項（実装時に確認）
 
