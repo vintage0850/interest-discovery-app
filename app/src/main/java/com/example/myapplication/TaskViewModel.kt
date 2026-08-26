@@ -413,4 +413,20 @@ class TaskViewModel(
             }
         }
     }
+
+    /**
+     * [TaskEditDialog] の確定結果を、変更があった項目だけ適用する。
+     */
+    fun applyTaskEdit(task: Task, result: TaskEditResult) {
+        val trimmedTitle = result.title.trim()
+        if (trimmedTitle.isNotEmpty() && trimmedTitle != task.title) {
+            renameTask(task, trimmedTitle)
+        }
+        if (result.eventHasTime != task.eventHasTime || result.deadline != task.deadline) {
+            updateEventTime(task, result.eventHasTime, result.deadline)
+        }
+        if (result.notificationTime != task.notificationTime) {
+            updateNotificationTime(task, result.notificationTime)
+        }
+    }
 }

@@ -366,6 +366,54 @@ class TaskViewModelCalendarTest {
         assertEquals(0, calendar.updateCallCount.get())
     }
 
+    @Test
+    fun `applyTaskEditは変更があった項目だけ更新する`() = runTest {
+        val task = createTask(id = 1, title = "元のタイトル", calendarEventId = null)
+        val repo = FakeRepository().apply { save(task) }
+        val calendar = FakeCalendarSync()
+        val scheduler = FakeTaskNotificationScheduler()
+        val viewModel = createViewModel(repo, calendar, scheduler)
+
+        viewModel.applyTaskEdit(
+            task,
+            TaskEditResult(
+                title = "新しいタイトル",
+                eventHasTime = true,
+                deadline = 1_700_050_000_000L,
+                notificationTime = 1_700_000_900_000L
+            )
+        )
+        advanceUntilIdle()
+
+        assertEquals(listOf(1 to "新しいタイトル"), repo.titleUpdates)
+        assertEquals(listOf(Triple(1, 1_700_050_000_000L, true)), repo.eventTimeUpdates)
+        assertEquals(listOf(1 to 1_700_000_900_000L), repo.notificationTimeUpdates)
+    }
+
+    @Test
+    fun `applyTaskEditはタイトルが同じなら更新しない`() = runTest {
+        val task = createTask(id = 1, title = "元のタイトル", calendarEventId = null)
+        val repo = FakeRepository().apply { save(task) }
+        val calendar = FakeCalendarSync()
+        val scheduler = FakeTaskNotificationScheduler()
+        val viewModel = createViewModel(repo, calendar, scheduler)
+
+        viewModel.applyTaskEdit(
+            task,
+            TaskEditResult(
+                title = "元のタイトル",
+                eventHasTime = task.eventHasTime,
+                deadline = task.deadline,
+                notificationTime = task.notificationTime
+            )
+        )
+        advanceUntilIdle()
+
+        assertTrue(repo.titleUpdates.isEmpty())
+        assertTrue(repo.eventTimeUpdates.isEmpty())
+        assertTrue(repo.notificationTimeUpdates.isEmpty())
+    }
+
     private fun createViewModel(
         repository: FakeRepository,
         calendarSync: FakeCalendarSync,

@@ -92,11 +92,12 @@ class MainActivity : ComponentActivity() {
                                     launchSingleTop = true
                                 }
                             },
+                            onManageNotificationSettings = {},
                             onTaskToggle = viewModel::toggleCompleted,
                             onSubTaskToggle = viewModel::toggleSubTaskCompleted,
                             onTaskDelete = viewModel::deleteTask,
                             onUndoDelete = viewModel::undoDelete,
-                            onTaskRename = viewModel::renameTask,
+                            onTaskEdit = viewModel::applyTaskEdit,
                             authState = authState,
                             onCalendarLinkChange = viewModel::setCalendarLinked,
                             onSignOut = viewModel::signOut
