@@ -25,6 +25,7 @@ import com.example.myapplication.ui.theme.MyApplicationTheme
 
 private const val ROUTE_LIST = "list"
 private const val ROUTE_ADD = "add"
+private const val ROUTE_SETTINGS_HUB = "settings_hub"
 private const val ROUTE_CATEGORIES = "categories"
 private const val ROUTE_NOTIFICATION_SETTINGS = "notification_settings"
 
@@ -88,24 +89,19 @@ class MainActivity : ComponentActivity() {
                                 // 連打で "add" が積み重なるのを防ぐ
                                 navController.navigate(ROUTE_ADD) { launchSingleTop = true }
                             },
-                            onManageCategories = {
-                                navController.navigate(ROUTE_CATEGORIES) {
-                                    launchSingleTop = true
-                                }
-                            },
-                            onManageNotificationSettings = {
-                                navController.navigate(ROUTE_NOTIFICATION_SETTINGS) {
+                            onOpenSettings = {
+                                navController.navigate(ROUTE_SETTINGS_HUB) {
                                     launchSingleTop = true
                                 }
                             },
                             onTaskToggle = viewModel::toggleCompleted,
                             onSubTaskToggle = viewModel::toggleSubTaskCompleted,
+                            onSubTaskRename = viewModel::renameSubTask,
                             onTaskDelete = viewModel::deleteTask,
                             onUndoDelete = viewModel::undoDelete,
                             onTaskEdit = viewModel::applyTaskEdit,
                             authState = authState,
-                            onCalendarLinkChange = viewModel::setCalendarLinked,
-                            onSignOut = viewModel::signOut
+                            onCalendarLinkChange = viewModel::setCalendarLinked
                         )
                     }
                     composable(ROUTE_ADD) {
@@ -138,6 +134,24 @@ class MainActivity : ComponentActivity() {
                             onRename = viewModel::renameCategory,
                             onDelete = viewModel::deleteCategory,
                             countTasksIn = viewModel::countTasksInCategory,
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
+                    composable(ROUTE_SETTINGS_HUB) {
+                        SettingsHubScreen(
+                            authState = authState,
+                            snackbarHostState = snackbarHostState,
+                            onNavigateToCategories = {
+                                navController.navigate(ROUTE_CATEGORIES) {
+                                    launchSingleTop = true
+                                }
+                            },
+                            onNavigateToNotificationSettings = {
+                                navController.navigate(ROUTE_NOTIFICATION_SETTINGS) {
+                                    launchSingleTop = true
+                                }
+                            },
+                            onSignOut = viewModel::signOut,
                             onBack = { navController.popBackStack() }
                         )
                     }

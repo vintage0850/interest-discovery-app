@@ -12,11 +12,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -46,10 +44,49 @@ import java.util.Date
  * 選択中のタブ。カテゴリは増減するので、位置ではなく「何で絞り込むか」を持たせる。
  * rememberSaveable にそのまま入れられるよう Int で表す。
  */
-private const val FILTER_ALL = -1
-private const val FILTER_UNCATEGORIZED = 0
+internal const val FILTER_ALL = -1
+internal const val FILTER_UNCATEGORIZED = 0
 
-/** タブ 1 つ分。filter は上の定数、またはカテゴリの id。 */
+/** タスク一覧の並び順。DB を変えず画面内で切り替える。 */
+internal enum class SortOrder { PRIORITY, DEADLINE }
+
+/**
+ * 選択中のカテゴリフィルターを、現在存在するカテゴリ一覧に照らして正規化する。
+ * 削除済みのカテゴリ ID や未分類が無くなった場合は「すべて」に戻す。
+ */
+internal fun resolveSelectedFilter(
+    selectedFilter: Int,
+    categories: List<Category>,
+    hasUncategorizedTasks: Boolean
+): Int = when {
+    selectedFilter == FILTER_ALL -> FILTER_ALL
+    selectedFilter == FILTER_UNCATEGORIZED && hasUncategorizedTasks -> FILTER_UNCATEGORIZED
+    selectedFilter == FILTER_UNCATEGORIZED && !hasUncategorizedTasks -> FILTER_ALL
+    categories.any { it.id == selectedFilter } -> selectedFilter
+    else -> FILTER_ALL
+}
+
+/**
+ * [tasks] を [sortOrder] に従って並び替える。
+ * 未完了を先頭に、その後に完了済みを置く。同点時は id で安定させる。
+ */
+internal fun sortedTasks(
+    tasks: List<TaskWithSubTasks>,
+    sortOrder: SortOrder
+): List<TaskWithSubTasks> = when (sortOrder) {
+    SortOrder.PRIORITY -> tasks.sortedWith(
+        compareBy<TaskWithSubTasks> { it.task.isCompleted }
+            .thenByDescending { it.task.priorityScore }
+            .thenBy { it.task.deadline }
+            .thenBy { it.task.id }
+    )
+    SortOrder.DEADLINE -> tasks.sortedWith(
+        compareBy<TaskWithSubTasks> { it.task.isCompleted }
+            .thenBy { it.task.deadline }
+            .thenByDescending { it.task.priorityScore }
+            .thenBy { it.task.id }
+    )
+}
 private data class TaskTab(val filter: Int, val title: String)
 
 /** OAuth クライアント ID 未設定時に出す案内。黙って何も起きない状態を避けるため必ず表示する。 */
@@ -151,28 +188,28 @@ fun TaskListScreen(
     categories: List<Category>,
     snackbarHostState: SnackbarHostState,
     onAddTask: () -> Unit,
-    onManageCategories: () -> Unit,
-    onManageNotificationSettings: () -> Unit,
+    onOpenSettings: () -> Unit,
     onTaskToggle: (Task) -> Unit,
     onSubTaskToggle: (SubTask) -> Unit,
+    onSubTaskRename: (SubTask, String) -> Unit,
     onTaskDelete: (Task) -> Unit,
     onUndoDelete: () -> Unit,
     onTaskEdit: (Task, TaskEditResult) -> Unit,
     authState: CalendarAuthState,
-    onCalendarLinkChange: (Task, Boolean) -> Unit,
-    onSignOut: () -> Unit
+    onCalendarLinkChange: (Task, Boolean) -> Unit
 ) {
     var selectedFilter by rememberSaveable { mutableIntStateOf(FILTER_ALL) }
+    var sortOrder by rememberSaveable { mutableStateOf(SortOrder.PRIORITY) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val auth = remember(context) { GoogleAuthManager.get(context) }
 
     // 同意フローの最中、対象のタスクを覚えておく（同意されたらそのまま登録する）
     var pendingCalendarTask by remember { mutableStateOf<Task?>(null) }
-    // アカウントメニュー（連携状況の確認とサインアウト）
-    var showAccountMenu by remember { mutableStateOf(false) }
     // リネーム対象のタスク。null ならダイアログを出さない
     var taskToEdit by remember { mutableStateOf<Task?>(null) }
+    // リネーム対象のサブタスク。null ならダイアログを出さない
+    var subTaskToEdit by remember { mutableStateOf<SubTask?>(null) }
 
     fun notify(message: String) {
         snackbarHostState.currentSnackbarData?.dismiss()
@@ -205,19 +242,27 @@ fun TaskListScreen(
 
     val categoryNames = remember(categories) { categories.associate { it.id to it.name } }
 
-    val tabs = remember(categories, tasks) {
+    val hasUncategorizedTasks = remember(tasks) { tasks.any { it.task.categoryId == null } }
+
+    // カテゴリが削除されたり未分類タスクが無くなったりしたら、選択中フィルターを正規化する
+    val currentFilter = resolveSelectedFilter(selectedFilter, categories, hasUncategorizedTasks)
+    if (currentFilter != selectedFilter) {
+        selectedFilter = currentFilter
+    }
+
+    val tabs = remember(categories, hasUncategorizedTasks) {
         buildList {
             add(TaskTab(FILTER_ALL, "すべて"))
             categories.forEach { add(TaskTab(it.id, it.name)) }
             // カテゴリを消されたタスクの行き先。該当が無いときはタブも出さない
-            if (tasks.any { it.task.categoryId == null }) {
+            if (hasUncategorizedTasks) {
                 add(TaskTab(FILTER_UNCATEGORIZED, Category.UNCATEGORIZED_LABEL))
             }
         }
     }
 
     // 選択中のカテゴリが削除されたら「すべて」に戻す
-    val selectedIndex = tabs.indexOfFirst { it.filter == selectedFilter }.takeIf { it >= 0 } ?: 0
+    val selectedIndex = tabs.indexOfFirst { it.filter == currentFilter }.takeIf { it >= 0 } ?: 0
     val currentTab = tabs[selectedIndex]
 
     Scaffold(
@@ -225,40 +270,10 @@ fun TaskListScreen(
             CenterAlignedTopAppBar(
                 title = { Text("今日のタスク") },
                 actions = {
-                    Box {
-                        IconButton(onClick = { showAccountMenu = true }) {
-                            Icon(
-                                Icons.Filled.AccountCircle,
-                                contentDescription = "カレンダー連携のアカウント",
-                                // 連携中かどうかを色の濃さで示す
-                                tint = if (authState is CalendarAuthState.Authorized) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    LocalContentColor.current.copy(alpha = 0.4f)
-                                }
-                            )
-                        }
-                        CalendarAccountMenu(
-                            expanded = showAccountMenu,
-                            authState = authState,
-                            onDismiss = { showAccountMenu = false },
-                            onConnect = {
-                                showAccountMenu = false
-                                requestAuthorization()
-                            },
-                            onSignOut = {
-                                showAccountMenu = false
-                                onSignOut()
-                            }
-                        )
-                    }
-                    IconButton(onClick = onManageCategories) {
-                        Icon(Icons.Filled.Settings, contentDescription = "カテゴリの管理")
-                    }
-                    IconButton(onClick = onManageNotificationSettings) {
+                    IconButton(onClick = onOpenSettings) {
                         Icon(
-                            imageVector = Icons.Filled.Notifications,
-                            contentDescription = "通知設定"
+                            Icons.Filled.Settings,
+                            contentDescription = "設定"
                         )
                     }
                 }
@@ -275,12 +290,13 @@ fun TaskListScreen(
             }
         }
     ) { padding ->
-        val filteredTasks = remember(tasks, currentTab) {
-            when (currentTab.filter) {
+        val filteredTasks = remember(tasks, currentTab, sortOrder) {
+            val filtered = when (currentTab.filter) {
                 FILTER_ALL -> tasks
                 FILTER_UNCATEGORIZED -> tasks.filter { it.task.categoryId == null }
                 else -> tasks.filter { it.task.categoryId == currentTab.filter }
             }
+            sortedTasks(filtered, sortOrder)
         }
         val uncompletedCount = filteredTasks.count { !it.task.isCompleted }
 
@@ -298,6 +314,11 @@ fun TaskListScreen(
                     )
                 }
             }
+
+            SortOrderSelector(
+                sortOrder = sortOrder,
+                onSortOrderChange = { sortOrder = it }
+            )
 
             CharacterStatusHeader(
                 uncompletedCount = uncompletedCount,
@@ -320,6 +341,7 @@ fun TaskListScreen(
                     categoryNames = categoryNames,
                     onTaskToggle = onTaskToggle,
                     onSubTaskToggle = onSubTaskToggle,
+                    onSubTaskRename = { subTask -> subTaskToEdit = subTask },
                     onCalendarClick = ::toggleCalendarLink,
                     onTaskTitleClick = { task -> taskToEdit = task },
                     onTaskDelete = { task ->
@@ -350,58 +372,16 @@ fun TaskListScreen(
             onDismiss = { taskToEdit = null }
         )
     }
-}
 
-/**
- * カレンダー連携の状況を見せて、接続 / サインアウトをする小さなメニュー。
- * 未設定の場合は理由を出すだけで、操作はできない。
- */
-@Composable
-private fun CalendarAccountMenu(
-    expanded: Boolean,
-    authState: CalendarAuthState,
-    onDismiss: () -> Unit,
-    onConnect: () -> Unit,
-    onSignOut: () -> Unit
-) {
-    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
-        when (authState) {
-            is CalendarAuthState.NotConfigured -> {
-                DropdownMenuItem(
-                    text = {
-                        Text(
-                            text = CALENDAR_NOT_CONFIGURED_MESSAGE,
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    },
-                    onClick = {},
-                    enabled = false
-                )
-            }
-            is CalendarAuthState.NotAuthorized -> {
-                DropdownMenuItem(
-                    text = { Text("Google カレンダーに接続") },
-                    onClick = onConnect
-                )
-            }
-            is CalendarAuthState.Authorized -> {
-                DropdownMenuItem(
-                    text = {
-                        Text(
-                            text = authState.email ?: "連携中の Google アカウント",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    },
-                    onClick = {},
-                    enabled = false
-                )
-                HorizontalDivider()
-                DropdownMenuItem(
-                    text = { Text("サインアウト") },
-                    onClick = onSignOut
-                )
-            }
-        }
+    subTaskToEdit?.let { subTask ->
+        SubTaskRenameDialog(
+            initialTitle = subTask.title,
+            onConfirm = { newTitle ->
+                onSubTaskRename(subTask, newTitle)
+                subTaskToEdit = null
+            },
+            onDismiss = { subTaskToEdit = null }
+        )
     }
 }
 
@@ -412,6 +392,7 @@ private fun TaskList(
     categoryNames: Map<Int, String>,
     onTaskToggle: (Task) -> Unit,
     onSubTaskToggle: (SubTask) -> Unit,
+    onSubTaskRename: (SubTask) -> Unit,
     onCalendarClick: (Task) -> Unit,
     onTaskTitleClick: (Task) -> Unit,
     onTaskDelete: (Task) -> Unit
@@ -444,6 +425,7 @@ private fun TaskList(
                         ?: Category.UNCATEGORIZED_LABEL,
                     onToggle = { onTaskToggle(item.task) },
                     onSubTaskToggle = onSubTaskToggle,
+                    onSubTaskRename = onSubTaskRename,
                     onCalendarClick = { onCalendarClick(item.task) },
                     onTitleClick = { onTaskTitleClick(item.task) }
                 )
@@ -516,11 +498,36 @@ fun EmptyStateView(modifier: Modifier, message: String) {
 }
 
 @Composable
+private fun SortOrderSelector(
+    sortOrder: SortOrder,
+    onSortOrderChange: (SortOrder) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        FilterChip(
+            selected = sortOrder == SortOrder.PRIORITY,
+            onClick = { onSortOrderChange(SortOrder.PRIORITY) },
+            label = { Text("優先順位順") }
+        )
+        FilterChip(
+            selected = sortOrder == SortOrder.DEADLINE,
+            onClick = { onSortOrderChange(SortOrder.DEADLINE) },
+            label = { Text("締切が近い順") }
+        )
+    }
+}
+
+@Composable
 fun TaskItem(
     item: TaskWithSubTasks,
     categoryName: String,
     onToggle: () -> Unit,
     onSubTaskToggle: (SubTask) -> Unit,
+    onSubTaskRename: (SubTask) -> Unit,
     onCalendarClick: () -> Unit = {},
     onTitleClick: () -> Unit = {}
 ) {
@@ -553,13 +560,18 @@ fun TaskItem(
                 .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(modifier = Modifier.weight(1f)) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    // タイトルだけでなく左側の情報領域全体をタップ可能にする。
+                    // 48dp 以上のタップ領域を確保し、カレンダー・完了・スワイプとは分離する。
+                    .clickable(onClick = onTitleClick)
+                    .padding(end = 8.dp)
+            ) {
                 Text(
                     text = task.title,
                     style = MaterialTheme.typography.titleMedium,
-                    textDecoration = if (task.isCompleted) TextDecoration.LineThrough else null,
-                    // カード全体のタップ操作（スワイプ削除など）と競合しないよう、タイトルだけをタップ対象にする
-                    modifier = Modifier.clickable(onClick = onTitleClick)
+                    textDecoration = if (task.isCompleted) TextDecoration.LineThrough else null
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Row(
@@ -618,7 +630,11 @@ fun TaskItem(
         }
 
         if (item.subTasks.isNotEmpty()) {
-            SubTaskSection(item = item, onSubTaskToggle = onSubTaskToggle)
+            SubTaskSection(
+                item = item,
+                onSubTaskToggle = onSubTaskToggle,
+                onSubTaskRename = onSubTaskRename
+            )
         }
     }
 }
@@ -626,7 +642,8 @@ fun TaskItem(
 @Composable
 private fun SubTaskSection(
     item: TaskWithSubTasks,
-    onSubTaskToggle: (SubTask) -> Unit
+    onSubTaskToggle: (SubTask) -> Unit,
+    onSubTaskRename: (SubTask) -> Unit
 ) {
     val doneCount = item.subTasks.count { it.isCompleted }
 
@@ -657,10 +674,55 @@ private fun SubTaskSection(
                 )
                 Text(
                     text = subTask.title,
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { onSubTaskRename(subTask) }
+                        .padding(vertical = 8.dp),
                     style = MaterialTheme.typography.bodyMedium,
                     textDecoration = if (subTask.isCompleted) TextDecoration.LineThrough else null
                 )
             }
         }
     }
+}
+
+/**
+ * サブタスク名変更ダイアログ。
+ * タスク名と同じ文字数上限を適用し、空白のみや変更なしの場合は確定できない。
+ */
+@Composable
+private fun SubTaskRenameDialog(
+    initialTitle: String,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var title by rememberSaveable { mutableStateOf(initialTitle) }
+    val trimmed = title.trim()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("サブタスク名を変更") },
+        text = {
+            OutlinedTextField(
+                value = title,
+                onValueChange = {
+                    if (it.length <= TASK_TITLE_MAX_LENGTH) title = it
+                },
+                label = { Text("サブタスク名") },
+                singleLine = true,
+                supportingText = { Text("${title.length} / $TASK_TITLE_MAX_LENGTH") }
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(trimmed) },
+                enabled = trimmed.isNotEmpty() && trimmed != initialTitle
+            ) {
+                Text("保存")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("キャンセル") }
+        }
+    )
 }
