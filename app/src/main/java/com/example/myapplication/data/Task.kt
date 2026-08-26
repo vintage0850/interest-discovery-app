@@ -33,6 +33,11 @@ data class Task(
     val progress: Int = 0, // 0-100
     val notificationTime: Long? = null,
     /**
+     * true なら [deadline] の時刻部分をカレンダー予定の開始時刻として使う（時刻指定予定）。
+     * false なら従来通り [deadline] の暦日で終日予定を作る。
+     */
+    val eventHasTime: Boolean = false,
+    /**
      * 書き出し済みの Google カレンダー予定の ID。未連携なら null。
      * Calendar REST API のイベント ID は文字列（例: "abc123def456"）なので String で持つ。
      */

@@ -244,6 +244,58 @@ class MigrationTest {
         }
     }
 
+    /**
+     * v5 -> v6 でスキーマ検証を通り、既存タスクの eventHasTime が全て false（0）になること。
+     */
+    @Test
+    fun v5からv6へ移行してもスキーマ検証を通りeventHasTimeがfalseで追加される() {
+        createV5DatabaseWithData()
+
+        val db = AppDatabase.getDatabase(context)
+        db.openHelper.writableDatabase
+
+        val dao = db.taskDao()
+        runBlocking {
+            val task1 = dao.getTaskById(1)
+            assertNotNull("id=1 のタスクが消えている", task1)
+            assertEquals(false, task1!!.eventHasTime)
+            // 既存の列は巻き戻っていないこと
+            assertEquals("レポート提出", task1.title)
+            assertEquals(TaskStatus.TODO, task1.status)
+
+            val task2 = dao.getTaskById(2)
+            assertNotNull("id=2 のタスクが消えている", task2)
+            assertEquals(false, task2!!.eventHasTime)
+        }
+    }
+
+    private fun createV5DatabaseWithData() {
+        helper.createDatabase(DB_NAME, 5).use { db ->
+            Category.DEFAULTS.forEachIndexed { index, name ->
+                db.execSQL(
+                    "INSERT INTO `categories` (`id`, `name`, `sortOrder`) VALUES (?, ?, ?)",
+                    arrayOf<Any>(index + 1, name, index)
+                )
+            }
+            db.execSQL(
+                "INSERT INTO `tasks` (" +
+                    "`id`, `title`, `deadline`, `importance`, `urgency`, `categoryId`, " +
+                    "`isCompleted`, `progress`, `notificationTime`, `calendarEventId`, " +
+                    "`createdAt`, `status`) " +
+                    "VALUES (1, 'レポート提出', 1700000000000, 3, 2, 1, 1, 40, NULL, NULL, " +
+                    "1600000000000, 'TODO')"
+            )
+            db.execSQL(
+                "INSERT INTO `tasks` (" +
+                    "`id`, `title`, `deadline`, `importance`, `urgency`, `categoryId`, " +
+                    "`isCompleted`, `progress`, `notificationTime`, `calendarEventId`, " +
+                    "`createdAt`, `status`) " +
+                    "VALUES (2, '未分類のタスク', 1700000000000, 1, 1, NULL, 0, 0, NULL, NULL, " +
+                    "1600000000000, 'TODO')"
+            )
+        }
+    }
+
     private fun createV4DatabaseWithData() {
         helper.createDatabase(DB_NAME, 4).use { db ->
             Category.DEFAULTS.forEachIndexed { index, name ->
