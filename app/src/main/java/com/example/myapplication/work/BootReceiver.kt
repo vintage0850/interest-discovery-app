@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import com.example.myapplication.data.AppDatabase
+import com.example.myapplication.data.Task
 import com.example.myapplication.data.TaskRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -23,11 +24,24 @@ class BootReceiver : BroadcastReceiver() {
             try {
                 val repository = TaskRepository(AppDatabase.getDatabase(appContext).taskDao())
                 val scheduler = AndroidTaskNotificationScheduler(appContext)
-                repository.getTasksWithFutureNotification(System.currentTimeMillis())
-                    .forEach { task -> scheduler.schedule(task) }
+                handleBoot(System.currentTimeMillis(), repository::getTasksWithFutureNotification, scheduler)
             } finally {
                 pendingResult.finish()
             }
+        }
+    }
+
+    companion object {
+        /**
+         * 再起動復元の本体。未来の未完了タスクを抽出し、それぞれ AlarmManager に再予約する。
+         * 単体テストでは実際の DB・AlarmManager を使えないため、対象取得と scheduler を注入可能にする。
+         */
+        suspend fun handleBoot(
+            now: Long,
+            getTasks: suspend (Long) -> List<Task>,
+            scheduler: TaskNotificationScheduler
+        ) {
+            getTasks(now).forEach { task -> scheduler.schedule(task) }
         }
     }
 }

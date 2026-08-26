@@ -292,6 +292,25 @@ class TaskViewModelCalendarTest {
     }
 
     @Test
+    fun `deleteTaskは呼び出し時点の古いTaskではなく最新のcalendarEventIdを削除する`() = runTest {
+        // 呼び出し側（UI）が持つ task は連携ON直前のスナップショットで calendarEventId が null。
+        val staleTask = createTask(id = 1, calendarEventId = null)
+        val repo = FakeRepository().apply { save(staleTask) }
+        val calendar = FakeCalendarSync()
+        val viewModel = createViewModel(repo, calendar)
+
+        // deleteTask 呼び出し前に、別経路（連携トグルON）で最新のDB状態が更新済みという状況を再現する。
+        repo.updateCalendarEventId(1, "event_new")
+
+        viewModel.deleteTask(staleTask)
+        advanceUntilIdle()
+
+        // 古い task 引数（calendarEventId = null）ではなく、Mutex取得後に再取得した
+        // 最新の calendarEventId("event_new")に対して deleteEvent が呼ばれること。
+        assertEquals(listOf("event_new"), calendar.deletedEventIds)
+    }
+
+    @Test
     fun `undoDeleteで通知時刻があれば再予約する`() = runTest {
         val task = createTask(id = 1).copy(notificationTime = 1_700_000_500_000L)
         val repo = FakeRepository().apply { save(task) }
@@ -415,6 +434,63 @@ class TaskViewModelCalendarTest {
         assertTrue(repo.titleUpdates.isEmpty())
         assertTrue(repo.eventTimeUpdates.isEmpty())
         assertTrue(repo.notificationTimeUpdates.isEmpty())
+    }
+
+    @Test
+    fun `タイトルと予定時刻を同時に変更してもupdateEventは1回だけ両方の新値で呼ばれる`() = runTest {
+        val task = createTask(
+            id = 1,
+            title = "元のタイトル",
+            calendarEventId = "event_old"
+        )
+        val repo = FakeRepository().apply { save(task) }
+        val calendar = FakeCalendarSync()
+        val viewModel = createViewModel(repository = repo, calendarSync = calendar)
+
+        viewModel.applyTaskEdit(
+            task,
+            TaskEditResult(
+                title = "新しいタイトル",
+                eventHasTime = true,
+                deadline = 1_700_050_000_000L,
+                notificationTime = task.notificationTime
+            )
+        )
+        advanceUntilIdle()
+
+        // 独立した coroutine が 2 本走ると 2 回呼ばれる。排他制御・単一 coroutine であれば 1 回。
+        assertEquals("updateEvent の呼び出し回数", 1, calendar.updateCallCount.get())
+        // 両方の新値が合成された Task で更新されている
+        assertEquals("新しいタイトル", calendar.lastUpdatedTask?.title)
+        assertEquals(1_700_050_000_000L, calendar.lastUpdatedTask?.deadline)
+        assertEquals(true, calendar.lastUpdatedTask?.eventHasTime)
+    }
+
+    @Test
+    fun `applyTaskEditで通知時刻だけ変更した場合はCalendar APIを呼ばない`() = runTest {
+        val task = createTask(
+            id = 1,
+            title = "変わらないタイトル",
+            calendarEventId = "event_old"
+        )
+        val repo = FakeRepository().apply { save(task) }
+        val calendar = FakeCalendarSync()
+        val viewModel = createViewModel(repository = repo, calendarSync = calendar)
+
+        viewModel.applyTaskEdit(
+            task,
+            TaskEditResult(
+                title = task.title,
+                eventHasTime = task.eventHasTime,
+                deadline = task.deadline,
+                notificationTime = 1_700_000_900_000L
+            )
+        )
+        advanceUntilIdle()
+
+        // タイトル・予定時刻は変わっていないので、通知時刻だけの変更でCalendar APIを呼んではいけない
+        assertEquals("通知時刻だけの変更でupdateEventが呼ばれてはいけない", 0, calendar.updateCallCount.get())
+        assertEquals(listOf(1 to 1_700_000_900_000L), repo.notificationTimeUpdates)
     }
 
     private fun createViewModel(
@@ -553,10 +629,17 @@ class TaskViewModelCalendarTest {
         ): CalendarResult<Unit> {
             updateCallCount.incrementAndGet()
             lastUpdatedTask = task
+            // 同時編集の競合を再現するため、呼び出しをわずかに遅延させる
+            delay(50)
             return CalendarResult.Success(Unit)
         }
 
+        val deletedEventIds = mutableListOf<String>()
+
         override suspend fun deleteEvent(eventId: String): CalendarResult<Unit> {
+            deletedEventIds.add(eventId)
+            // renameTask との排他制御を再現するため、わずかに遅延させる
+            delay(50)
             return CalendarResult.Success(Unit)
         }
     }

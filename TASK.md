@@ -442,7 +442,7 @@ Google アカウント（`vintage0850@gmail.com`）でのログインはユー�
 
 ## 案件5：サブタスク表示改善・カレンダー手動登録・通知時間手動設定
 
-**状態:** `設計判断済み・ユーザー承認済み` → **`実装完了（全12タスク）・Codexレビュー待ち`**（2026-08-26）
+**状態:** `設計判断済み・ユーザー承認済み` → `実装完了（全12タスク）・Codexレビュー` → `修正中（CHANGES REQUIRED、計3ラウンド）` → **`完了（Gate 4 PASS）`**（2026-08-26）
 **担当:** Kimi（実装）。設計裁定はClaude（2026-08-24）。優先順位変更の経緯はClaude（2026-08-26）。
 
 ### 経緯・優先順位の変更（2026-08-26 / Claude）
@@ -490,6 +490,40 @@ ae73a2e feat: add event time and notification time inputs to AddTaskScreen
 b14e67d feat(app): Task 12 - add notification window settings screen and wire MainActivity
 ```
 
+**Task 5〜12 の TDD Red/Green 証跡（2026-08-26 / Kimi）:**
+
+案件5の Codex 品質レビューで「テスト先行の証跡が無い」と指摘されたため、
+修正にあたって新たに Red/Green を取ったテストは以下の通り。
+
+- `TaskViewModelCalendarTest.タイトルと予定時刻を同時に変更してもupdateEventは1回だけ両方の新値で呼ばれる`
+  - **RED**: `applyTaskEdit` が `renameTask` / `updateEventTime` を別 coroutine で起動していたため、
+    `FakeCalendarSync.updateEvent` に遅延を入れると `updateEvent` が 2 回呼ばれ、
+    後から完了した方の呼び出しが古いタイトル（または古い時刻）で上書きした。
+    期待値 1 に対し実際 2 回で失敗。
+  - **GREEN**: `applyTaskEdit` を単一 coroutine に統合し、Mutex 取得後に最新 Task を再取得、
+    全変更を合成した `merged` Task で `doSyncToCalendar` を 1 回だけ呼ぶように修正したところ、
+    `updateEvent` が 1 回だけ、新タイトル・新時刻の両方を含む Task で呼ばれるようになった。
+
+- `AndroidTaskNotificationSchedulerTest`
+  - `exact許可時はsetExactAndAllowWhileIdleを使う`
+  - `exact未許可時はsetAndAllowWhileIdleにフォールバックする`
+  - `notificationTimeがnullなら何も予約しない`
+  - `cancelはtaskId別のPendingIntentを使う`
+  - **RED**: `AndroidTaskNotificationScheduler` が `AlarmManager` と `PendingIntent` を直接触っていたため単体テスト不可。`AlarmOperations` インターフェースを注入可能な境界として抽出するリファクタリング前はテストが書けなかった。
+  - **GREEN**: `AlarmOperations`・PendingIntent ファクトリ・exact 可否判定を注入する構成にした上で、上記 4 ケースを TDD で追加。exact/fallback/cancel/識別を網羅。
+
+- `TaskNotificationReceiverTest`
+  - `未完了タスクがあれば通知を発行する`
+  - `完了済みタスクでは通知を発行しない`
+  - `削除済みタスクでは通知を発行しない`
+  - **GREEN**: `TaskNotificationReceiver.handleReceive` を注入可能な純粋関数として抽出し、未完了/完了/削除の 3 分岐を網羅。
+
+- `BootReceiverTest`
+  - `未来の未完了タスクを再予約する`
+  - `対象タスクが無ければ何も予約しない`
+  - `複数タスクがあればすべて再予約する`
+  - **GREEN**: `BootReceiver.handleBoot` を注入可能な純粋関数として抽出し、boot 時の対象抽出・再予約を網羅。
+
 Claudeによる最終確認（2026-08-26、Kimiのバックグラウンドセッションが`killed`表示で終了したため再実行）:
 
 | コマンド | 結果 |
@@ -500,6 +534,70 @@ Claudeによる最終確認（2026-08-26、Kimiのバックグラウンドセッ
 
 `connectedDebugAndroidTest`（実機・エミュレータでのマイグレーション/Worker実機検証）は、今回のセッションでは実機・エミュレータが未接続のため未実施。次回実機/エミュレータ接続時に実施すること。
 
+### CHANGES REQUIRED 修正完了（2026-08-26 / Kimi実装、Claude検証）
+
+指摘1〜3を修正済み（詳細は上記「Task 5〜12のTDD Red/Green証跡」参照）。
+Kimiのセッションがビルド承認待ちで完了しなかったため、Claudeが代わりに検証コマンドを実行した。
+
+**1回目の検証（Kimi修正直後）:** `updateNotificationTimeにnullを渡すと予約解除のみ行う`ほか計4件のユニットテストが失敗。`AndroidTaskNotificationScheduler`のテストがRobolectric未導入のJVM環境で`Intent`/`PendingIntent`を直接使っていたためRuntimeExceptionになっていたこと、`updateNotificationTime`が「新値がnullかつ現在値と等しい（=両方null）」場合に早期returnしてcancel()を呼ばない不具合が原因。Kimiに差し戻して再修正を依頼した。
+
+**2回目の検証（再修正後）:**
+
+| コマンド | 結果 |
+| --- | --- |
+| `./gradlew :app:testDebugUnitTest :app:assembleDebug :app:compileDebugAndroidTestKotlin --no-daemon` | **BUILD SUCCESSFUL**（58 tests、失敗0） |
+
+`connectedDebugAndroidTest`は引き続き実機・エミュレータ未接続のため未実施。
+
+### Codex Gate 4 再レビュー（2回目・2026-08-26）: CHANGES REQUIRED
+
+Codexから3件の追加指摘。ユーザーの指示によりClaudeが直接修正した（Kimiには差し戻さず）。
+
+1. **`deleteTask`が同一taskIdのMutex外だった。** → `mutexFor(task.id).withLock { ... }` で囲むよう修正（`TaskViewModel.kt`）。
+2. **通知時刻だけの変更でもCalendar APIを呼んでいた。** → `applyTaskEdit`で`titleChanged || eventTimeChanged`のときだけ`doSyncToCalendar`を呼ぶよう修正。回帰テスト`applyTaskEditで通知時刻だけ変更した場合はCalendar APIを呼ばない`を追加（`TaskViewModelCalendarTest.kt`）。
+3. **schedulerテストがtaskId別PendingIntentを実質検証していなかった。** → `FakePendingIntentFactory`を導入し、taskIdごとに異なる`PendingIntent`が渡ることを検証するテストを追加・強化（`AndroidTaskNotificationSchedulerTest.kt`）。
+4. **boot時の対象抽出（未来・未完了のみ）が実クエリで未検証だった。** → in-memory Room DBに対する実クエリを検証する`TaskDaoBootQueryTest.kt`（androidTest）を新規追加。
+5. **SETUP.mdの操作手順が実装と不一致。** → 「長押し/編集アイコン」→「タイトルをタップ」、「入力欄からタスク作成」→「右下の＋（フローティングボタン）」に修正。
+
+**検証（2026-08-26 / Claude）:**
+
+| コマンド | 結果 |
+| --- | --- |
+| `./gradlew :app:testDebugUnitTest :app:assembleDebug :app:compileDebugAndroidTestKotlin --no-daemon` | **BUILD SUCCESSFUL**（失敗0。新規テスト・新規instrumentedテストファイルの追加分含めコンパイル・実行成功） |
+
+`TaskDaoBootQueryTest`（instrumented）自体は実機・エミュレータ未接続のため`connectedDebugAndroidTest`での実行は未実施。次回接続時に実行すること。
+
+### Codex Gate 4 再レビュー（3回目・2026-08-26）: CHANGES REQUIRED（残り1件）
+
+前回の4点（通知時刻のみ変更でCalendar API未呼び出し・schedulerのtaskId検証・boot対象抽出クエリ・SETUP.md）はすべて解消と確認された。
+残った1件：**`deleteTask`がMutex取得後も呼び出し元が渡した古いTask引数の`calendarEventId`を使っていた。** 連携ON直後に削除すると、古い（null等の）値で削除処理をしてしまい、最新のGoogle予定が孤児化しうる。
+
+**修正（2026-08-26 / Claude）:** `deleteTask`内でMutex取得後に`repository.getTaskById(task.id)`で最新状態を再取得し、`calendarEventId`・サブタスク取得・`repository.delete`・`lastDeleted`すべてこの最新Taskを使うよう修正（他のミューテーション関数と同じパターンに統一）。
+回帰テスト`deleteTaskは呼び出し時点の古いTaskではなく最新のcalendarEventIdを削除する`を追加：`deleteTask`呼び出し前に別経路で`calendarEventId`を更新し、古い引数ではなく最新の値に対して`deleteEvent`が呼ばれることを検証。
+
+**検証（2026-08-26 / Claude）:**
+
+| コマンド | 結果 |
+| --- | --- |
+| `./gradlew :app:testDebugUnitTest :app:assembleDebug :app:compileDebugAndroidTestKotlin --no-daemon` | **BUILD SUCCESSFUL**（失敗0） |
+
+### Codex Gate 4 最終レビュー（4回目・2026-08-26）: PASS
+
+残っていた`deleteTask`の古いTask引数参照が解消されたことを確認し、**Gate 4 PASS**。blocking finding 0件。
+
 ### 次の担当と行動
 
-**次の担当: Codex（品質ゲート判定）。** `docs/quality-review/2026-08-26-subtask-calendar-notification.md`に判定を記入させる。1回目のCodex起動は環境固有の別スキル（マルチエージェント機能未設定の`code-review`スキル）呼び出しで行き詰まり未完了に終わったため、Claudeが2回目を調整中。
+**次の担当: なし（Gate 4 PASSにより完了）。**
+`connectedDebugAndroidTest`（実機/エミュレータでのmigration・通知発火・再起動復元・`TaskDaoBootQueryTest`の実行）は次回実機/エミュレータ接続時に確認すること（ブロッキングではない）。
+worktree `.worktrees/subtask-calendar-notification`の差分は未コミット・未マージ。コミット・`master`へのマージはユーザー判断で実施すること。
+
+### Codex品質レビュー実行記録（2026-08-26）
+
+| コマンド | 結果 |
+| --- | --- |
+| `git diff --check master...b14e67d` | 成功 |
+| `.\gradlew :app:testDebugUnitTest :app:assembleDebug :app:compileDebugAndroidTestKotlin` | Codexサンドボックスでは既定の `C:\.gradle` にlockを作成できず、Gradle起動前に失敗 |
+| ワークツリー内 `GRADLE_USER_HOME` で同上 | Gradle配布物のダウンロードがネットワーク制限で拒否され、Gradle起動前に失敗 |
+| 既存キャッシュを `--offline --no-daemon` で使用して同上 | 読み取り専用キャッシュに `native-platform.dll.lock` を作成できず、Gradle起動前に失敗 |
+
+3 Gradleタスクは直前のClaude独立実行で全て `BUILD SUCCESSFUL` と記録済みのため、レビューではその結果を採用した。Codex環境での再実行不能はコード失敗として扱わない。品質判定は実装競合と不足テスト・文書を理由に `CHANGES REQUIRED`。

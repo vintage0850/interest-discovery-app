@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import com.example.myapplication.data.AppDatabase
+import com.example.myapplication.data.Task
 import com.example.myapplication.data.TaskRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -24,11 +25,8 @@ class TaskNotificationReceiver : BroadcastReceiver() {
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val repository = TaskRepository(AppDatabase.getDatabase(appContext).taskDao())
-                val task = repository.getTaskById(taskId)
-                // 発火までの間に完了・削除された可能性があるので、その場合は何もしない
-                if (task != null && !task.isCompleted) {
-                    AndroidFreeTimeNotifier(appContext).notifyTaskStart(task)
-                }
+                val notifier = AndroidFreeTimeNotifier(appContext)
+                handleReceive(taskId, repository::getTaskById, notifier)
             } finally {
                 pendingResult.finish()
             }
@@ -37,5 +35,21 @@ class TaskNotificationReceiver : BroadcastReceiver() {
 
     companion object {
         const val EXTRA_TASK_ID = "task_id"
+
+        /**
+         * 受信処理の本体。DB からタスクを取得し、未完了なら通知を発行する。
+         * 単体テストでは Android の通知 API が動かないため、repository・notifier を注入可能にする。
+         */
+        suspend fun handleReceive(
+            taskId: Int,
+            getTask: suspend (Int) -> Task?,
+            notifier: FreeTimeNotifier
+        ) {
+            val task = getTask(taskId)
+            // 発火までの間に完了・削除された可能性があるので、その場合は何もしない
+            if (task != null && !task.isCompleted) {
+                notifier.notifyTaskStart(task)
+            }
+        }
     }
 }

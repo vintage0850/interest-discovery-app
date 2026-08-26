@@ -115,8 +115,14 @@ class TaskViewModel(
     /**
      * タスク ID ごとのカレンダー操作排他用 Mutex。
      * 素早く連携トグルを 2 回操作しても、同じタスクの予定が 2 件作られないようにする。
+     * タスク編集時も同じ Mutex でカレンダー同期を直列化し、部分更新同士の競合を防ぐ。
      */
     private val calendarMutexes = mutableMapOf<Int, Mutex>()
+
+    /** タスク ID に対応する Mutex を取得する（無ければ作成）。 */
+    private fun mutexFor(taskId: Int): Mutex = synchronized(calendarMutexes) {
+        calendarMutexes.getOrPut(taskId) { Mutex() }
+    }
 
     init {
         // 起動時に一度だけ、ユーザー操作なしで認可済みかを確認しておく
@@ -266,10 +272,7 @@ class TaskViewModel(
     fun setCalendarLinked(task: Task, enabled: Boolean) {
         viewModelScope.launch {
             // タスク ID ごとに Mutex を用意。同じタスクに対するカレンダー操作は同時に 1 つだけ実行される。
-            val mutex = synchronized(calendarMutexes) {
-                calendarMutexes.getOrPut(task.id) { Mutex() }
-            }
-            mutex.withLock {
+            mutexFor(task.id).withLock {
                 // Mutex 取得後に最新のタスク状態を再取得。
                 // 待ち行列で他の処理が既に calendarEventId を書き換えていた場合、二重登録を防ぐため。
                 val current = repository.getTaskById(task.id) ?: return@withLock
@@ -314,15 +317,20 @@ class TaskViewModel(
     }
 
     /**
-     * タスク名を変更する。連携済み（calendarEventId != null）なら syncToCalendar が
-     * カレンダー側の予定タイトルも合わせて更新する。
+     * タスク名を変更する。連携済み（calendarEventId != null）ならカレンダー側の予定タイトルも合わせて更新する。
+     * タスク ID 単位の Mutex で他のカレンダー操作と直列化する。
      */
     fun renameTask(task: Task, newTitle: String) {
         val trimmed = newTitle.trim()
         if (trimmed.isEmpty() || trimmed == task.title) return
         viewModelScope.launch {
-            repository.updateTitle(task.id, trimmed)
-            syncToCalendar(task.copy(title = trimmed))
+            mutexFor(task.id).withLock {
+                // Mutex 取得後に最新状態を再取得。待ち行列で他の処理が変更を済ませていた場合に備える。
+                val current = repository.getTaskById(task.id) ?: return@withLock
+                if (trimmed.isEmpty() || trimmed == current.title) return@withLock
+                repository.updateTitle(current.id, trimmed)
+                doSyncToCalendar(current.copy(title = trimmed))
+            }
         }
     }
 
@@ -334,19 +342,25 @@ class TaskViewModel(
 
     fun deleteTask(task: Task) {
         viewModelScope.launch {
-            // 取り消しに備えて、削除前にサブタスクも読み出しておく
-            val subTasks = repository.getSubTasksFor(task.id)
-            repository.delete(task)
-            notificationScheduler.cancel(task.id)
+            mutexFor(task.id).withLock {
+                // Mutex 取得後に最新状態を再取得する。連携ON直後など、呼び出し側が
+                // 渡した task の calendarEventId が既に古くなっている可能性があるため。
+                val current = repository.getTaskById(task.id) ?: return@withLock
 
-            // カレンダー側を消せたかどうかは取り消し時の判断材料になるので必ず控える
-            val eventDeleted = task.calendarEventId?.let { eventId ->
-                val result = calendarSync.deleteEvent(eventId)
-                notifyCalendarFailure(result)
-                result is CalendarResult.Success
-            } ?: false
+                // 取り消しに備えて、削除前にサブタスクも読み出しておく
+                val subTasks = repository.getSubTasksFor(current.id)
+                repository.delete(current)
+                notificationScheduler.cancel(current.id)
 
-            lastDeleted = DeletedTask(task, subTasks, eventDeleted)
+                // カレンダー側を消せたかどうかは取り消し時の判断材料になるので必ず控える
+                val eventDeleted = current.calendarEventId?.let { eventId ->
+                    val result = calendarSync.deleteEvent(eventId)
+                    notifyCalendarFailure(result)
+                    result is CalendarResult.Success
+                } ?: false
+
+                lastDeleted = DeletedTask(current, subTasks, eventDeleted)
+            }
         }
     }
 
@@ -381,8 +395,9 @@ class TaskViewModel(
     /**
      * 連携済みのタスクの変更をカレンダーへ反映する。
      * ユーザーがカレンダー側で予定を消していた場合は作り直し、ID を貼り替える。
+     * 呼び出し側はタスク ID 単位の Mutex を取得済みであること。
      */
-    private suspend fun syncToCalendar(task: Task) {
+    private suspend fun doSyncToCalendar(task: Task) {
         val eventId = task.calendarEventId ?: return
         val name = categoryNameOf(task)
         val subTasks = repository.getSubTasksFor(task.id)
@@ -405,43 +420,95 @@ class TaskViewModel(
     }
 
     /**
+     * [doSyncToCalendar] をタスク ID 単位の Mutex で直列化して実行する。
+     */
+    private suspend fun syncToCalendar(task: Task) {
+        mutexFor(task.id).withLock {
+            doSyncToCalendar(task)
+        }
+    }
+
+    /**
      * 予定の時刻指定を変更する。連携済み（calendarEventId != null）ならカレンダー側の
-     * 予定も合わせて更新する（[syncToCalendar] を再利用）。
+     * 予定も合わせて更新する（[doSyncToCalendar] を再利用）。
+     * タスク ID 単位の Mutex で他のカレンダー操作と直列化する。
      */
     fun updateEventTime(task: Task, eventHasTime: Boolean, newDeadline: Long) {
         viewModelScope.launch {
-            repository.updateEventTime(task.id, newDeadline, eventHasTime)
-            syncToCalendar(task.copy(deadline = newDeadline, eventHasTime = eventHasTime))
+            mutexFor(task.id).withLock {
+                val current = repository.getTaskById(task.id) ?: return@withLock
+                if (eventHasTime == current.eventHasTime && newDeadline == current.deadline) return@withLock
+                repository.updateEventTime(current.id, newDeadline, eventHasTime)
+                doSyncToCalendar(current.copy(deadline = newDeadline, eventHasTime = eventHasTime))
+            }
         }
     }
 
     /**
      * 手動通知時刻を変更する。既存の予約を解除してから、新しい時刻があれば予約し直す。
      * null を渡すと手動通知を解除するだけになる。
+     * タスク ID 単位の Mutex で他のカレンダー操作と直列化する。
      */
     fun updateNotificationTime(task: Task, newNotificationTime: Long?) {
         viewModelScope.launch {
-            repository.updateNotificationTime(task.id, newNotificationTime)
-            notificationScheduler.cancel(task.id)
-            if (newNotificationTime != null) {
-                notificationScheduler.schedule(task.copy(notificationTime = newNotificationTime))
+            mutexFor(task.id).withLock {
+                val current = repository.getTaskById(task.id) ?: return@withLock
+                if (newNotificationTime != null && newNotificationTime == current.notificationTime) return@withLock
+                repository.updateNotificationTime(current.id, newNotificationTime)
+                notificationScheduler.cancel(current.id)
+                if (newNotificationTime != null) {
+                    notificationScheduler.schedule(current.copy(notificationTime = newNotificationTime))
+                }
             }
         }
     }
 
     /**
      * [TaskEditDialog] の確定結果を、変更があった項目だけ適用する。
+     * タイトル・予定時刻・通知時刻の複数変更があっても、単一 coroutine でまとめて処理し、
+     * 全変更を合成した最新 Task でカレンダー同期を 1 回だけ行う。
      */
     fun applyTaskEdit(task: Task, result: TaskEditResult) {
-        val trimmedTitle = result.title.trim()
-        if (trimmedTitle.isNotEmpty() && trimmedTitle != task.title) {
-            renameTask(task, trimmedTitle)
-        }
-        if (result.eventHasTime != task.eventHasTime || result.deadline != task.deadline) {
-            updateEventTime(task, result.eventHasTime, result.deadline)
-        }
-        if (result.notificationTime != task.notificationTime) {
-            updateNotificationTime(task, result.notificationTime)
+        viewModelScope.launch {
+            mutexFor(task.id).withLock {
+                val current = repository.getTaskById(task.id) ?: return@withLock
+
+                val trimmedTitle = result.title.trim()
+                val titleChanged = trimmedTitle.isNotEmpty() && trimmedTitle != current.title
+                val eventTimeChanged = result.eventHasTime != current.eventHasTime || result.deadline != current.deadline
+                val notificationTimeChanged = result.notificationTime != current.notificationTime
+
+                // 変更が無ければ何もしない
+                if (!titleChanged && !eventTimeChanged && !notificationTimeChanged) return@withLock
+
+                // 必要な列だけを部分更新する
+                if (titleChanged) repository.updateTitle(current.id, trimmedTitle)
+                if (eventTimeChanged) repository.updateEventTime(current.id, result.deadline, result.eventHasTime)
+                if (notificationTimeChanged) repository.updateNotificationTime(current.id, result.notificationTime)
+
+                // DB 更新後の最新 Task を合成。これを 1 回のカレンダー同期に使うことで、
+                // タイトルと予定時刻のどちらかが巻き戻る競合を防ぐ。
+                val merged = current.copy(
+                    title = if (titleChanged) trimmedTitle else current.title,
+                    deadline = if (eventTimeChanged) result.deadline else current.deadline,
+                    eventHasTime = if (eventTimeChanged) result.eventHasTime else current.eventHasTime,
+                    notificationTime = if (notificationTimeChanged) result.notificationTime else current.notificationTime
+                )
+
+                // カレンダー側に影響する変更（タイトル・予定時刻）があるときだけ同期する。
+                // 通知時刻だけの変更でCalendar APIを呼ぶと無駄なリクエストになる。
+                if (titleChanged || eventTimeChanged) {
+                    doSyncToCalendar(merged)
+                }
+
+                // 通知時刻が変わったら、既存予約を解除して新しい時刻で予約し直す
+                if (notificationTimeChanged) {
+                    notificationScheduler.cancel(current.id)
+                    if (result.notificationTime != null) {
+                        notificationScheduler.schedule(merged)
+                    }
+                }
+            }
         }
     }
 }
