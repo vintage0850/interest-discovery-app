@@ -63,7 +63,10 @@ interface GoogleCalendarApi {
 }
 
 /**
- * 予定の作成・更新に送る本文。終日予定なので [start] / [end] は `date` のみを持つ。
+ * 予定の作成・更新に送る本文。
+ *
+ * [start] / [end] は終日予定なら `date`、時刻指定予定なら `dateTime` を持つ
+ * [CalendarEventDateTime] を使う（読み取り側と同じ型）。
  *
  * @param summary 予定のタイトル
  * @param description 予定の説明
@@ -72,18 +75,8 @@ interface GoogleCalendarApi {
 data class CalendarEventRequest(
     val summary: String,
     val description: String,
-    val start: CalendarEventDate,
-    val end: CalendarEventDate
-)
-
-/**
- * 終日予定の日付。`YYYY-MM-DD` 形式の文字列を入れる（`dateTime` ではない）。
- *
- * end 側は **排他的** なので、締切当日だけの予定にしたい場合は翌日を入れること。
- */
-@Serializable
-data class CalendarEventDate(
-    val date: String
+    val start: CalendarEventDateTime,
+    val end: CalendarEventDateTime
 )
 
 /**

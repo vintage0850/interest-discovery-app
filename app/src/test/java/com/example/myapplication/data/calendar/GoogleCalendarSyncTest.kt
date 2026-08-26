@@ -226,13 +226,75 @@ class GoogleCalendarSyncTest {
         )
     }
 
-    private fun createTask(): Task = Task(
+    @Test
+    fun `サブタスクがあれば説明欄に列挙される`() = runBlocking {
+        val authManager = TestAuthManager().apply { queuedTokens.add("tokenA") }
+        val api = FakeCalendarApi { _ -> Response.success(CalendarEventResponse(id = "event1")) }
+        val sync = GoogleCalendarSync(authManager, api, NoOpCalendarLogger)
+        val subTasks = listOf(
+            com.example.myapplication.data.SubTask(id = 1, taskId = 1, title = "下書き", sortOrder = 0),
+            com.example.myapplication.data.SubTask(id = 2, taskId = 1, title = "清書", sortOrder = 1)
+        )
+
+        sync.insertEvent(createTask(), "仕事", subTasks)
+
+        val request = api.capturedEvents.single()
+        assertTrue(request.description.endsWith("サブタスク:\n・下書き\n・清書"))
+    }
+
+    @Test
+    fun `サブタスクが無ければ説明欄にサブタスクの見出しを出さない`() = runBlocking {
+        val authManager = TestAuthManager().apply { queuedTokens.add("tokenA") }
+        val api = FakeCalendarApi { _ -> Response.success(CalendarEventResponse(id = "event1")) }
+        val sync = GoogleCalendarSync(authManager, api, NoOpCalendarLogger)
+
+        sync.insertEvent(createTask(), "仕事")
+
+        val request = api.capturedEvents.single()
+        assertFalse(request.description.contains("サブタスク"))
+    }
+
+    @Test
+    fun `eventHasTimeがfalseなら終日予定のdateを使う`() = runBlocking {
+        val authManager = TestAuthManager().apply { queuedTokens.add("tokenA") }
+        val api = FakeCalendarApi { _ -> Response.success(CalendarEventResponse(id = "event1")) }
+        val sync = GoogleCalendarSync(authManager, api, NoOpCalendarLogger)
+
+        sync.insertEvent(createTask(deadline = 1_700_000_000_000L, eventHasTime = false), "仕事")
+
+        val request = api.capturedEvents.single()
+        assertEquals(null, request.start.dateTime)
+        assertEquals(null, request.end.dateTime)
+        assertTrue(request.start.date != null)
+    }
+
+    @Test
+    fun `eventHasTimeがtrueなら時刻付きのdateTimeを使い1時間後を終了時刻にする`() = runBlocking {
+        val authManager = TestAuthManager().apply { queuedTokens.add("tokenA") }
+        val api = FakeCalendarApi { _ -> Response.success(CalendarEventResponse(id = "event1")) }
+        val sync = GoogleCalendarSync(authManager, api, NoOpCalendarLogger)
+
+        sync.insertEvent(createTask(deadline = 1_700_000_000_000L, eventHasTime = true), "仕事")
+
+        val request = api.capturedEvents.single()
+        assertEquals(null, request.start.date)
+        val start = java.time.OffsetDateTime.parse(request.start.dateTime)
+        val end = java.time.OffsetDateTime.parse(request.end.dateTime)
+        assertEquals(java.time.Instant.ofEpochMilli(1_700_000_000_000L), start.toInstant())
+        assertEquals(start.toInstant().plusSeconds(3600), end.toInstant())
+    }
+
+    private fun createTask(
+        deadline: Long = 1_700_000_000_000L,
+        eventHasTime: Boolean = false
+    ): Task = Task(
         title = "テストタスク",
-        deadline = 1_700_000_000_000L,
+        deadline = deadline,
         importance = 2,
         urgency = 2,
         categoryId = null,
-        isCompleted = false
+        isCompleted = false,
+        eventHasTime = eventHasTime
     )
 
     /**
@@ -301,6 +363,7 @@ class GoogleCalendarSyncTest {
     ) : GoogleCalendarApi {
         val authorizations = mutableListOf<String>()
         var apiCallCount = 0
+        val capturedEvents = mutableListOf<CalendarEventRequest>()
         var listEventsHandler: ((authorization: String, timeMin: String, timeMax: String) -> Response<CalendarEventListResponse>)? =
             null
 
@@ -309,6 +372,7 @@ class GoogleCalendarSyncTest {
             event: CalendarEventRequest
         ): Response<CalendarEventResponse> {
             authorizations.add(authorization)
+            capturedEvents.add(event)
             return handler(authorization)
         }
 
@@ -317,7 +381,9 @@ class GoogleCalendarSyncTest {
             eventId: String,
             event: CalendarEventRequest
         ): Response<CalendarEventResponse> {
-            throw UnsupportedOperationException("このテストでは patchEvent は使われない")
+            authorizations.add(authorization)
+            capturedEvents.add(event)
+            return handler(authorization)
         }
 
         override suspend fun deleteEvent(

@@ -275,9 +275,12 @@ class TaskViewModelCalendarTest {
         val updateCallCount = AtomicInteger(0)
         var lastUpdatedTask: Task? = null
 
-        override suspend fun insertEvent(task: Task, categoryName: String): CalendarResult<String> {
+        override suspend fun insertEvent(
+            task: Task,
+            categoryName: String,
+            subTasks: List<SubTask>
+        ): CalendarResult<String> {
             insertCallCount.incrementAndGet()
-            // 処理に時間がかかっている間に 2 回目の操作が入ってくる可能性がある
             delay(50)
             return CalendarResult.Success("event123")
         }
@@ -285,7 +288,8 @@ class TaskViewModelCalendarTest {
         override suspend fun updateEvent(
             eventId: String,
             task: Task,
-            categoryName: String
+            categoryName: String,
+            subTasks: List<SubTask>
         ): CalendarResult<Unit> {
             updateCallCount.incrementAndGet()
             lastUpdatedTask = task
