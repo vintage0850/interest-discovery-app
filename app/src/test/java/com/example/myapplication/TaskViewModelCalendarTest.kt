@@ -15,6 +15,7 @@ import com.example.myapplication.data.calendar.CalendarResult
 import com.example.myapplication.data.calendar.GoogleAuthManager
 import com.example.myapplication.data.calendar.GoogleCalendarSync
 import com.example.myapplication.data.calendar.SignOutResult
+import com.example.myapplication.work.TaskNotificationScheduler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -233,9 +234,142 @@ class TaskViewModelCalendarTest {
         assertEquals(listOf("下書き"), calendar.lastInsertedSubTasks?.map { it.title })
     }
 
+    @Test
+    fun `notificationTime指定でタスク追加すると通知が予約される`() = runTest {
+        val repo = FakeRepository()
+        val calendar = FakeCalendarSync()
+        val scheduler = FakeTaskNotificationScheduler()
+        val viewModel = createViewModel(repo, calendar, scheduler)
+
+        viewModel.addTask(
+            title = "新規タスク",
+            deadline = 1_700_000_000_000L,
+            importance = 2,
+            urgency = 2,
+            categoryId = null,
+            notificationTime = 1_700_000_500_000L
+        )
+        advanceUntilIdle()
+
+        assertEquals(1, scheduler.scheduled.size)
+        assertEquals(1_700_000_500_000L, scheduler.scheduled.single().notificationTime)
+    }
+
+    @Test
+    fun `notificationTime未指定でタスク追加しても通知は予約しない`() = runTest {
+        val repo = FakeRepository()
+        val calendar = FakeCalendarSync()
+        val scheduler = FakeTaskNotificationScheduler()
+        val viewModel = createViewModel(repo, calendar, scheduler)
+
+        viewModel.addTask(
+            title = "新規タスク",
+            deadline = 1_700_000_000_000L,
+            importance = 2,
+            urgency = 2,
+            categoryId = null
+        )
+        advanceUntilIdle()
+
+        assertTrue(scheduler.scheduled.isEmpty())
+    }
+
+    @Test
+    fun `タスク削除で通知予約を解除する`() = runTest {
+        val task = createTask(id = 1)
+        val repo = FakeRepository().apply { save(task) }
+        val calendar = FakeCalendarSync()
+        val scheduler = FakeTaskNotificationScheduler()
+        val viewModel = createViewModel(repo, calendar, scheduler)
+
+        viewModel.deleteTask(task)
+        advanceUntilIdle()
+
+        assertEquals(listOf(1), scheduler.cancelled)
+    }
+
+    @Test
+    fun `undoDeleteで通知時刻があれば再予約する`() = runTest {
+        val task = createTask(id = 1).copy(notificationTime = 1_700_000_500_000L)
+        val repo = FakeRepository().apply { save(task) }
+        val calendar = FakeCalendarSync()
+        val scheduler = FakeTaskNotificationScheduler()
+        val viewModel = createViewModel(repo, calendar, scheduler)
+
+        viewModel.deleteTask(task)
+        advanceUntilIdle()
+        scheduler.scheduled.clear()
+
+        viewModel.undoDelete()
+        advanceUntilIdle()
+
+        assertEquals(1, scheduler.scheduled.size)
+    }
+
+    @Test
+    fun `updateNotificationTimeは既存予約を解除してから新しい時刻で予約し直す`() = runTest {
+        val task = createTask(id = 1)
+        val repo = FakeRepository().apply { save(task) }
+        val calendar = FakeCalendarSync()
+        val scheduler = FakeTaskNotificationScheduler()
+        val viewModel = createViewModel(repo, calendar, scheduler)
+
+        viewModel.updateNotificationTime(task, 1_700_000_900_000L)
+        advanceUntilIdle()
+
+        assertEquals(listOf(1), scheduler.cancelled)
+        assertEquals(1_700_000_900_000L, scheduler.scheduled.single().notificationTime)
+        assertEquals(1_700_000_900_000L, repo.getTaskById(1)?.notificationTime)
+    }
+
+    @Test
+    fun `updateNotificationTimeにnullを渡すと予約解除のみ行う`() = runTest {
+        val task = createTask(id = 1)
+        val repo = FakeRepository().apply { save(task) }
+        val calendar = FakeCalendarSync()
+        val scheduler = FakeTaskNotificationScheduler()
+        val viewModel = createViewModel(repo, calendar, scheduler)
+
+        viewModel.updateNotificationTime(task, null)
+        advanceUntilIdle()
+
+        assertEquals(listOf(1), scheduler.cancelled)
+        assertTrue(scheduler.scheduled.isEmpty())
+        assertNull(repo.getTaskById(1)?.notificationTime)
+    }
+
+    @Test
+    fun `updateEventTimeは連携済みタスクのカレンダー予定も更新する`() = runTest {
+        val task = createTask(id = 1, calendarEventId = "event_old")
+        val repo = FakeRepository().apply { save(task) }
+        val calendar = FakeCalendarSync()
+        val viewModel = createViewModel(repo, calendar)
+
+        viewModel.updateEventTime(task, eventHasTime = true, newDeadline = 1_700_050_000_000L)
+        advanceUntilIdle()
+
+        assertEquals(1, calendar.updateCallCount.get())
+        assertEquals(1_700_050_000_000L, repo.getTaskById(1)?.deadline)
+        assertEquals(true, repo.getTaskById(1)?.eventHasTime)
+    }
+
+    @Test
+    fun `updateEventTimeは未連携タスクならカレンダーAPIを呼ばない`() = runTest {
+        val task = createTask(id = 1, calendarEventId = null)
+        val repo = FakeRepository().apply { save(task) }
+        val calendar = FakeCalendarSync()
+        val viewModel = createViewModel(repo, calendar)
+
+        viewModel.updateEventTime(task, eventHasTime = false, newDeadline = 1_700_050_000_000L)
+        advanceUntilIdle()
+
+        assertEquals(0, calendar.updateCallCount.get())
+    }
+
     private fun createViewModel(
         repository: FakeRepository,
-        calendarSync: FakeCalendarSync
+        calendarSync: FakeCalendarSync,
+        notificationScheduler: TaskNotificationScheduler = FakeTaskNotificationScheduler()
     ): TaskViewModel {
         return TaskViewModel(
             application = FakeApplication(),
@@ -243,7 +377,8 @@ class TaskViewModelCalendarTest {
             authManager = FakeAuthManager(),
             calendarSync = calendarSync,
             // WorkManager は単体テストでは初期化されていないため、実際の登録は行わない
-            freeTimeCheckScheduler = FreeTimeCheckScheduler {}
+            freeTimeCheckScheduler = FreeTimeCheckScheduler {},
+            notificationScheduler = notificationScheduler
         )
     }
 
@@ -272,6 +407,8 @@ class TaskViewModelCalendarTest {
         val fullTaskUpdates = mutableListOf<Task>()
         val titleUpdates = mutableListOf<Pair<Int, String>>()
         val subTasksByTaskId = mutableMapOf<Int, List<SubTask>>()
+        val eventTimeUpdates = mutableListOf<Triple<Int, Long, Boolean>>()
+        val notificationTimeUpdates = mutableListOf<Pair<Int, Long?>>()
 
         val storedTasks: List<Task> get() = tasks.values.toList()
 
@@ -297,6 +434,16 @@ class TaskViewModelCalendarTest {
         override suspend fun updateTitle(taskId: Int, title: String) {
             titleUpdates.add(taskId to title)
             tasks[taskId]?.let { tasks[taskId] = it.copy(title = title) }
+        }
+
+        override suspend fun updateEventTime(taskId: Int, deadline: Long, eventHasTime: Boolean) {
+            eventTimeUpdates.add(Triple(taskId, deadline, eventHasTime))
+            tasks[taskId]?.let { tasks[taskId] = it.copy(deadline = deadline, eventHasTime = eventHasTime) }
+        }
+
+        override suspend fun updateNotificationTime(taskId: Int, notificationTime: Long?) {
+            notificationTimeUpdates.add(taskId to notificationTime)
+            tasks[taskId]?.let { tasks[taskId] = it.copy(notificationTime = notificationTime) }
         }
 
         override suspend fun insert(task: Task): Int {
@@ -341,6 +488,16 @@ class TaskViewModelCalendarTest {
         override suspend fun deleteEvent(eventId: String): CalendarResult<Unit> {
             return CalendarResult.Success(Unit)
         }
+    }
+
+    /**
+     * テスト用の手動通知スケジューラー。
+     */
+    private class FakeTaskNotificationScheduler : TaskNotificationScheduler {
+        val scheduled = mutableListOf<Task>()
+        val cancelled = mutableListOf<Int>()
+        override fun schedule(task: Task) { scheduled.add(task) }
+        override fun cancel(taskId: Int) { cancelled.add(taskId) }
     }
 
     private class FakeAuthManager : GoogleAuthManager(FakeApplication()) {

@@ -12,6 +12,8 @@ import com.example.myapplication.data.calendar.GoogleAuthManager
 import com.example.myapplication.data.calendar.GoogleCalendarSync
 import com.example.myapplication.data.calendar.SignOutResult
 import com.example.myapplication.work.FreeTimeCheckWorker
+import com.example.myapplication.work.AndroidTaskNotificationScheduler
+import com.example.myapplication.work.TaskNotificationScheduler
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -53,7 +55,9 @@ class TaskViewModel(
     private val authManager: GoogleAuthManager = GoogleAuthManager.get(application),
     private val calendarSync: GoogleCalendarSync = GoogleCalendarSync(authManager),
     private val freeTimeCheckScheduler: FreeTimeCheckScheduler =
-        WorkManagerFreeTimeCheckScheduler(application)
+        WorkManagerFreeTimeCheckScheduler(application),
+    private val notificationScheduler: TaskNotificationScheduler =
+        AndroidTaskNotificationScheduler(application)
 ) : AndroidViewModel(application) {
 
     val allTasks: StateFlow<List<TaskWithSubTasks>> = repository.allTasks.stateIn(
@@ -197,7 +201,9 @@ class TaskViewModel(
         urgency: Int,
         categoryId: Int?,
         subTaskTitles: List<String> = emptyList(),
-        addToCalendar: Boolean = false
+        addToCalendar: Boolean = false,
+        eventHasTime: Boolean = false,
+        notificationTime: Long? = null
     ) {
         val trimmed = title.trim()
         if (trimmed.isEmpty()) return
@@ -208,9 +214,12 @@ class TaskViewModel(
                 deadline = deadline,
                 importance = importance,
                 urgency = urgency,
-                categoryId = categoryId
+                categoryId = categoryId,
+                eventHasTime = eventHasTime,
+                notificationTime = notificationTime
             )
             val id = repository.insert(task)
+            val saved = task.copy(id = id)
 
             val subTasks = subTaskTitles
                 .map { it.trim() }
@@ -221,13 +230,16 @@ class TaskViewModel(
             if (subTasks.isNotEmpty()) repository.insertSubTasks(subTasks)
 
             if (addToCalendar) {
-                val saved = task.copy(id = id)
                 when (val result = calendarSync.insertEvent(saved, categoryNameOf(saved), subTasks)) {
                     is CalendarResult.Success ->
                         // 全列を上書きすると並行する別更新が失われる恐れがあるので、calendarEventId だけ更新
                         repository.updateCalendarEventId(saved.id, result.value)
                     else -> notifyCalendarFailure(result)
                 }
+            }
+
+            if (notificationTime != null) {
+                notificationScheduler.schedule(saved)
             }
         }
     }
@@ -310,6 +322,7 @@ class TaskViewModel(
             // 取り消しに備えて、削除前にサブタスクも読み出しておく
             val subTasks = repository.getSubTasksFor(task.id)
             repository.delete(task)
+            notificationScheduler.cancel(task.id)
 
             // カレンダー側を消せたかどうかは取り消し時の判断材料になるので必ず控える
             val eventDeleted = task.calendarEventId?.let { eventId ->
@@ -330,6 +343,7 @@ class TaskViewModel(
             val task = deleted.task
             repository.insert(task)
             if (deleted.subTasks.isNotEmpty()) repository.insertSubTasks(deleted.subTasks)
+            if (task.notificationTime != null) notificationScheduler.schedule(task)
 
             // 予定を消せていなかった場合はカレンダー側にまだ残っている。
             // 作り直すと二重になり、古い ID も上書きで失われて孤立するので、元の ID をそのまま戻す
@@ -372,6 +386,31 @@ class TaskViewModel(
                 }
             }
             else -> notifyCalendarFailure(result)
+        }
+    }
+
+    /**
+     * 予定の時刻指定を変更する。連携済み（calendarEventId != null）ならカレンダー側の
+     * 予定も合わせて更新する（[syncToCalendar] を再利用）。
+     */
+    fun updateEventTime(task: Task, eventHasTime: Boolean, newDeadline: Long) {
+        viewModelScope.launch {
+            repository.updateEventTime(task.id, newDeadline, eventHasTime)
+            syncToCalendar(task.copy(deadline = newDeadline, eventHasTime = eventHasTime))
+        }
+    }
+
+    /**
+     * 手動通知時刻を変更する。既存の予約を解除してから、新しい時刻があれば予約し直す。
+     * null を渡すと手動通知を解除するだけになる。
+     */
+    fun updateNotificationTime(task: Task, newNotificationTime: Long?) {
+        viewModelScope.launch {
+            repository.updateNotificationTime(task.id, newNotificationTime)
+            notificationScheduler.cancel(task.id)
+            if (newNotificationTime != null) {
+                notificationScheduler.schedule(task.copy(notificationTime = newNotificationTime))
+            }
         }
     }
 }
