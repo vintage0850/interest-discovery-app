@@ -430,3 +430,76 @@ Google アカウント（`vintage0850@gmail.com`）でのログインはユー�
 4. **`release.keystore.jks` と `local.properties` 内のパスワード類をリポジトリ外にバックアップする。** `SETUP.md`「リリース署名」参照。
 5. **Play Console でのアプリ登録、ストア掲載情報（スクリーンショット・説明文・アイコン等）、データセーフティフォームの入力、Play App Signing の有効化。** これらは Play への外部公開行為そのものであり、AGENTS.md の禁止事項（外部公開はユーザー事前承認が必須）に該当するため Claude/Kimi では行わない。
 6. **同意画面のスコープ `calendar.events` 登録**（案件1から持ち越し。本番公開には Google の審査が必要になる制限付きスコープのため、テスト運用のみで公開する場合は不要）。
+
+---
+
+## 案件4：iOS/Android両対応（KMP移行）Phase 1
+
+**状態:** `設計判断済み・実装完了` → **`Windows側の検証完了・Mac側作業待ち`**（2026-08-26）
+**担当:** 設計・実装（Kimi役）は前セッションで完了済み。Claudeが検証（Task 10 Step 1〜3）のみ実施。
+
+`master`ブランチ側で進行中の作業。詳細は`master`のTASK.mdを参照。この作業ツリー（`feature/subtask-calendar-notification`）は`:shared`配下を一切変更しないため、案件4とはファイルが競合しない。
+
+## 案件5：サブタスク表示改善・カレンダー手動登録・通知時間手動設定
+
+**状態:** `設計判断済み・ユーザー承認済み` → **`実装完了（全12タスク）・Codexレビュー待ち`**（2026-08-26）
+**担当:** Kimi（実装）。設計裁定はClaude（2026-08-24）。優先順位変更の経緯はClaude（2026-08-26）。
+
+### 経緯・優先順位の変更（2026-08-26 / Claude）
+
+`docs/superpowers/specs/2026-08-24-kmp-ios-migration-phase1-design.md`では「この機能はKMP移行（案件4）完了後、共通化されたコードベースの上で作り直す」として保留にしていた。
+しかし案件4のPhase 1はMac環境でのiOSシミュレータ確認が必須で止まっており、ユーザーから「Macが無いので、保留にしていたこちらの機能を先に進めよう」と明示指示があったため、優先順位を変更した。
+
+**この機能は`app/`（既存Android・Room版）を対象とし、`:shared`（KMP版）には触れない。** 設計ドキュメント・実装計画とも元々`app/`配下のファイルのみを対象にしており、KMP移行の有無に関係なく独立して実装できる。
+
+### 作業場所
+
+このworktree自体（`.worktrees/subtask-calendar-notification`、ブランチ`feature/subtask-calendar-notification`、`master`の`3d40a03`から作成）。
+
+### 対象ファイル（担当宣言：Kimi）
+
+`docs/superpowers/plans/2026-08-24-subtask-calendar-notification.md` のTask 1〜12に記載の全ファイル。担当解除までこのworktree以外（＝`master`本体や`:shared`）で同じファイルを編集しない。
+
+### 受入条件
+
+`docs/superpowers/specs/2026-08-24-subtask-calendar-notification-design.md`の「スコープ」「データモデルの変更」「コンポーネント構成」節、および実装計画の各Taskの受入条件・テスト方針に従う。全12タスク完了後、`./gradlew :app:testDebugUnitTest :app:assembleDebug`が成功すること。
+
+### 実行ログ
+
+**注記（2026-08-26 / Claude）:** Kimiは実行ログを誤って`app/TASK.md`という別ファイルに記録していた（Task 1〜4のみ記録、以降は未記録）。本セクションへ統合し、`app/TASK.md`は削除した。
+
+Kimi自身の記録（Task 1〜4、コミット時点で確認）:
+
+```
+2026-08-26 Task 1: Task.eventHasTime 追加 + DB v6 移行。:app:assembleDebug BUILD SUCCESSFUL。スキーマ 6.json 生成済み。connectedDebugAndroidTest は実機/エミュレータ未接続のため実行不可（adb devices で 0 台）。コミット 8cf2d36。
+2026-08-26 Task 2: TaskDao/TaskRepository 拡張。:app:testDebugUnitTest --tests "com.example.myapplication.TaskViewModelCalendarTest" BUILD SUCCESSFUL。コミット faf82e9。
+2026-08-26 Task 3: NotificationWindowPreferences 追加。:app:testDebugUnitTest --tests "com.example.myapplication.data.NotificationWindowPreferencesTest" BUILD SUCCESSFUL。コミット 68a0af4。
+2026-08-26 Task 4: GoogleCalendarSync 時刻指定・サブタスク対応。:app:testDebugUnitTest --tests "com.example.myapplication.data.calendar.GoogleCalendarSyncTest" BUILD SUCCESSFUL。コミット 026655a。
+```
+
+Task 5〜12（Kimi自身のログ記録は無いが、コミットと成果物から完了を確認）:
+
+```
+34e95d8 feat: pass subtasks through to calendar sync calls
+b9f136f feat: add AlarmManager-based task notification scheduler and boot rescheduling
+3a8e6d7 feat: wire manual notification scheduling and add event/notification time editing
+89d0227 feat: read notification window from NotificationWindowPreferences
+d44c76b feat: add reusable OptionalTimePicker composable
+ae73a2e feat: add event time and notification time inputs to AddTaskScreen
+28568c9 feat(app): Task 11 - wire TaskEditDialog into TaskListScreen and MainActivity
+b14e67d feat(app): Task 12 - add notification window settings screen and wire MainActivity
+```
+
+Claudeによる最終確認（2026-08-26、Kimiのバックグラウンドセッションが`killed`表示で終了したため再実行）:
+
+| コマンド | 結果 |
+| --- | --- |
+| `./gradlew :app:testDebugUnitTest` | BUILD SUCCESSFUL（新規テスト含む全47ユニットテスト、失敗0） |
+| `./gradlew :app:assembleDebug` | BUILD SUCCESSFUL |
+| `./gradlew :app:compileDebugAndroidTestKotlin` | BUILD SUCCESSFUL（`MigrationTest.kt`・`FreeTimeCheckWorkerTest.kt`の追記分含む） |
+
+`connectedDebugAndroidTest`（実機・エミュレータでのマイグレーション/Worker実機検証）は、今回のセッションでは実機・エミュレータが未接続のため未実施。次回実機/エミュレータ接続時に実施すること。
+
+### 次の担当と行動
+
+**次の担当: Codex（品質ゲート判定）。** `docs/quality-review/2026-08-26-subtask-calendar-notification.md`に判定を記入させる。1回目のCodex起動は環境固有の別スキル（マルチエージェント機能未設定の`code-review`スキル）呼び出しで行き詰まり未完了に終わったため、Claudeが2回目を調整中。
