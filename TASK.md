@@ -430,3 +430,158 @@ Google アカウント（`vintage0850@gmail.com`）でのログインはユー�
 4. **`release.keystore.jks` と `local.properties` 内のパスワード類をリポジトリ外にバックアップする。** `SETUP.md`「リリース署名」参照。
 5. **Play Console でのアプリ登録、ストア掲載情報（スクリーンショット・説明文・アイコン等）、データセーフティフォームの入力、Play App Signing の有効化。** これらは Play への外部公開行為そのものであり、AGENTS.md の禁止事項（外部公開はユーザー事前承認が必須）に該当するため Claude/Kimi では行わない。
 6. **同意画面のスコープ `calendar.events` 登録**（案件1から持ち越し。本番公開には Google の審査が必要になる制限付きスコープのため、テスト運用のみで公開する場合は不要）。
+
+---
+
+## 案件4：iOS/Android両対応（KMP移行）Phase 1
+
+**状態:** `設計判断済み・実装完了` → **`Windows側の検証完了・Mac側作業待ち`**（2026-08-26）
+**担当:** 設計・実装（Kimi役）は前セッションで完了済み。今回はClaudeが検証（Task 10 Step 1〜3）のみ実施。
+
+関連ドキュメント:
+- `docs/superpowers/specs/2026-08-24-kmp-ios-migration-phase1-design.md`（設計、ユーザー承認済み）
+- `docs/superpowers/plans/2026-08-24-kmp-shared-module-task-crud.md`（Task 1〜9、`:shared`のSQLDelightデータ層。全タスク`master`にコミット済み）
+- `docs/superpowers/plans/2026-08-24-kmp-compose-ui-port.md`（Task 1〜9、Compose MultiplatformのUI移植。全タスク`master`にコミット済み。Task 10は本セッションで実施）
+
+### 引き継ぎメモ（2026-08-26 / Claude）
+
+前セッションまでに、KMP Phase 1の実装（`:shared`モジュール新設、SQLDelightデータ層、Compose Multiplatform UI移植、`App()`ルートComposable、iOSセットアップ手順・Swiftブリッジ、レビュー指摘の修正2件）が全て`master`ブランチにコミット済みであることを`git log`で確認した。`git status`もクリーン（未コミット差分なし）。
+
+本セッションでは残っていた **Task 10「最終確認」のStep 1〜3**（Windows上で実行可能な検証）のみを実施した。
+
+**実行結果:**
+
+| コマンド | 結果 |
+| --- | --- |
+| `./gradlew :shared:assembleDebug` | BUILD SUCCESSFUL |
+| `./gradlew :shared:testDebugUnitTest` | BUILD SUCCESSFUL（`AppStateTest`含む全件） |
+| `./gradlew :app:testDebugUnitTest :app:assembleDebug` | BUILD SUCCESSFUL（`:shared`追加による`:app`への回帰なし） |
+
+`docs/superpowers/plans/2026-08-24-kmp-compose-ui-port.md`のTask 10 Step1〜3のチェックボックスを完了に更新済み。
+
+**次の担当と行動:**
+
+**次の担当: なし（Windows側でできる作業はここまで）**
+
+Task 10 Step 4に記載の以下4項目は、Mac環境でのユーザー自身の作業が必要（Kotlin/NativeのiOSターゲットはWindowsでコンパイル不可のため）:
+
+1. `./gradlew :shared:compileKotlinIosSimulatorArm64` — iOSターゲットのコンパイル確認
+2. `SETUP.md`「iOSアプリのセットアップ」節に従ったXcodeプロジェクトの作成・実行確認
+3. `IosDatabaseDriverFactory`の外部キー制約（`PRAGMA foreign_keys`）挙動の確認
+4. Android実機/エミュレータでの`App()`の目視確認（タスク追加・削除・カテゴリ管理が実際に動くこと。今回はコンパイル確認のみ）
+
+**注意（未整理の副産物、2026-08-26に解消）:** 旧`.worktrees/subtask-calendar-notification`（ブランチ`feature/subtask-calendar-notification`）は`master`の祖先コミットで固有差分が無かったため、ユーザー承認のうえ削除し、`master`最新から作り直した。詳細は案件5参照。
+
+---
+
+## 案件5：サブタスク表示改善・カレンダー手動登録・通知時間手動設定
+
+**状態:** `設計判断済み・ユーザー承認済み` → **`実装中（Kimi、worktree）`**（2026-08-26）
+**担当:** Kimi（実装）。設計裁定はClaude（前セッション、2026-08-24）。
+
+### 経緯・優先順位の変更（2026-08-26 / Claude）
+
+`docs/superpowers/specs/2026-08-24-kmp-ios-migration-phase1-design.md`では「この機能はKMP移行（案件4）完了後、共通化されたコードベースの上で作り直す」として保留にしていた。
+しかし案件4のPhase 1はMac環境でのiOSシミュレータ確認が必須で止まっており（`TASK.md`案件4参照）、ユーザーから「Macが無いので、保留にしていたこちらの機能を先に進めよう」と明示指示があったため、優先順位を変更した。
+
+**この機能は`app/`（既存Android・Room版）を対象とし、`:shared`（KMP版）には触れない。** 設計ドキュメント・実装計画とも元々`app/`配下のファイルのみを対象にしており、KMP移行の有無に関係なく独立して実装できる。両者が同じファイルを取り合うことはない（`:shared`配下のファイルは今回一切変更しない）。
+
+### 作業場所
+
+`app/src/main/java/com/example/myapplication/` 配下、worktree `.worktrees/subtask-calendar-notification`（ブランチ`feature/subtask-calendar-notification`、`master`の最新3d40a03から作成）。
+
+### 対象ファイル（担当宣言：Kimi）
+
+`docs/superpowers/plans/2026-08-24-subtask-calendar-notification.md` のTask 1〜12に記載の全ファイル（`Task.kt`、`AppDatabase.kt`、`TaskDao.kt`、`TaskRepository.kt`、`GoogleCalendarSync.kt`、`GoogleCalendarApi.kt`、`TaskViewModel.kt`、新規`TaskNotificationScheduler`/`TaskNotificationReceiver`/`BootReceiver`/`NotificationWindowPreferences`/`NotificationSettingsScreen`/`OptionalTimePicker`/`TaskEditDialog`、`AddTaskScreen.kt`、`TaskListScreen.kt`、`MainActivity.kt`、`AndroidManifest.xml`、対応する`app/src/test`・`app/src/androidTest`）。担当解除までこのworktree以外（＝`master`本体や`:shared`）で同じファイルを編集しない。
+
+### 受入条件
+
+`docs/superpowers/specs/2026-08-24-subtask-calendar-notification-design.md`の「スコープ」「データモデルの変更」「コンポーネント構成」節、および`docs/superpowers/plans/2026-08-24-subtask-calendar-notification.md`の各Taskの受入条件・テスト方針に従う。全12タスク完了後、`./gradlew :app:testDebugUnitTest :app:assembleDebug`が成功すること。
+
+### 実行ログ
+
+（Kimiが追記する）
+
+---
+
+## 案件6：広報・事前配布戦略（戦略部隊）
+
+**状態:** `戦略ドラフト完成・ユーザー承認待ち`（2026-08-26）
+**担当:** 戦略部隊（Grok=市場調査 → Gemini=統合・ドラフト作成）。最終承認はユーザー/Claude。
+
+### 経緯
+
+ユーザーからの依頼で、AI会社に新設した「戦略部隊」（`AGENTS.md`参照）の初回案件として実施。
+対象はMyApplicationのみ（Registar_Calender・TaskMVP_Newは対象外）。
+
+関連ノート:
+- `app-studio/Obsidian_Comapany/Inbox/2026-08-26_Grok調査_個人開発 Androidアプリ タスク管理カレンダー連携 Google Play.md`（Grok調査、2026年8月時点）
+- `app-studio/Obsidian_Comapany/戦略/MyApplication_広報事前配布戦略_ドラフト.md`（Geminiによる統合ドラフト。事前配布プラン・広報プラン・7週間タイムライン・リスク一覧を含む）
+
+### ユーザー対応が必要な項目（ドラフトの「次のアクション」より）
+
+- [ ] 正式なアプリ名・`applicationId`（パッケージ名）の決定
+- [ ] プライバシーポリシーのWeb公開（`PRIVACY_POLICY.md`を元にURL確定。案件2から持ち越し）
+- [ ] `release.keystore.jks`とパスワード類のバックアップ（案件2から持ち越し）
+- [ ] 実機での内部テスト起動確認（OAuth同意フロー・空き時間通知）
+- [ ] GCP「制限付きスコープ（`calendar.events`）」の検証審査申請（外部公開に関わる操作のため、申請前にユーザー承認が必要。AGENTS.md禁止事項に該当）
+- [ ] クローズドテストのテスター20〜30名の募集（SNS発信・Zenn/Qiita記事は着手可、Play Console上の登録自体はPlay公開行為のためユーザー実施）
+
+### ユーザー決定（2026-08-26）
+
+- **アプリ名: 「Realize」に決定。**
+- **`applicationId`（パッケージ名）は変更しない。** `com.example.myapplication`のまま維持。GCP OAuthクライアントの再設定は不要。
+
+### 対象ファイル（担当宣言：Kimi、2026-08-26〜）
+
+- `app/src/main/res/values/strings.xml`（`app_name`を"Realize"に変更）
+- `app/src/main/res/values-*/strings.xml`が存在する場合は同様に変更（多言語対応時のみ）
+
+上記以外のファイル（`AndroidManifest.xml`含む）は変更しない。`AndroidManifest.xml`は案件5（worktree）が担当宣言中のため、パッケージ名変更を行わない今回は関与不要。
+
+### Kimiへの引き継ぎタスク
+
+1. **アプリ名変更（着手可）**：`strings.xml`の`app_name`を"My Application"から"Realize"へ変更。`./gradlew :app:assembleDebug`で成功確認。
+2. **既存ユーザー移行時のUX警告ダイアログ**（保留・対象ファイル未確定）：Room v3→v4マイグレーション実行を検知し、カレンダー上の孤児予定について手動削除を案内するダイアログを表示する。
+
+### 次の担当と行動
+
+**次の担当: Kimi**（アプリ名変更）。完了後、テスト結果と引き継ぎメモを本ファイルに追記すること。
+
+---
+
+## 案件7：UI/機能フィードバック（ユーザーからの手直し依頼）
+
+**状態:** `受付・案件5完了待ち`（2026-08-26）
+**担当:** 秘書・ディレクションとしてClaudeが受付・整理。実装は案件5（worktree `.worktrees/subtask-calendar-notification`）が `CHANGES REQUIRED` の修正を終えて完了するまで着手しない。
+
+### 経緯
+
+ユーザーから `/company` 経由でUI/機能面のフィードバック一式を受け取った。整理すると以下7項目。
+
+**UI:**
+1. 設定ボタンが複数箇所に分散している → 一つに統合できないか（ユーザー案）
+2. カテゴリを削除した際、カテゴリ欄に空白が残る（表示崩れ・バグ）
+3. メインタスクをリネームする際のタップ判定が小さく、連打してもリネームに入りにくい
+4. UI上の猫の画像を、ユーザー指定の別の猫に差し替える
+
+**機能:**
+5. サブタスクもリネームできるようにする（現状はメインタスクのみ？要確認）
+6. 通知に猫の画像を表示できるようにする（画像付き通知）
+7. 優先順位・時間でタスクをソートできる機能
+
+### 保留にした理由（他案件との衝突回避）
+
+現在 `.worktrees/subtask-calendar-notification`（案件5）でKimiが `CHANGES REQUIRED` の修正作業中であり、`TaskListScreen.kt` / `AddTaskScreen.kt` / `MainActivity.kt` / `TaskEditDialog` など、本案件7が触る可能性が高い画面ファイルの大半を案件5が担当宣言中（未マージ）。
+同一ファイルを複数のAIが同時に編集しない、というAGENTS.mdの原則に従い、**案件5がCodexのGate 4 `PASS`を得て`master`にマージされるまで、案件7の実装には着手しない。**
+
+### ユーザー確認が必要な項目（着手前に必須）
+
+- **項目4（猫の画像差し替え）:** 「このコ」が具体的にどの画像・ファイルを指すか不明。差し替え先の画像ファイル（PNG/SVG等）をご提供いただくか、既存アセット内のどれかを指定してください。
+- **項目6（通知に猫の画像）:** 同上、使用する画像アセットの提供が必要。また `NotificationCompat` の `BigPictureStyle` 採用が前提になるため、通知の見た目（大きい画像 vs アイコンのみ）の希望があれば教えてください。
+- **項目1（設定ボタンの統合）:** 「一つにまとめる」の具体像（例: 既存の設定関連ボタンをすべて1つの設定画面/ドロワーに集約する、というAdvicetでよいか）をユーザーの意図通りか、Codexの仕様確定フェーズで確認する。
+
+### 次の担当と行動
+
+**次の担当: なし（待機中）。** 案件5がGate 4 `PASS`で完了し`master`へマージされ次第、Codexに項目1〜7の仕様確定（対象外・受入条件・担当ファイル）を依頼し、Gemini分割 → Kimi実装 の標準フローに進める。
+画像アセット（項目4・6）はそれまでにユーザーからご提供いただければ、そのまま作業に組み込める。
