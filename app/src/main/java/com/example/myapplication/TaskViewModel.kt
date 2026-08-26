@@ -6,6 +6,8 @@ import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import com.example.myapplication.data.*
+import com.example.myapplication.data.NotificationWindow
+import com.example.myapplication.data.NotificationWindowPreferences
 import com.example.myapplication.data.calendar.CalendarAuthState
 import com.example.myapplication.data.calendar.CalendarResult
 import com.example.myapplication.data.calendar.GoogleAuthManager
@@ -15,10 +17,12 @@ import com.example.myapplication.work.FreeTimeCheckWorker
 import com.example.myapplication.work.AndroidTaskNotificationScheduler
 import com.example.myapplication.work.TaskNotificationScheduler
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -57,7 +61,9 @@ class TaskViewModel(
     private val freeTimeCheckScheduler: FreeTimeCheckScheduler =
         WorkManagerFreeTimeCheckScheduler(application),
     private val notificationScheduler: TaskNotificationScheduler =
-        AndroidTaskNotificationScheduler(application)
+        AndroidTaskNotificationScheduler(application),
+    private val notificationWindowPreferences: NotificationWindowPreferences =
+        NotificationWindowPreferences.get(application)
 ) : AndroidViewModel(application) {
 
     val allTasks: StateFlow<List<TaskWithSubTasks>> = repository.allTasks.stateIn(
@@ -75,6 +81,15 @@ class TaskViewModel(
 
     /** カレンダー連携（OAuth）の状態。UI はこれを見て表示と操作を切り替える。 */
     val authState: StateFlow<CalendarAuthState> = authManager.authState
+
+    /** 通知有効時間帯。設定画面の初期値・保存に使う。 */
+    private val _notificationWindow = MutableStateFlow(notificationWindowPreferences.get())
+    val notificationWindow: StateFlow<NotificationWindow> = _notificationWindow.asStateFlow()
+
+    fun saveNotificationWindow(window: NotificationWindow) {
+        notificationWindowPreferences.set(window)
+        _notificationWindow.value = window
+    }
 
     /** 画面にスナックバーで出す一言（重複名の警告、カレンダー連携の失敗など）。 */
     private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 1)

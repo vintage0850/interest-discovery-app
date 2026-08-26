@@ -3,6 +3,9 @@ package com.example.myapplication
 import android.app.Application
 import android.content.Context
 import com.example.myapplication.data.Category
+import android.content.SharedPreferences
+import com.example.myapplication.data.NotificationWindow
+import com.example.myapplication.data.NotificationWindowPreferences
 import com.example.myapplication.data.NotifiedSlot
 import com.example.myapplication.data.SubTask
 import com.example.myapplication.data.Task
@@ -417,7 +420,9 @@ class TaskViewModelCalendarTest {
     private fun createViewModel(
         repository: FakeRepository,
         calendarSync: FakeCalendarSync,
-        notificationScheduler: TaskNotificationScheduler = FakeTaskNotificationScheduler()
+        notificationScheduler: TaskNotificationScheduler = FakeTaskNotificationScheduler(),
+        notificationWindowPreferences: NotificationWindowPreferences =
+            NotificationWindowPreferences(FakeSharedPreferences())
     ): TaskViewModel {
         return TaskViewModel(
             application = FakeApplication(),
@@ -426,8 +431,26 @@ class TaskViewModelCalendarTest {
             calendarSync = calendarSync,
             // WorkManager は単体テストでは初期化されていないため、実際の登録は行わない
             freeTimeCheckScheduler = FreeTimeCheckScheduler {},
-            notificationScheduler = notificationScheduler
+            notificationScheduler = notificationScheduler,
+            notificationWindowPreferences = notificationWindowPreferences
         )
+    }
+
+    @Test
+    fun `saveNotificationWindowで保存した値がnotificationWindowに反映される`() = runTest {
+        val repo = FakeRepository()
+        val calendar = FakeCalendarSync()
+        val prefs = NotificationWindowPreferences(FakeSharedPreferences())
+        val viewModel = createViewModel(repo, calendar, notificationWindowPreferences = prefs)
+
+        viewModel.saveNotificationWindow(
+            NotificationWindow(java.time.LocalTime.of(7, 0), java.time.LocalTime.of(21, 0))
+        )
+
+        assertEquals(java.time.LocalTime.of(7, 0), viewModel.notificationWindow.value.start)
+        assertEquals(java.time.LocalTime.of(21, 0), viewModel.notificationWindow.value.end)
+        // SharedPreferences 側にも保存されている
+        assertEquals(java.time.LocalTime.of(7, 0), prefs.get().start)
     }
 
     private fun createTask(
@@ -591,5 +614,46 @@ class TaskViewModelCalendarTest {
         override suspend fun isSlotNotified(startMillis: Long): Boolean = false
         override suspend fun insertNotifiedSlot(slot: NotifiedSlot) = Unit
         override suspend fun deleteNotifiedSlotsOlderThan(cutoffMillis: Long) = Unit
+    }
+
+    /**
+     * [com.example.myapplication.data.NotificationWindowPreferencesTest.FakeSharedPreferences] と同内容。
+     */
+    private class FakeSharedPreferences : SharedPreferences {
+        private val values = mutableMapOf<String, Any?>()
+
+        override fun getInt(key: String, defValue: Int): Int = values[key] as? Int ?: defValue
+        override fun contains(key: String): Boolean = values.containsKey(key)
+        override fun getAll(): MutableMap<String, *> = values
+        override fun getString(key: String, defValue: String?): String? = values[key] as? String ?: defValue
+        override fun getStringSet(key: String, defValues: MutableSet<String>?): MutableSet<String>? =
+            @Suppress("UNCHECKED_CAST") (values[key] as? MutableSet<String>) ?: defValues
+        override fun getLong(key: String, defValue: Long): Long = values[key] as? Long ?: defValue
+        override fun getFloat(key: String, defValue: Float): Float = values[key] as? Float ?: defValue
+        override fun getBoolean(key: String, defValue: Boolean): Boolean = values[key] as? Boolean ?: defValue
+        override fun registerOnSharedPreferenceChangeListener(
+            listener: SharedPreferences.OnSharedPreferenceChangeListener
+        ) = Unit
+        override fun unregisterOnSharedPreferenceChangeListener(
+            listener: SharedPreferences.OnSharedPreferenceChangeListener
+        ) = Unit
+        override fun edit(): SharedPreferences.Editor = FakeEditor()
+
+        private inner class FakeEditor : SharedPreferences.Editor {
+            private val pending = mutableMapOf<String, Any?>()
+            override fun putString(key: String, value: String?) = apply { pending[key] = value }
+            override fun putStringSet(key: String, values: MutableSet<String>?) = apply { pending[key] = values }
+            override fun putInt(key: String, value: Int) = apply { pending[key] = value }
+            override fun putLong(key: String, value: Long) = apply { pending[key] = value }
+            override fun putFloat(key: String, value: Float) = apply { pending[key] = value }
+            override fun putBoolean(key: String, value: Boolean) = apply { pending[key] = value }
+            override fun remove(key: String) = apply { pending[key] = null }
+            override fun clear() = apply { values.clear() }
+            override fun commit(): Boolean { apply(); return true }
+            override fun apply() {
+                pending.forEach { (key, value) -> if (value == null) values.remove(key) else values[key] = value }
+                pending.clear()
+            }
+        }
     }
 }

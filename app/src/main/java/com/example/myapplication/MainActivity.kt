@@ -26,6 +26,7 @@ import com.example.myapplication.ui.theme.MyApplicationTheme
 private const val ROUTE_LIST = "list"
 private const val ROUTE_ADD = "add"
 private const val ROUTE_CATEGORIES = "categories"
+private const val ROUTE_NOTIFICATION_SETTINGS = "notification_settings"
 
 class MainActivity : ComponentActivity() {
     // TaskViewModel はテスト用に repository/authManager/calendarSync を注入できるよう
@@ -92,7 +93,11 @@ class MainActivity : ComponentActivity() {
                                     launchSingleTop = true
                                 }
                             },
-                            onManageNotificationSettings = {},
+                            onManageNotificationSettings = {
+                                navController.navigate(ROUTE_NOTIFICATION_SETTINGS) {
+                                    launchSingleTop = true
+                                }
+                            },
                             onTaskToggle = viewModel::toggleCompleted,
                             onSubTaskToggle = viewModel::toggleSubTaskCompleted,
                             onTaskDelete = viewModel::deleteTask,
@@ -133,6 +138,14 @@ class MainActivity : ComponentActivity() {
                             onRename = viewModel::renameCategory,
                             onDelete = viewModel::deleteCategory,
                             countTasksIn = viewModel::countTasksInCategory,
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
+                    composable(ROUTE_NOTIFICATION_SETTINGS) {
+                        val window by viewModel.notificationWindow.collectAsStateWithLifecycle()
+                        NotificationSettingsScreen(
+                            initialWindow = window,
+                            onSave = viewModel::saveNotificationWindow,
                             onBack = { navController.popBackStack() }
                         )
                     }
