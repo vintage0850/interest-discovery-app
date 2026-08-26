@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.example.myapplication.data.AppDatabase
+import com.example.myapplication.data.NotificationWindowPreferences
 import com.example.myapplication.data.NotifiedSlot
 import com.example.myapplication.data.TaskRepository
 import com.example.myapplication.data.calendar.CalendarAuthState
@@ -13,7 +14,6 @@ import com.example.myapplication.data.calendar.GoogleCalendarSync
 import com.example.myapplication.data.calendar.findNextFreeSlot
 import java.time.Clock
 import java.time.Instant
-import java.time.LocalTime
 import java.time.temporal.ChronoUnit
 
 /**
@@ -37,17 +37,21 @@ class FreeTimeCheckWorker @JvmOverloads constructor(
      */
     private val authState: () -> CalendarAuthState = { authManager.authState.value },
     private val clock: Clock = Clock.systemDefaultZone(),
-    private val notifier: FreeTimeNotifier = AndroidFreeTimeNotifier(context)
+    private val notifier: FreeTimeNotifier = AndroidFreeTimeNotifier(context),
+    private val notificationWindow: () -> com.example.myapplication.data.NotificationWindow = {
+        NotificationWindowPreferences.get(context).get()
+    }
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
         // 未連携なら通知の材料（予定）が取れないので終了
         if (authState() !is CalendarAuthState.Authorized) return Result.success()
 
+        val window = notificationWindow()
         val zone = clock.zone
         val now = Instant.now(clock)
         val localTime = now.atZone(zone).toLocalTime()
-        if (localTime.isBefore(WINDOW_START) || !localTime.isBefore(WINDOW_END)) {
+        if (localTime.isBefore(window.start) || !localTime.isBefore(window.end)) {
             return Result.success()
         }
 
@@ -59,7 +63,7 @@ class FreeTimeCheckWorker @JvmOverloads constructor(
             else -> return Result.success()
         }
 
-        val windowEnd = now.atZone(zone).toLocalDate().atTime(WINDOW_END).atZone(zone).toInstant()
+        val windowEnd = now.atZone(zone).toLocalDate().atTime(window.end).atZone(zone).toInstant()
         val freeSlot = findNextFreeSlot(events, now, windowEnd) ?: return Result.success()
 
         val slotStartMillis = freeSlot.start.toEpochMilli()
@@ -79,8 +83,5 @@ class FreeTimeCheckWorker @JvmOverloads constructor(
 
     companion object {
         const val WORK_NAME = "free_time_check"
-
-        private val WINDOW_START: LocalTime = LocalTime.of(8, 0)
-        private val WINDOW_END: LocalTime = LocalTime.of(22, 0)
     }
 }
