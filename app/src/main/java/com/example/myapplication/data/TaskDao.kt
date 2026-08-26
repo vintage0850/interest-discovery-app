@@ -53,6 +53,27 @@ interface TaskDao {
     )
     suspend fun getTopEligibleTaskForNotification(): Task?
 
+    /**
+     * 予定の日時（deadline）と時刻指定の有無だけを更新する。
+     * カレンダーへの反映は呼び出し側（TaskViewModel）の責務。
+     */
+    @Query("UPDATE tasks SET deadline = :deadline, eventHasTime = :eventHasTime WHERE id = :taskId")
+    suspend fun updateEventTime(taskId: Int, deadline: Long, eventHasTime: Boolean)
+
+    /** 通知時刻だけを更新する。null にすると手動通知を解除する。 */
+    @Query("UPDATE tasks SET notificationTime = :notificationTime WHERE id = :taskId")
+    suspend fun updateNotificationTime(taskId: Int, notificationTime: Long?)
+
+    /**
+     * 端末再起動後、まだ発火していない手動通知の予約を復元するために使う。
+     * 未完了かつ、指定時刻がまだ先のタスクだけを返す。
+     */
+    @Query(
+        "SELECT * FROM tasks WHERE isCompleted = 0 AND notificationTime IS NOT NULL " +
+            "AND notificationTime > :now"
+    )
+    suspend fun getTasksWithFutureNotification(now: Long): List<Task>
+
     // ---- 通知済みスロット ----
 
     @Query("SELECT EXISTS(SELECT 1 FROM notified_slots WHERE startMillis = :startMillis)")

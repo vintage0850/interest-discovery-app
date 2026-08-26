@@ -333,6 +333,9 @@ class TaskViewModelCalendarTest {
         override suspend fun updateCalendarEventId(taskId: Int, calendarEventId: String?) = Unit
         override suspend fun updateTaskTitle(taskId: Int, title: String) = Unit
         override suspend fun updateTaskStatus(taskId: Int, status: TaskStatus) = Unit
+        override suspend fun updateEventTime(taskId: Int, deadline: Long, eventHasTime: Boolean) = Unit
+        override suspend fun updateNotificationTime(taskId: Int, notificationTime: Long?) = Unit
+        override suspend fun getTasksWithFutureNotification(now: Long): List<Task> = emptyList()
         override suspend fun getTopEligibleTaskForNotification(): Task? = null
         override suspend fun isSlotNotified(startMillis: Long): Boolean = false
         override suspend fun insertNotifiedSlot(slot: NotifiedSlot) = Unit
