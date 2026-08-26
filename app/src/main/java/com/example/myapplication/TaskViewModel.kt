@@ -222,7 +222,7 @@ class TaskViewModel(
 
             if (addToCalendar) {
                 val saved = task.copy(id = id)
-                when (val result = calendarSync.insertEvent(saved, categoryNameOf(saved))) {
+                when (val result = calendarSync.insertEvent(saved, categoryNameOf(saved), subTasks)) {
                     is CalendarResult.Success ->
                         // 全列を上書きすると並行する別更新が失われる恐れがあるので、calendarEventId だけ更新
                         repository.updateCalendarEventId(saved.id, result.value)
@@ -248,7 +248,8 @@ class TaskViewModel(
                 val current = repository.getTaskById(task.id) ?: return@withLock
                 if (enabled) {
                     if (current.calendarEventId != null) return@withLock
-                    when (val result = calendarSync.insertEvent(current, categoryNameOf(current))) {
+                    val subTasks = repository.getSubTasksFor(current.id)
+                    when (val result = calendarSync.insertEvent(current, categoryNameOf(current), subTasks)) {
                         is CalendarResult.Success -> {
                             // calendarEventId だけを更新。Task 全列を上書きすると他の変更が巻き戻る恐れがある。
                             repository.updateCalendarEventId(current.id, result.value)
@@ -335,7 +336,7 @@ class TaskViewModel(
             if (task.calendarEventId == null || !deleted.calendarEventDeleted) return@launch
 
             // 予定は確かに消えているので、連携を復活させるには作り直すしかない
-            when (val result = calendarSync.insertEvent(task, categoryNameOf(task))) {
+            when (val result = calendarSync.insertEvent(task, categoryNameOf(task), deleted.subTasks)) {
                 is CalendarResult.Success ->
                     // 作り直した予定の ID だけを更新。他の列は巻き戻さない。
                     repository.updateCalendarEventId(task.id, result.value)
@@ -355,10 +356,11 @@ class TaskViewModel(
     private suspend fun syncToCalendar(task: Task) {
         val eventId = task.calendarEventId ?: return
         val name = categoryNameOf(task)
-        when (val result = calendarSync.updateEvent(eventId, task, name)) {
+        val subTasks = repository.getSubTasksFor(task.id)
+        when (val result = calendarSync.updateEvent(eventId, task, name, subTasks)) {
             is CalendarResult.Success -> Unit
             is CalendarResult.NotFound -> {
-                when (val recreated = calendarSync.insertEvent(task, name)) {
+                when (val recreated = calendarSync.insertEvent(task, name, subTasks)) {
                     is CalendarResult.Success ->
                         // 予定を作り直したので、calendarEventId だけを新しい値に差し替える
                         repository.updateCalendarEventId(task.id, recreated.value)

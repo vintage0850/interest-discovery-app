@@ -197,6 +197,42 @@ class TaskViewModelCalendarTest {
         assertEquals(0, calendar.updateCallCount.get())
     }
 
+    @Test
+    fun `新規タスク追加でカレンダー登録するとサブタスクも渡す`() = runTest {
+        val repo = FakeRepository()
+        val calendar = FakeCalendarSync()
+        val viewModel = createViewModel(repository = repo, calendarSync = calendar)
+
+        viewModel.addTask(
+            title = "新規タスク",
+            deadline = 1_700_000_000_000L,
+            importance = 2,
+            urgency = 2,
+            categoryId = null,
+            subTaskTitles = listOf("下書き", "清書"),
+            addToCalendar = true
+        )
+        advanceUntilIdle()
+
+        assertEquals(listOf("下書き", "清書"), calendar.lastInsertedSubTasks?.map { it.title })
+    }
+
+    @Test
+    fun `既存タスクのカレンダー連携時に保存済みサブタスクを渡す`() = runTest {
+        val task = createTask(id = 1, calendarEventId = null)
+        val repo = FakeRepository().apply {
+            save(task)
+            subTasksByTaskId[1] = listOf(SubTask(id = 1, taskId = 1, title = "下書き", sortOrder = 0))
+        }
+        val calendar = FakeCalendarSync()
+        val viewModel = createViewModel(repository = repo, calendarSync = calendar)
+
+        viewModel.setCalendarLinked(task, true)
+        advanceUntilIdle()
+
+        assertEquals(listOf("下書き"), calendar.lastInsertedSubTasks?.map { it.title })
+    }
+
     private fun createViewModel(
         repository: FakeRepository,
         calendarSync: FakeCalendarSync
@@ -235,12 +271,16 @@ class TaskViewModelCalendarTest {
         val calendarEventIdUpdates = mutableListOf<Pair<Int, String?>>()
         val fullTaskUpdates = mutableListOf<Task>()
         val titleUpdates = mutableListOf<Pair<Int, String>>()
+        val subTasksByTaskId = mutableMapOf<Int, List<SubTask>>()
 
         val storedTasks: List<Task> get() = tasks.values.toList()
 
         fun save(task: Task) {
             tasks[task.id] = task
         }
+
+        override suspend fun getSubTasksFor(taskId: Int): List<SubTask> =
+            subTasksByTaskId[taskId] ?: emptyList()
 
         override suspend fun getTaskById(id: Int): Task? = tasks[id]
 
@@ -274,6 +314,7 @@ class TaskViewModelCalendarTest {
         val insertCallCount = AtomicInteger(0)
         val updateCallCount = AtomicInteger(0)
         var lastUpdatedTask: Task? = null
+        var lastInsertedSubTasks: List<SubTask>? = null
 
         override suspend fun insertEvent(
             task: Task,
@@ -281,6 +322,7 @@ class TaskViewModelCalendarTest {
             subTasks: List<SubTask>
         ): CalendarResult<String> {
             insertCallCount.incrementAndGet()
+            lastInsertedSubTasks = subTasks
             delay(50)
             return CalendarResult.Success("event123")
         }
