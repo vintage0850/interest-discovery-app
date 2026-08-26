@@ -115,7 +115,9 @@ class MainActivity : ComponentActivity() {
                                     urgency = input.urgency,
                                     categoryId = input.categoryId,
                                     subTaskTitles = input.subTaskTitles,
-                                    addToCalendar = input.addToCalendar
+                                    addToCalendar = input.addToCalendar,
+                                    eventHasTime = input.eventHasTime,
+                                    notificationTime = input.notificationTime
                                 )
                                 navController.popBackStack()
                             },

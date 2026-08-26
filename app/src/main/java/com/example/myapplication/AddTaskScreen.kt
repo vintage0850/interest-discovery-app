@@ -42,7 +42,9 @@ data class NewTaskInput(
     /** 所属カテゴリ。null は未分類。 */
     val categoryId: Int?,
     val subTaskTitles: List<String>,
-    val addToCalendar: Boolean
+    val addToCalendar: Boolean,
+    val eventHasTime: Boolean,
+    val notificationTime: Long?
 )
 
 /**
@@ -60,6 +62,18 @@ private fun toLocalEndOfDay(utcMillis: Long): Long {
             utc.get(Calendar.DAY_OF_MONTH),
             23, 59, 59
         )
+    }.timeInMillis
+}
+
+/**
+ * DatePicker が返す「UTC のその日の 0 時」から、指定した時（ローカル）を合成する。
+ * 通知時刻・予定時刻の両方で、選んだ締切日はそのまま使う。
+ */
+private fun toLocalDateTime(utcMillis: Long, hour: Int, minute: Int): Long {
+    val utc = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { timeInMillis = utcMillis }
+    return Calendar.getInstance().apply {
+        clear()
+        set(utc.get(Calendar.YEAR), utc.get(Calendar.MONTH), utc.get(Calendar.DAY_OF_MONTH), hour, minute, 0)
     }.timeInMillis
 }
 
@@ -112,6 +126,12 @@ fun AddTaskScreen(
     ) { mutableStateListOf<String>() }
 
     var addToCalendar by rememberSaveable { mutableStateOf(false) }
+    var eventHasTime by rememberSaveable { mutableStateOf(false) }
+    var eventHour by rememberSaveable { mutableIntStateOf(9) }
+    var eventMinute by rememberSaveable { mutableIntStateOf(0) }
+    var notificationEnabled by rememberSaveable { mutableStateOf(false) }
+    var notificationHour by rememberSaveable { mutableIntStateOf(9) }
+    var notificationMinute by rememberSaveable { mutableIntStateOf(0) }
     // 認可できなかった理由（拒否 / 通信エラーなど）。null なら問題なし。トグルも戻す
     var calendarAuthorizationError by rememberSaveable { mutableStateOf<String?>(null) }
 
@@ -143,15 +163,27 @@ fun AddTaskScreen(
             return
         }
         keyboardController?.hide()
+        val deadline = if (eventHasTime) {
+            toLocalDateTime(date, eventHour, eventMinute)
+        } else {
+            toLocalEndOfDay(date)
+        }
+        val notificationTime = if (notificationEnabled) {
+            toLocalDateTime(date, notificationHour, notificationMinute)
+        } else {
+            null
+        }
         onTaskAdded(
             NewTaskInput(
                 title = title.trim(),
-                deadline = toLocalEndOfDay(date),
+                deadline = deadline,
                 importance = importance.toInt(),
                 urgency = urgency.toInt(),
                 categoryId = selectedCategoryId.takeIf { it != NO_CATEGORY },
                 subTaskTitles = subTaskTitles.toList(),
-                addToCalendar = addToCalendar
+                addToCalendar = addToCalendar,
+                eventHasTime = eventHasTime,
+                notificationTime = notificationTime
             )
         )
     }
@@ -318,6 +350,30 @@ fun AddTaskScreen(
                     }
                 )
             }
+
+            HorizontalDivider()
+
+            OptionalTimePicker(
+                label = "予定の時刻を指定する",
+                description = "指定しない場合は締切日の終日予定になります",
+                enabled = eventHasTime,
+                onEnabledChange = { eventHasTime = it },
+                hour = eventHour,
+                minute = eventMinute,
+                onTimeChange = { h, m -> eventHour = h; eventMinute = m }
+            )
+
+            HorizontalDivider()
+
+            OptionalTimePicker(
+                label = "通知時刻を指定する",
+                description = "指定した時刻に必ず通知します（締切日と同じ日）",
+                enabled = notificationEnabled,
+                onEnabledChange = { notificationEnabled = it },
+                hour = notificationHour,
+                minute = notificationMinute,
+                onTimeChange = { h, m -> notificationHour = h; notificationMinute = m }
+            )
 
             Spacer(modifier = Modifier.height(8.dp))
 
