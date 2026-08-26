@@ -476,8 +476,8 @@ Task 10 Step 4に記載の以下4項目は、Mac環境でのユーザー自身�
 
 ## 案件5：サブタスク表示改善・カレンダー手動登録・通知時間手動設定
 
-**状態:** `設計判断済み・ユーザー承認済み` → **`実装中（Kimi、worktree）`**（2026-08-26）
-**担当:** Kimi（実装）。設計裁定はClaude（前セッション、2026-08-24）。
+**状態:** `設計判断済み・ユーザー承認済み` → `実装完了（全12タスク）・Codexレビュー` → `修正中（CHANGES REQUIRED、計3ラウンド）` → **`完了（Gate 4 PASS）`**（2026-08-26）
+**担当:** Kimi（実装）。設計裁定はClaude（2026-08-24）。優先順位変更の経緯はClaude（2026-08-26）。
 
 ### 経緯・優先順位の変更（2026-08-26 / Claude）
 
@@ -488,7 +488,7 @@ Task 10 Step 4に記載の以下4項目は、Mac環境でのユーザー自身�
 
 ### 作業場所
 
-`app/src/main/java/com/example/myapplication/` 配下、worktree `.worktrees/subtask-calendar-notification`（ブランチ`feature/subtask-calendar-notification`、`master`の最新3d40a03から作成）。
+`app/src/main/java/com/example/myapplication/` 配下、worktree `.worktrees/subtask-calendar-notification`（ブランチ`feature/subtask-calendar-notification`、`master`の最新3d40a03から作成）。マージ済み（コミット8472f36まで）。
 
 ### 対象ファイル（担当宣言：Kimi）
 
@@ -500,7 +500,141 @@ Task 10 Step 4に記載の以下4項目は、Mac環境でのユーザー自身�
 
 ### 実行ログ
 
-（Kimiが追記する）
+**注記（2026-08-26 / Claude）:** Kimiは実行ログを誤って`app/TASK.md`という別ファイルに記録していた（Task 1〜4のみ記録、以降は未記録）。本セクションへ統合し、`app/TASK.md`は削除した。
+
+Kimi自身の記録（Task 1〜4、コミット時点で確認）:
+
+```
+2026-08-26 Task 1: Task.eventHasTime 追加 + DB v6 移行。:app:assembleDebug BUILD SUCCESSFUL。スキーマ 6.json 生成済み。connectedDebugAndroidTest は実機/エミュレータ未接続のため実行不可（adb devices で 0 台）。コミット 8cf2d36。
+2026-08-26 Task 2: TaskDao/TaskRepository 拡張。:app:testDebugUnitTest --tests "com.example.myapplication.TaskViewModelCalendarTest" BUILD SUCCESSFUL。コミット faf82e9。
+2026-08-26 Task 3: NotificationWindowPreferences 追加。:app:testDebugUnitTest --tests "com.example.myapplication.data.NotificationWindowPreferencesTest" BUILD SUCCESSFUL。コミット 68a0af4。
+2026-08-26 Task 4: GoogleCalendarSync 時刻指定・サブタスク対応。:app:testDebugUnitTest --tests "com.example.myapplication.data.calendar.GoogleCalendarSyncTest" BUILD SUCCESSFUL。コミット 026655a。
+```
+
+Task 5〜12（Kimi自身のログ記録は無いが、コミットと成果物から完了を確認）:
+
+```
+34e95d8 feat: pass subtasks through to calendar sync calls
+b9f136f feat: add AlarmManager-based task notification scheduler and boot rescheduling
+3a8e6d7 feat: wire manual notification scheduling and add event/notification time editing
+89d0227 feat: read notification window from NotificationWindowPreferences
+d44c76b feat: add reusable OptionalTimePicker composable
+ae73a2e feat: add event time and notification time inputs to AddTaskScreen
+28568c9 feat(app): Task 11 - wire TaskEditDialog into TaskListScreen and MainActivity
+b14e67d feat(app): Task 12 - add notification window settings screen and wire MainActivity
+```
+
+**Task 5〜12 の TDD Red/Green 証跡（2026-08-26 / Kimi）:**
+
+案件5の Codex 品質レビューで「テスト先行の証跡が無い」と指摘されたため、
+修正にあたって新たに Red/Green を取ったテストは以下の通り。
+
+- `TaskViewModelCalendarTest.タイトルと予定時刻を同時に変更してもupdateEventは1回だけ両方の新値で呼ばれる`
+  - **RED**: `applyTaskEdit` が `renameTask` / `updateEventTime` を別 coroutine で起動していたため、
+    `FakeCalendarSync.updateEvent` に遅延を入れると `updateEvent` が 2 回呼ばれ、
+    後から完了した方の呼び出しが古いタイトル（または古い時刻）で上書きした。
+    期待値 1 に対し実際 2 回で失敗。
+  - **GREEN**: `applyTaskEdit` を単一 coroutine に統合し、Mutex 取得後に最新 Task を再取得、
+    全変更を合成した `merged` Task で `doSyncToCalendar` を 1 回だけ呼ぶように修正したところ、
+    `updateEvent` が 1 回だけ、新タイトル・新時刻の両方を含む Task で呼ばれるようになった。
+
+- `AndroidTaskNotificationSchedulerTest`
+  - `exact許可時はsetExactAndAllowWhileIdleを使う`
+  - `exact未許可時はsetAndAllowWhileIdleにフォールバックする`
+  - `notificationTimeがnullなら何も予約しない`
+  - `cancelはtaskId別のPendingIntentを使う`
+  - **RED**: `AndroidTaskNotificationScheduler` が `AlarmManager` と `PendingIntent` を直接触っていたため単体テスト不可。`AlarmOperations` インターフェースを注入可能な境界として抽出するリファクタリング前はテストが書けなかった。
+  - **GREEN**: `AlarmOperations`・PendingIntent ファクトリ・exact 可否判定を注入する構成にした上で、上記 4 ケースを TDD で追加。exact/fallback/cancel/識別を網羅。
+
+- `TaskNotificationReceiverTest`
+  - `未完了タスクがあれば通知を発行する`
+  - `完了済みタスクでは通知を発行しない`
+  - `削除済みタスクでは通知を発行しない`
+  - **GREEN**: `TaskNotificationReceiver.handleReceive` を注入可能な純粋関数として抽出し、未完了/完了/削除の 3 分岐を網羅。
+
+- `BootReceiverTest`
+  - `未来の未完了タスクを再予約する`
+  - `対象タスクが無ければ何も予約しない`
+  - `複数タスクがあればすべて再予約する`
+  - **GREEN**: `BootReceiver.handleBoot` を注入可能な純粋関数として抽出し、boot 時の対象抽出・再予約を網羅。
+
+Claudeによる最終確認（2026-08-26、Kimiのバックグラウンドセッションが`killed`表示で終了したため再実行）:
+
+| コマンド | 結果 |
+| --- | --- |
+| `./gradlew :app:testDebugUnitTest` | BUILD SUCCESSFUL（新規テスト含む全47ユニットテスト、失敗0） |
+| `./gradlew :app:assembleDebug` | BUILD SUCCESSFUL |
+| `./gradlew :app:compileDebugAndroidTestKotlin` | BUILD SUCCESSFUL（`MigrationTest.kt`・`FreeTimeCheckWorkerTest.kt`の追記分含む） |
+
+`connectedDebugAndroidTest`（実機・エミュレータでのマイグレーション/Worker実機検証）は、今回のセッションでは実機・エミュレータが未接続のため未実施。次回実機/エミュレータ接続時に実施すること。
+
+### CHANGES REQUIRED 修正完了（2026-08-26 / Kimi実装、Claude検証）
+
+指摘1〜3を修正済み（詳細は上記「Task 5〜12のTDD Red/Green証跡」参照）。
+Kimiのセッションがビルド承認待ちで完了しなかったため、Claudeが代わりに検証コマンドを実行した。
+
+**1回目の検証（Kimi修正直後）:** `updateNotificationTimeにnullを渡すと予約解除のみ行う`ほか計4件のユニットテストが失敗。`AndroidTaskNotificationScheduler`のテストがRobolectric未導入のJVM環境で`Intent`/`PendingIntent`を直接使っていたためRuntimeExceptionになっていたこと、`updateNotificationTime`が「新値がnullかつ現在値と等しい（=両方null）」場合に早期returnしてcancel()を呼ばない不具合が原因。Kimiに差し戻して再修正を依頼した。
+
+**2回目の検証（再修正後）:**
+
+| コマンド | 結果 |
+| --- | --- |
+| `./gradlew :app:testDebugUnitTest :app:assembleDebug :app:compileDebugAndroidTestKotlin --no-daemon` | **BUILD SUCCESSFUL**（58 tests、失敗0） |
+
+`connectedDebugAndroidTest`は引き続き実機・エミュレータ未接続のため未実施。
+
+### Codex Gate 4 再レビュー（2回目・2026-08-26）: CHANGES REQUIRED
+
+Codexから3件の追加指摘。ユーザーの指示によりClaudeが直接修正した（Kimiには差し戻さず）。
+
+1. **`deleteTask`が同一taskIdのMutex外だった。** → `mutexFor(task.id).withLock { ... }` で囲むよう修正（`TaskViewModel.kt`）。
+2. **通知時刻だけの変更でもCalendar APIを呼んでいた。** → `applyTaskEdit`で`titleChanged || eventTimeChanged`のときだけ`doSyncToCalendar`を呼ぶよう修正。回帰テスト`applyTaskEditで通知時刻だけ変更した場合はCalendar APIを呼ばない`を追加（`TaskViewModelCalendarTest.kt`）。
+3. **schedulerテストがtaskId別PendingIntentを実質検証していなかった。** → `FakePendingIntentFactory`を導入し、taskIdごとに異なる`PendingIntent`が渡ることを検証するテストを追加・強化（`AndroidTaskNotificationSchedulerTest.kt`）。
+4. **boot時の対象抽出（未来・未完了のみ）が実クエリで未検証だった。** → in-memory Room DBに対する実クエリを検証する`TaskDaoBootQueryTest.kt`（androidTest）を新規追加。
+5. **SETUP.mdの操作手順が実装と不一致。** → 「長押し/編集アイコン」→「タイトルをタップ」、「入力欄からタスク作成」→「右下の＋（フローティングボタン）」に修正。
+
+**検証（2026-08-26 / Claude）:**
+
+| コマンド | 結果 |
+| --- | --- |
+| `./gradlew :app:testDebugUnitTest :app:assembleDebug :app:compileDebugAndroidTestKotlin --no-daemon` | **BUILD SUCCESSFUL**（失敗0。新規テスト・新規instrumentedテストファイルの追加分含めコンパイル・実行成功） |
+
+`TaskDaoBootQueryTest`（instrumented）自体は実機・エミュレータ未接続のため`connectedDebugAndroidTest`での実行は未実施。次回接続時に実行すること。
+
+### Codex Gate 4 再レビュー（3回目・2026-08-26）: CHANGES REQUIRED（残り1件）
+
+前回の4点（通知時刻のみ変更でCalendar API未呼び出し・schedulerのtaskId検証・boot対象抽出クエリ・SETUP.md）はすべて解消と確認された。
+残った1件：**`deleteTask`がMutex取得後も呼び出し元が渡した古いTask引数の`calendarEventId`を使っていた。** 連携ON直後に削除すると、古い（null等の）値で削除処理をしてしまい、最新のGoogle予定が孤児化しうる。
+
+**修正（2026-08-26 / Claude）:** `deleteTask`内でMutex取得後に`repository.getTaskById(task.id)`で最新状態を再取得し、`calendarEventId`・サブタスク取得・`repository.delete`・`lastDeleted`すべてこの最新Taskを使うよう修正（他のミューテーション関数と同じパターンに統一）。
+回帰テスト`deleteTaskは呼び出し時点の古いTaskではなく最新のcalendarEventIdを削除する`を追加：`deleteTask`呼び出し前に別経路で`calendarEventId`を更新し、古い引数ではなく最新の値に対して`deleteEvent`が呼ばれることを検証。
+
+**検証（2026-08-26 / Claude）:**
+
+| コマンド | 結果 |
+| --- | --- |
+| `./gradlew :app:testDebugUnitTest :app:assembleDebug :app:compileDebugAndroidTestKotlin --no-daemon` | **BUILD SUCCESSFUL**（失敗0） |
+
+### Codex Gate 4 最終レビュー（4回目・2026-08-26）: PASS
+
+残っていた`deleteTask`の古いTask引数参照が解消されたことを確認し、**Gate 4 PASS**。blocking finding 0件。
+
+### 次の担当と行動
+
+**次の担当: なし（Gate 4 PASSにより完了）。**
+`connectedDebugAndroidTest`（実機/エミュレータでのmigration・通知発火・再起動復元・`TaskDaoBootQueryTest`の実行）は次回実機/エミュレータ接続時に確認すること（ブロッキングではない）。
+worktree `.worktrees/subtask-calendar-notification`の差分は未コミット・未マージ。コミット・`master`へのマージはユーザー判断で実施すること。
+
+### Codex品質レビュー実行記録（2026-08-26）
+
+| コマンド | 結果 |
+| --- | --- |
+| `git diff --check master...b14e67d` | 成功 |
+| `.\gradlew :app:testDebugUnitTest :app:assembleDebug :app:compileDebugAndroidTestKotlin` | Codexサンドボックスでは既定の `C:\.gradle` にlockを作成できず、Gradle起動前に失敗 |
+| ワークツリー内 `GRADLE_USER_HOME` で同上 | Gradle配布物のダウンロードがネットワーク制限で拒否され、Gradle起動前に失敗 |
+| 既存キャッシュを `--offline --no-daemon` で使用して同上 | 読み取り専用キャッシュに `native-platform.dll.lock` を作成できず、Gradle起動前に失敗 |
+
+3 Gradleタスクは直前のClaude独立実行で全て `BUILD SUCCESSFUL` と記録済みのため、レビューではその結果を採用した。Codex環境での再実行不能はコード失敗として扱わない。品質判定は実装競合と不足テスト・文書を理由に `CHANGES REQUIRED`（1回目、以降の経緯は上記参照）。
 
 ---
 
@@ -537,7 +671,7 @@ Task 10 Step 4に記載の以下4項目は、Mac環境でのユーザー自身�
 - `app/src/main/res/values/strings.xml`（`app_name`を"Realize"に変更）
 - `app/src/main/res/values-*/strings.xml`が存在する場合は同様に変更（多言語対応時のみ）
 
-上記以外のファイル（`AndroidManifest.xml`含む）は変更しない。`AndroidManifest.xml`は案件5（worktree）が担当宣言中のため、パッケージ名変更を行わない今回は関与不要。
+上記以外のファイル（`AndroidManifest.xml`含む）は変更しない。`AndroidManifest.xml`は案件5が担当宣言していたため元々関与不要だったが、案件5は完了・マージ済み。
 
 ### Kimiへの引き継ぎタスク
 
@@ -552,8 +686,8 @@ Task 10 Step 4に記載の以下4項目は、Mac環境でのユーザー自身�
 
 ## 案件7：UI/機能フィードバック（ユーザーからの手直し依頼）
 
-**状態:** `受付・案件5完了待ち`（2026-08-26）
-**担当:** 秘書・ディレクションとしてClaudeが受付・整理。実装は案件5（worktree `.worktrees/subtask-calendar-notification`）が `CHANGES REQUIRED` の修正を終えて完了するまで着手しない。
+**状態:** `着手可能`（2026-08-26、案件5がGate 4 PASSで完了・masterへマージ済みのため保留解除）
+**担当:** 秘書・ディレクションとしてClaudeが受付・整理。次はCodexへ仕様確定を依頼する。
 
 ### 経緯
 
@@ -563,25 +697,23 @@ Task 10 Step 4に記載の以下4項目は、Mac環境でのユーザー自身�
 1. 設定ボタンが複数箇所に分散している → 一つに統合できないか（ユーザー案）
 2. カテゴリを削除した際、カテゴリ欄に空白が残る（表示崩れ・バグ）
 3. メインタスクをリネームする際のタップ判定が小さく、連打してもリネームに入りにくい
-4. UI上の猫の画像を、ユーザー指定の別の猫に差し替える
+4. ~~UI上の猫の画像を、ユーザー指定の別の猫に差し替える~~ → **ユーザー判断によりスコープ外（画像アセット未提供のため見送り）**
 
 **機能:**
 5. サブタスクもリネームできるようにする（現状はメインタスクのみ？要確認）
-6. 通知に猫の画像を表示できるようにする（画像付き通知）
+6. ~~通知に猫の画像を表示できるようにする（画像付き通知）~~ → **ユーザー判断によりスコープ外（画像アセット未提供のため見送り）**
 7. 優先順位・時間でタスクをソートできる機能
 
-### 保留にした理由（他案件との衝突回避）
+**今回のスコープ: 項目1・2・3・5・7の5件。** 項目4・6は画像アセットが用意でき次第、別途対応する。
 
-現在 `.worktrees/subtask-calendar-notification`（案件5）でKimiが `CHANGES REQUIRED` の修正作業中であり、`TaskListScreen.kt` / `AddTaskScreen.kt` / `MainActivity.kt` / `TaskEditDialog` など、本案件7が触る可能性が高い画面ファイルの大半を案件5が担当宣言中（未マージ）。
-同一ファイルを複数のAIが同時に編集しない、というAGENTS.mdの原則に従い、**案件5がCodexのGate 4 `PASS`を得て`master`にマージされるまで、案件7の実装には着手しない。**
+### 保留解除（2026-08-26 / Claude）
 
-### ユーザー確認が必要な項目（着手前に必須）
+案件5がCodex Gate 4 `PASS`（4ラウンド目）で完了し、`master`へマージ済み（コミット8472f36）。`TaskListScreen.kt`等の担当宣言は解除されたため、案件7の実装に着手可能。
 
-- **項目4（猫の画像差し替え）:** 「このコ」が具体的にどの画像・ファイルを指すか不明。差し替え先の画像ファイル（PNG/SVG等）をご提供いただくか、既存アセット内のどれかを指定してください。
-- **項目6（通知に猫の画像）:** 同上、使用する画像アセットの提供が必要。また `NotificationCompat` の `BigPictureStyle` 採用が前提になるため、通知の見た目（大きい画像 vs アイコンのみ）の希望があれば教えてください。
-- **項目1（設定ボタンの統合）:** 「一つにまとめる」の具体像（例: 既存の設定関連ボタンをすべて1つの設定画面/ドロワーに集約する、というAdvicetでよいか）をユーザーの意図通りか、Codexの仕様確定フェーズで確認する。
+### ユーザー確認が必要な項目（着手前に必須、項目1のみ）
+
+- **項目1（設定ボタンの統合）:** 「一つにまとめる」の具体像（例: 既存の設定関連ボタンをすべて1つの設定画面/ドロワーに集約する、というイメージでよいか）をユーザーの意図通りか、Codexの仕様確定フェーズで確認する。
 
 ### 次の担当と行動
 
-**次の担当: なし（待機中）。** 案件5がGate 4 `PASS`で完了し`master`へマージされ次第、Codexに項目1〜7の仕様確定（対象外・受入条件・担当ファイル）を依頼し、Gemini分割 → Kimi実装 の標準フローに進める。
-画像アセット（項目4・6）はそれまでにユーザーからご提供いただければ、そのまま作業に組み込める。
+**次の担当: Codex（仕様確定）。** 項目1・2・3・5・7について、目的・対象外・受入条件・担当ファイルを整理し、Geminiへ作業単位への分割を依頼する標準フローへ進める。

@@ -2,6 +2,7 @@ package com.example.myapplication.data.calendar
 
 import android.util.Log
 import com.example.myapplication.BuildConfig
+import com.example.myapplication.data.SubTask
 import com.example.myapplication.data.Task
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import kotlinx.coroutines.CancellationException
@@ -19,6 +20,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 import java.util.concurrent.TimeUnit
 
 /**
@@ -99,28 +101,33 @@ open class GoogleCalendarSync(
     }
 
     /**
-     * 締切当日の終日予定を作成し、そのイベント ID を返す。
+     * 締切当日の終日予定（または [Task.eventHasTime] が true なら時刻付き予定）を作成し、
+     * そのイベント ID を返す。[subTasks] があれば説明欄に列挙する。
      */
-    open suspend fun insertEvent(task: Task, categoryName: String): CalendarResult<String> =
+    open suspend fun insertEvent(
+        task: Task,
+        categoryName: String,
+        subTasks: List<SubTask> = emptyList()
+    ): CalendarResult<String> =
         request("予定の作成") { authorization ->
-            api.insertEvent(authorization, task.toEventRequest(categoryName))
+            api.insertEvent(authorization, task.toEventRequest(categoryName, subTasks))
         }.mapSuccess { body ->
-            // 201 が返ったのに ID が無いことは通常ありえないが、念のため握り潰さず失敗にする
             body?.id?.let { CalendarResult.Success(it) }
                 ?: CalendarResult.Failure("予定は作成されましたが ID を取得できませんでした")
         }
 
     /**
-     * 既存の予定をタスクの現在の内容へ更新する。
+     * 既存の予定をタスクの現在の内容へ更新する。[subTasks] があれば説明欄に列挙する。
      * 予定がユーザーに手動で削除されていた場合は [CalendarResult.NotFound]。
      */
     open suspend fun updateEvent(
         eventId: String,
         task: Task,
-        categoryName: String
+        categoryName: String,
+        subTasks: List<SubTask> = emptyList()
     ): CalendarResult<Unit> =
         request("予定の更新") { authorization ->
-            api.patchEvent(authorization, eventId, task.toEventRequest(categoryName))
+            api.patchEvent(authorization, eventId, task.toEventRequest(categoryName, subTasks))
         }.mapSuccess { CalendarResult.Success(Unit) }
 
     /**
@@ -263,16 +270,40 @@ open class GoogleCalendarSync(
         is CalendarResult.Failure -> this
     }
 
-    /** タイトルと説明。完了済みのタスクは一目で分かるよう印を付ける。 */
-    private fun Task.toEventRequest(categoryName: String): CalendarEventRequest {
+    /**
+     * タイトルと説明。完了済みのタスクは一目で分かるよう印を付ける。
+     * サブタスクがあれば説明欄に列挙し、[Task.eventHasTime] に応じて終日/時刻指定を切り替える。
+     */
+    private fun Task.toEventRequest(
+        categoryName: String,
+        subTasks: List<SubTask>
+    ): CalendarEventRequest {
         val mark = if (isCompleted) "✓ " else ""
-        val date = localDateOf(deadline)
+        val description = buildString {
+            append("重要度: $importance / 緊急度: $urgency\nカテゴリ: $categoryName")
+            val sorted = subTasks.sortedBy { it.sortOrder }
+            if (sorted.isNotEmpty()) {
+                append("\n\nサブタスク:\n")
+                append(sorted.joinToString("\n") { "・${it.title}" })
+            }
+        }
+        val zone = ZoneId.systemDefault()
+        val (start, end) = if (eventHasTime) {
+            val startInstant = Instant.ofEpochMilli(deadline)
+            val endInstant = startInstant.plus(1, ChronoUnit.HOURS)
+            CalendarEventDateTime(dateTime = startInstant.atZone(zone).format(DATETIME_FORMATTER)) to
+                CalendarEventDateTime(dateTime = endInstant.atZone(zone).format(DATETIME_FORMATTER))
+        } else {
+            val date = localDateOf(deadline)
+            // end.date は排他的なので締切日の「翌日」を入れると締切当日だけの終日予定になる
+            CalendarEventDateTime(date = date.format(DATE_FORMATTER)) to
+                CalendarEventDateTime(date = date.plusDays(1).format(DATE_FORMATTER))
+        }
         return CalendarEventRequest(
             summary = "$mark$title",
-            description = "重要度: $importance / 緊急度: $urgency\nカテゴリ: $categoryName",
-            start = CalendarEventDate(date.format(DATE_FORMATTER)),
-            // end.date は排他的なので締切日の「翌日」を入れると締切当日だけの終日予定になる
-            end = CalendarEventDate(date.plusDays(1).format(DATE_FORMATTER))
+            description = description,
+            start = start,
+            end = end
         )
     }
 
@@ -299,6 +330,9 @@ open class GoogleCalendarSync(
 
         /** 終日予定用の日付書式（RFC3339 の日付部分のみ）。 */
         private val DATE_FORMATTER: DateTimeFormatter = DateTimeFormatter.ISO_LOCAL_DATE
+
+        /** 時刻指定予定用のRFC3339フォーマット（オフセット付き）。 */
+        private val DATETIME_FORMATTER: DateTimeFormatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME
 
         /**
          * 本番用の Retrofit クライアントを生成する。

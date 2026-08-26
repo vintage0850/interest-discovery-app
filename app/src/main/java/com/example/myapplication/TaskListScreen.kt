@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -151,11 +152,12 @@ fun TaskListScreen(
     snackbarHostState: SnackbarHostState,
     onAddTask: () -> Unit,
     onManageCategories: () -> Unit,
+    onManageNotificationSettings: () -> Unit,
     onTaskToggle: (Task) -> Unit,
     onSubTaskToggle: (SubTask) -> Unit,
     onTaskDelete: (Task) -> Unit,
     onUndoDelete: () -> Unit,
-    onTaskRename: (Task, String) -> Unit,
+    onTaskEdit: (Task, TaskEditResult) -> Unit,
     authState: CalendarAuthState,
     onCalendarLinkChange: (Task, Boolean) -> Unit,
     onSignOut: () -> Unit
@@ -170,7 +172,7 @@ fun TaskListScreen(
     // アカウントメニュー（連携状況の確認とサインアウト）
     var showAccountMenu by remember { mutableStateOf(false) }
     // リネーム対象のタスク。null ならダイアログを出さない
-    var taskToRename by remember { mutableStateOf<Task?>(null) }
+    var taskToEdit by remember { mutableStateOf<Task?>(null) }
 
     fun notify(message: String) {
         snackbarHostState.currentSnackbarData?.dismiss()
@@ -253,6 +255,12 @@ fun TaskListScreen(
                     IconButton(onClick = onManageCategories) {
                         Icon(Icons.Filled.Settings, contentDescription = "カテゴリの管理")
                     }
+                    IconButton(onClick = onManageNotificationSettings) {
+                        Icon(
+                            imageVector = Icons.Filled.Notifications,
+                            contentDescription = "通知設定"
+                        )
+                    }
                 }
             )
         },
@@ -313,7 +321,7 @@ fun TaskListScreen(
                     onTaskToggle = onTaskToggle,
                     onSubTaskToggle = onSubTaskToggle,
                     onCalendarClick = ::toggleCalendarLink,
-                    onTaskTitleClick = { task -> taskToRename = task },
+                    onTaskTitleClick = { task -> taskToEdit = task },
                     onTaskDelete = { task ->
                         onTaskDelete(task)
                         // 直前のスナックバーは畳んで、常に最新の削除に対する取り消しを出す
@@ -332,18 +340,14 @@ fun TaskListScreen(
         }
     }
 
-    taskToRename?.let { task ->
-        CategoryNameDialog(
-            title = "タスク名を変更",
-            initialName = task.title,
-            confirmLabel = "変更",
-            label = "タスク名",
-            maxLength = TASK_TITLE_MAX_LENGTH,
-            onConfirm = { newTitle ->
-                onTaskRename(task, newTitle)
-                taskToRename = null
+    taskToEdit?.let { task ->
+        TaskEditDialog(
+            task = task,
+            onConfirm = { result ->
+                onTaskEdit(task, result)
+                taskToEdit = null
             },
-            onDismiss = { taskToRename = null }
+            onDismiss = { taskToEdit = null }
         )
     }
 }

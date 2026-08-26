@@ -155,6 +155,18 @@ private val MIGRATION_4_5 = object : Migration(4, 5) {
     }
 }
 
+/**
+ * v5 -> v6: 予定の時刻指定手動設定のための列を追加する。
+ *
+ * - tasks.eventHasTime（INTEGER, デフォルト 0 = false）: true ならカレンダー予定を
+ *   deadline の時刻付きで書き出す。既存タスクはすべて false（従来通りの終日予定）のまま
+ */
+private val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `tasks` ADD COLUMN `eventHasTime` INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
 /** 新規インストール時は移行が走らないので、初期カテゴリはここで入れる。 */
 private val SEED_CALLBACK = object : RoomDatabase.Callback() {
     override fun onCreate(db: SupportSQLiteDatabase) {
@@ -169,7 +181,7 @@ private val SEED_CALLBACK = object : RoomDatabase.Callback() {
 
 @Database(
     entities = [Task::class, SubTask::class, Category::class, NotifiedSlot::class],
-    version = 5,
+    version = 6,
     // スキーマ JSON を app/schemas/ に書き出す。
     // マイグレーションテスト（MigrationTest）が各バージョン間の検証に使うので必須。
     exportSchema = true
@@ -188,7 +200,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "task_database"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                     .addCallback(SEED_CALLBACK)
                     .build()
                 INSTANCE = instance

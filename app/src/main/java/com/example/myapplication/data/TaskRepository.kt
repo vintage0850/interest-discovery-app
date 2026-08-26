@@ -30,6 +30,18 @@ open class TaskRepository(private val taskDao: TaskDao) {
     open suspend fun updateStatus(taskId: Int, status: TaskStatus) =
         taskDao.updateTaskStatus(taskId, status)
 
+    /** 予定の日時と時刻指定の有無だけを更新する部分更新。 */
+    open suspend fun updateEventTime(taskId: Int, deadline: Long, eventHasTime: Boolean) =
+        taskDao.updateEventTime(taskId, deadline, eventHasTime)
+
+    /** 通知時刻だけを更新する部分更新。null で手動通知を解除する。 */
+    open suspend fun updateNotificationTime(taskId: Int, notificationTime: Long?) =
+        taskDao.updateNotificationTime(taskId, notificationTime)
+
+    /** 端末再起動後にアラームを再登録する対象（未完了かつ通知時刻が未来）を返す。 */
+    open suspend fun getTasksWithFutureNotification(now: Long): List<Task> =
+        taskDao.getTasksWithFutureNotification(now)
+
     /** 「始めさせる」通知の対象候補を1件選ぶ。未完了かつ未着手で優先度最大のタスク。 */
     open suspend fun getTopEligibleTaskForNotification(): Task? =
         taskDao.getTopEligibleTaskForNotification()

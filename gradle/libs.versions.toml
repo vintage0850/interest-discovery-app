@@ -24,6 +24,7 @@ kotlinxCoroutinesCore = "1.10.2"
 composeMultiplatform = "1.11.1"
 navigationComposeMultiplatform = "2.9.2"
 kotlinxDatetime = "0.7.1"
+mockk = "1.13.16"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -71,6 +72,7 @@ sqldelight-native-driver = { group = "app.cash.sqldelight", name = "native-drive
 sqldelight-sqlite-driver = { group = "app.cash.sqldelight", name = "sqlite-driver", version.ref = "sqldelight" }
 navigation-compose-multiplatform = { group = "org.jetbrains.androidx.navigation", name = "navigation-compose", version.ref = "navigationComposeMultiplatform" }
 kotlinx-datetime = { group = "org.jetbrains.kotlinx", name = "kotlinx-datetime", version.ref = "kotlinxDatetime" }
+mockk = { group = "io.mockk", name = "mockk", version.ref = "mockk" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
