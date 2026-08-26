@@ -6,6 +6,10 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- 「空き時間です」通知の送信に使う（Android 13 / API 33 以降は実行時権限） -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 手動通知時刻に確実に発火させるため（Android 12+ はユーザーが設定でON/OFFする特別な権限） -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <!-- 端末再起動後にアラーム予約を復元するため -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
         android:allowBackup="true"
@@ -37,6 +41,23 @@
         <receiver
             android:name=".TaskStartActionReceiver"
             android:exported="false" />
+
+        <!--
+             手動通知時刻の AlarmManager からのみ呼ばれる内部用レシーバー。
+             他アプリから任意のタスクを操作されないよう exported="false" にする。
+        -->
+        <receiver
+            android:name=".work.TaskNotificationReceiver"
+            android:exported="false" />
+
+        <!-- 端末再起動後にアラーム予約を復元する -->
+        <receiver
+            android:name=".work.BootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>
