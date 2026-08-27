@@ -580,6 +580,23 @@ class TaskViewModelCalendarTest {
         assertTrue(repo.subTaskTitleUpdates.isEmpty())
     }
 
+    @Test
+    fun `サブタスクリネームは50文字超の名前も受け入れる`() = runTest {
+        val task = createTask(id = 1)
+        val longName = "あ".repeat(60)
+        val subTask = SubTask(id = 10, taskId = 1, title = "下書き", isCompleted = false)
+        val repo = FakeRepository().apply {
+            save(task)
+            subTasksByTaskId[1] = listOf(subTask)
+        }
+        val viewModel = createViewModel(repo, FakeCalendarSync())
+
+        viewModel.renameSubTask(subTask, longName)
+        advanceUntilIdle()
+
+        assertEquals(longName, repo.subTaskTitleUpdates.single().second)
+    }
+
     private fun createViewModel(
         repository: FakeRepository,
         calendarSync: FakeCalendarSync,

@@ -24,6 +24,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
@@ -78,12 +82,14 @@ internal fun sortedTasks(
         compareBy<TaskWithSubTasks> { it.task.isCompleted }
             .thenByDescending { it.task.priorityScore }
             .thenBy { it.task.deadline }
+            .thenBy { it.task.createdAt }
             .thenBy { it.task.id }
     )
     SortOrder.DEADLINE -> tasks.sortedWith(
         compareBy<TaskWithSubTasks> { it.task.isCompleted }
             .thenBy { it.task.deadline }
             .thenByDescending { it.task.priorityScore }
+            .thenBy { it.task.createdAt }
             .thenBy { it.task.id }
     )
 }
@@ -306,12 +312,14 @@ fun TaskListScreen(
                 selectedTabIndex = selectedIndex,
                 edgePadding = 8.dp
             ) {
-                tabs.forEachIndexed { index, tab ->
-                    Tab(
-                        selected = selectedIndex == index,
-                        onClick = { selectedFilter = tab.filter },
-                        text = { Text(tab.title, maxLines = 1) }
-                    )
+                tabs.forEach { tab ->
+                    key(tab.filter) {
+                        Tab(
+                            selected = selectedIndex == tabs.indexOf(tab),
+                            onClick = { selectedFilter = tab.filter },
+                            text = { Text(tab.title, maxLines = 1) }
+                        )
+                    }
                 }
             }
 
@@ -563,10 +571,13 @@ fun TaskItem(
             Column(
                 modifier = Modifier
                     .weight(1f)
-                    // タイトルだけでなく左側の情報領域全体をタップ可能にする。
-                    // 48dp 以上のタップ領域を確保し、カレンダー・完了・スワイプとは分離する。
+                    .heightIn(min = 48.dp)
                     .clickable(onClick = onTitleClick)
                     .padding(end = 8.dp)
+                    .semantics {
+                        role = Role.Button
+                        contentDescription = "${task.title}、タスクを編集する"
+                    }
             ) {
                 Text(
                     text = task.title,
@@ -676,8 +687,13 @@ private fun SubTaskSection(
                     text = subTask.title,
                     modifier = Modifier
                         .weight(1f)
+                        .heightIn(min = 48.dp)
                         .clickable { onSubTaskRename(subTask) }
-                        .padding(vertical = 8.dp),
+                        .padding(vertical = 8.dp)
+                        .semantics {
+                            role = Role.Button
+                            contentDescription = "${subTask.title}、サブタスクの名前を変更する"
+                        },
                     style = MaterialTheme.typography.bodyMedium,
                     textDecoration = if (subTask.isCompleted) TextDecoration.LineThrough else null
                 )
@@ -688,7 +704,8 @@ private fun SubTaskSection(
 
 /**
  * サブタスク名変更ダイアログ。
- * タスク名と同じ文字数上限を適用し、空白のみや変更なしの場合は確定できない。
+ * 既存のサブタスク名には新しい文字数制限を遡及適用しない。
+ * 空白のみや変更なしの場合は確定できない。
  */
 @Composable
 private fun SubTaskRenameDialog(
@@ -705,12 +722,9 @@ private fun SubTaskRenameDialog(
         text = {
             OutlinedTextField(
                 value = title,
-                onValueChange = {
-                    if (it.length <= TASK_TITLE_MAX_LENGTH) title = it
-                },
+                onValueChange = { title = it },
                 label = { Text("サブタスク名") },
-                singleLine = true,
-                supportingText = { Text("${title.length} / $TASK_TITLE_MAX_LENGTH") }
+                singleLine = true
             )
         },
         confirmButton = {

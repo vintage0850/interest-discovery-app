@@ -82,12 +82,117 @@ class TaskListLogicTest {
         assertEquals(listOf(3L, 4L, 2L, 1L), sorted.map { it.task.id.toLong() })
     }
 
+    @Test
+    fun `優先順位順で同点時は作成日時の早い順で安定する`() {
+        val tasks = listOf(
+            taskWithSubTasks(
+                id = 1,
+                isCompleted = false,
+                importance = 3,
+                urgency = 3,
+                deadline = 1000L,
+                createdAt = 2000L
+            ),
+            taskWithSubTasks(
+                id = 2,
+                isCompleted = false,
+                importance = 3,
+                urgency = 3,
+                deadline = 1000L,
+                createdAt = 1000L
+            )
+        )
+
+        val sorted = sortedTasks(tasks, SortOrder.PRIORITY)
+
+        assertEquals(listOf(2L, 1L), sorted.map { it.task.id.toLong() })
+    }
+
+    @Test
+    fun `優先順位順でcreatedAtも同点ならid昇順で安定する`() {
+        val tasks = listOf(
+            taskWithSubTasks(
+                id = 2,
+                isCompleted = false,
+                importance = 3,
+                urgency = 3,
+                deadline = 1000L,
+                createdAt = 1000L
+            ),
+            taskWithSubTasks(
+                id = 1,
+                isCompleted = false,
+                importance = 3,
+                urgency = 3,
+                deadline = 1000L,
+                createdAt = 1000L
+            )
+        )
+
+        val sorted = sortedTasks(tasks, SortOrder.PRIORITY)
+
+        assertEquals(listOf(1L, 2L), sorted.map { it.task.id.toLong() })
+    }
+
+    @Test
+    fun `締切が近い順で同点時は作成日時の早い順で安定する`() {
+        val tasks = listOf(
+            taskWithSubTasks(
+                id = 1,
+                isCompleted = false,
+                importance = 3,
+                urgency = 3,
+                deadline = 1000L,
+                createdAt = 2000L
+            ),
+            taskWithSubTasks(
+                id = 2,
+                isCompleted = false,
+                importance = 3,
+                urgency = 3,
+                deadline = 1000L,
+                createdAt = 1000L
+            )
+        )
+
+        val sorted = sortedTasks(tasks, SortOrder.DEADLINE)
+
+        assertEquals(listOf(2L, 1L), sorted.map { it.task.id.toLong() })
+    }
+
+    @Test
+    fun `締切が近い順でcreatedAtも同点ならid昇順で安定する`() {
+        val tasks = listOf(
+            taskWithSubTasks(
+                id = 2,
+                isCompleted = false,
+                importance = 3,
+                urgency = 3,
+                deadline = 1000L,
+                createdAt = 1000L
+            ),
+            taskWithSubTasks(
+                id = 1,
+                isCompleted = false,
+                importance = 3,
+                urgency = 3,
+                deadline = 1000L,
+                createdAt = 1000L
+            )
+        )
+
+        val sorted = sortedTasks(tasks, SortOrder.DEADLINE)
+
+        assertEquals(listOf(1L, 2L), sorted.map { it.task.id.toLong() })
+    }
+
     private fun taskWithSubTasks(
         id: Int,
         isCompleted: Boolean,
         importance: Int,
         urgency: Int,
-        deadline: Long
+        deadline: Long,
+        createdAt: Long = 0L
     ): TaskWithSubTasks = TaskWithSubTasks(
         task = Task(
             id = id,
@@ -96,7 +201,8 @@ class TaskListLogicTest {
             importance = importance,
             urgency = urgency,
             isCompleted = isCompleted,
-            status = TaskStatus.TODO
+            status = TaskStatus.TODO,
+            createdAt = createdAt
         ),
         subTasks = emptyList()
     )

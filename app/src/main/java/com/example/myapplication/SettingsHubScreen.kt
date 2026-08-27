@@ -52,19 +52,19 @@ internal data class CalendarLinkSummary(
 internal fun calendarLinkSummary(authState: CalendarAuthState): CalendarLinkSummary = when (authState) {
     is CalendarAuthState.NotConfigured -> CalendarLinkSummary(
         title = "Google カレンダー連携",
-        subtitle = "SETUP.md の手順で OAuth クライアント ID を設定してください",
+        subtitle = "未設定：SETUP.md の手順で OAuth クライアント ID を設定してください",
         isConnected = false,
         canConnect = false
     )
     is CalendarAuthState.NotAuthorized -> CalendarLinkSummary(
         title = "Google カレンダー連携",
-        subtitle = null,
+        subtitle = "未接続",
         isConnected = false,
         canConnect = true
     )
     is CalendarAuthState.Authorized -> CalendarLinkSummary(
         title = "Google カレンダー連携",
-        subtitle = if (authState.email != null) "${authState.email} で連携中" else "連携中",
+        subtitle = if (authState.email != null) "接続済み：${authState.email}" else "接続済み",
         isConnected = true,
         canConnect = false
     )

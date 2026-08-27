@@ -763,3 +763,55 @@ Kimiが項目1・2・3・5・7を一括で実装したが、セッション中Gr
 ### 次の担当と行動
 
 **次の担当: Codex（Gate 3.5 / Gate 4レビュー）。** 項目1・2・3・5・7の実装・ビルド検証済み。項目4・6は画像アセット未提供のためスコープ外のまま。
+
+### Codex Gate 3.5 / Gate 4レビュー（2026-08-27）
+
+**総合判定: `CHANGES REQUIRED`**
+
+- Gate 3.5（設計・SOLID・保守性）: **`CHANGES REQUIRED`**
+- Gate 4（テスト・型・ビルド・セキュリティ・入力値・エラー処理）: **`CHANGES REQUIRED`**
+- 詳細: `docs/quality-review/2026-08-27-案件7-ui-feature-feedback.md`
+
+**ブロッキング指摘:**
+
+1. カテゴリTabに`key(tab.filter)`がなく、仕様のID安定キー要件を満たさない。
+2. 両ソートに`createdAt`タイブレークがない。
+3. メイン/サブタスク編集領域の48dp保証と明示的なTalkBack操作名がない。
+4. 仕様で禁止された50文字制限を既存サブタスクのリネームに適用している。
+5. 設定ハブに「未設定」「未接続」「接続済み」の状態が明示されない。
+6. 仕様で必須のCompose UI/Room DAO回帰テストがなく、現在のJVMテストは上記不備を見逃している。
+7. 詳細仕様書がこのworktree/`HEAD`に含まれず、main checkoutの未追跡ファイルにしか存在しない。
+
+**検証記録:** `git diff --check master...HEAD` は成功。Gradleはユーザー指示に従い、直前のClaude検証 `./gradlew :app:testDebugUnitTest :app:assembleDebug :app:compileDebugAndroidTestKotlin --no-daemon` = **BUILD SUCCESSFUL（失敗0）** を採用した。`connectedDebugAndroidTest`は端末未接続のため未実施だが、ブロッキング理由にしていない。
+
+### 次の担当と行動（Gate差し戻し）
+
+**次の担当: Kimi（修正とテスト追加）。** 上記7点を修正し、同じ3 Gradleタスクと`git diff --check`の結果を記録してCodexの再レビューへ戻す。`connectedDebugAndroidTest`は端末接続時の後続確認でよい。
+
+### CHANGES REQUIRED 修正完了（2026-08-27 / Kimi実装、Claude検証・仕上げ）
+
+Kimiが7点中6点（1〜6）を修正。指摘7（仕様書がworktreeに未追跡）はClaudeがmain checkoutから`docs/superpowers/specs/2026-08-27-案件7-ui-feature-feedback-design.md`をこのworktreeへコピーして解消した。
+
+**Kimiの修正内容:**
+1. カテゴリTabに`key(tab.filter)`を追加し安定キー化。
+2. `sortedTasks()`の両ソートに`createdAt`昇順→`id`昇順のタイブレークを追加。`TaskListLogicTest`に`createdAt`/`id`が逆になる同点データのテストを追加。
+3. メイン/サブタスクの編集領域に`Modifier.heightIn(min = 48.dp)`を追加し、`clickable`にsemantics経由で操作名（「タスクを編集する」「サブタスクの名前を変更する」）を付与。
+4. サブタスク名変更から`TASK_TITLE_MAX_LENGTH = 50`の適用とカウンタ表示を除去。50文字超の既存サブタスク名を保持したまま編集できる回帰テストを追加。
+5. `calendarLinkSummary()`のsubtitleを「未設定：...」「未接続」「接続済み」（メールありなら「接続済み：${email}」）と明示。
+6. `SettingsScreenTest.kt`・`TaskListScreenTest.kt`・`TaskDaoSubTaskTest.kt`（いずれもinstrumented）を新規追加。設定ハブの画面遷移・戻る操作・3状態表示、カテゴリタブ削除後のUI状態、48dp保証、実Room DAOでのサブタスク列非干渉を検証。
+
+**Claudeが修正した不具合（2026-08-27、2ラウンド目）:**
+1. `SettingsScreenTest.kt`・`TaskListScreenTest.kt`が`androidx.compose.ui.test.assertDoesNotExist`をトップレベル関数としてimportしていたためコンパイルエラー（`assertDoesNotExist`は`SemanticsNodeInteraction`のメンバー関数でありimport不要かつ不可）→ 誤ったimport文を削除。
+2. `CalendarLinkSummaryTest`の`認可済み状態ではアカウントと接続済みが表示される`が、実装のsubtitle書式（`"${email} で接続済み"`）とテストの期待（`startsWith("接続済み")`）が食い違い失敗 → 実装を`"接続済み：${email}"`に統一し、`SettingsScreenTest.kt`の対応する期待文字列も合わせて修正。
+
+**検証（2026-08-27 / Claude、2回目）:**
+
+| コマンド | 結果 |
+| --- | --- |
+| `./gradlew :app:testDebugUnitTest :app:assembleDebug :app:compileDebugAndroidTestKotlin --no-daemon` | **BUILD SUCCESSFUL**（失敗0） |
+
+`connectedDebugAndroidTest`は実機・エミュレータ未接続のため未実施。
+
+### 次の担当と行動
+
+**次の担当: Codex（Gate 3.5 / Gate 4 再レビュー）。** 指摘1〜7すべて修正・検証済み。
