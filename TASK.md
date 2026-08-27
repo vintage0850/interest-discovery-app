@@ -686,8 +686,8 @@ worktree `.worktrees/subtask-calendar-notification`の差分は未コミット�
 
 ## 案件7：UI/機能フィードバック（ユーザーからの手直し依頼）
 
-**状態:** `着手可能`（2026-08-26、案件5がGate 4 PASSで完了・masterへマージ済みのため保留解除）
-**担当:** 秘書・ディレクションとしてClaudeが受付・整理。次はCodexへ仕様確定を依頼する。
+**状態:** `仕様確定・Kimi実装待ち`（2026-08-27、Codex）
+**担当:** Codexが現状調査と仕様確定を完了。次はKimiがTDDで実装する。
 
 ### 経緯
 
@@ -710,10 +710,141 @@ worktree `.worktrees/subtask-calendar-notification`の差分は未コミット�
 
 案件5がCodex Gate 4 `PASS`（4ラウンド目）で完了し、`master`へマージ済み（コミット8472f36）。`TaskListScreen.kt`等の担当宣言は解除されたため、案件7の実装に着手可能。
 
-### ユーザー確認が必要な項目（着手前に必須、項目1のみ）
+### 仕様確定（2026-08-27 / Codex）
 
-- **項目1（設定ボタンの統合）:** 「一つにまとめる」の具体像（例: 既存の設定関連ボタンをすべて1つの設定画面/ドロワーに集約する、というイメージでよいか）をユーザーの意図通りか、Codexの仕様確定フェーズで確認する。
+詳細仕様: `docs/superpowers/specs/2026-08-27-案件7-ui-feature-feedback-design.md`
+
+- **項目1:** 一覧トップバーは歯車アイコン1個に統合し、新しい設定ハブ画面から「カテゴリ管理」「通知設定」「Googleカレンダー連携」へ進む。個別タスクのカレンダーボタンは統合対象外。
+- **項目2:** カテゴリ削除時に削除済みIDを `selectedFilter` から除去して「すべて」へ戻し、カテゴリIDを安定キーにして空白・ゴーストタブを残さない。所属タスクは従来どおり「未分類」に移す。
+- **項目3:** メインタスクの編集導線をタイトル文字だけから左側情報領域全体へ広げ、48dp以上のタップ領域を確保する。カレンダー・完了・スワイプ削除とは分離する。
+- **項目5:** サブタスクのテキスト領域から専用リネームダイアログを開く。タイトルと完了状態は別々のDAO部分更新にし、連携済みなら既存のMutexと `GoogleCalendarSync.updateEvent` で予定説明欄も同期する。
+- **項目7:** DBを変えず、カテゴリ絞り込み後の一覧を画面内で「優先順位順」または「締切が近い順」に安定ソートする。初期値は優先順位順、選択は画面回転まで保持しアプリ再起動では初期化する。
+- 項目4・6はユーザー判断どおりスコープ外。
+- Roomスキーマ、認証、課金、公開API、ADR-001の同期失敗ポリシーに変更はない。現時点でClaudeへの追加設計判断依頼は不要。実装中にスキーマ等の変更が必要と判明した場合は実装を止め、**「Claudeへ設計判断を依頼」**として差し戻す。
 
 ### 次の担当と行動
 
-**次の担当: Codex（仕様確定）。** 項目1・2・3・5・7について、目的・対象外・受入条件・担当ファイルを整理し、Geminiへ作業単位への分割を依頼する標準フローへ進める。
+**次の担当: Kimi（TDD実装）。**
+
+1. 上記仕様書を読み、1作業単位を最大3ファイル・半日以内・1コミットに分割する。
+2. 推奨順は、設定ハブ → カテゴリ削除／メイン編集タップ領域／ソート → サブタスクのDAO部分更新 → サブタスクのリネームUIとカレンダー同期。
+3. 各単位で失敗テストを先に追加し、Red → Green → Refactorを守る。
+4. 最後に `./gradlew :app:testDebugUnitTest :app:assembleDebug :app:compileDebugAndroidTestKotlin` を実行し、エミュレータ接続時は `./gradlew :app:connectedDebugAndroidTest` も実行する。
+5. 実装結果、テスト結果、コミットIDを本セクションへ追記し、CodexのGate 3.5 / Gate 4レビューへ渡す。
+
+### 作業場所（担当宣言：Kimi、2026-08-27〜）
+
+worktree `.worktrees/ui-feedback-item7`（ブランチ`feature/ui-feedback-item7`、`master`の`4a9aa4a`から作成）。
+担当解除までこのworktree以外（＝`master`本体）で`app/src/main/java/com/example/myapplication/`配下の同じファイルを編集しない。
+
+### 実装完了報告（2026-08-27 / Kimi実装、Claude検証・仕上げ）
+
+Kimiが項目1・2・3・5・7を一括で実装したが、セッション中Gradleコマンドが承認待ちのまま完了し、未コミット・未検証だった。Claudeが引き継いでビルド検証と3件の不具合修正を行った。
+
+**実装内容（Kimi）:**
+- `SettingsHubScreen.kt`（新規）: 項目1。歯車アイコン1個から「カテゴリ管理」「通知設定」「Googleカレンダー連携」へ遷移する設定ハブ画面。`calendarLinkSummary()`で認可状態をUI表示用データへ変換（`CalendarLinkSummaryTest.kt`で検証）。
+- `TaskListScreen.kt`: 項目2は`resolveSelectedFilter()`でカテゴリ削除後に無効な`selectedFilter`を「すべて」へ解決（`TaskListLogicTest.kt`で検証）。項目3はメインタスクの`onTitleClick`領域をタイトル文字だけから左側情報Column全体へ拡大。項目7は`SortOrder`（優先順位順／締切が近い順）を追加し、`sortedTasks()`で表示専用ソート（DB非変更）、`FilterChip`で切替UI。
+- `TaskViewModel.kt` / `TaskDao.kt` / `TaskRepository.kt`: 項目5。`renameSubTask()`を追加、タスクID単位Mutexで直列化し最新状態を再取得後に`updateSubTaskTitle`で部分更新、連携済みなら`doSyncToCalendar`で予定側も同期。`toggleSubTaskCompleted`も全列上書き（`updateSubTask`）から`updateSubTaskCompleted`部分更新へ変更。
+- `MainActivity.kt`: 設定ハブへのナビゲーションと`onSubTaskRename`の配線。
+
+**Claudeが修正した不具合（2026-08-27）:**
+1. `SettingsHubScreen.kt`に`GoogleAuthManager`のimportが漏れておりコンパイルエラー → import追加。
+2. `FreeTimeCheckWorkerTest.kt`の`FakeTaskDao`が新規追加の`updateSubTaskTitle`/`updateSubTaskCompleted`を実装しておらずコンパイルエラー → 空実装のoverrideを追加。
+3. `TaskViewModelCalendarTest.kt`の`連携済みタスクのサブタスクリネームでカレンダー予定も更新される`テストが、Fakeリポジトリを「リネーム後のタイトルで」誤って初期化していたため早期returnで無反応になり失敗 → 初期化を未リネームの状態に修正。
+
+**検証（2026-08-27 / Claude）:**
+
+| コマンド | 結果 |
+| --- | --- |
+| `./gradlew :app:testDebugUnitTest :app:assembleDebug :app:compileDebugAndroidTestKotlin --no-daemon` | **BUILD SUCCESSFUL**（失敗0） |
+
+`connectedDebugAndroidTest`は実機・エミュレータ未接続のため未実施。
+
+### 次の担当と行動
+
+**次の担当: Codex（Gate 3.5 / Gate 4レビュー）。** 項目1・2・3・5・7の実装・ビルド検証済み。項目4・6は画像アセット未提供のためスコープ外のまま。
+
+### Codex Gate 3.5 / Gate 4レビュー（2026-08-27）
+
+**総合判定: `CHANGES REQUIRED`**
+
+- Gate 3.5（設計・SOLID・保守性）: **`CHANGES REQUIRED`**
+- Gate 4（テスト・型・ビルド・セキュリティ・入力値・エラー処理）: **`CHANGES REQUIRED`**
+- 詳細: `docs/quality-review/2026-08-27-案件7-ui-feature-feedback.md`
+
+**ブロッキング指摘:**
+
+1. カテゴリTabに`key(tab.filter)`がなく、仕様のID安定キー要件を満たさない。
+2. 両ソートに`createdAt`タイブレークがない。
+3. メイン/サブタスク編集領域の48dp保証と明示的なTalkBack操作名がない。
+4. 仕様で禁止された50文字制限を既存サブタスクのリネームに適用している。
+5. 設定ハブに「未設定」「未接続」「接続済み」の状態が明示されない。
+6. 仕様で必須のCompose UI/Room DAO回帰テストがなく、現在のJVMテストは上記不備を見逃している。
+7. 詳細仕様書がこのworktree/`HEAD`に含まれず、main checkoutの未追跡ファイルにしか存在しない。
+
+**検証記録:** `git diff --check master...HEAD` は成功。Gradleはユーザー指示に従い、直前のClaude検証 `./gradlew :app:testDebugUnitTest :app:assembleDebug :app:compileDebugAndroidTestKotlin --no-daemon` = **BUILD SUCCESSFUL（失敗0）** を採用した。`connectedDebugAndroidTest`は端末未接続のため未実施だが、ブロッキング理由にしていない。
+
+### 次の担当と行動（Gate差し戻し）
+
+**次の担当: Kimi（修正とテスト追加）。** 上記7点を修正し、同じ3 Gradleタスクと`git diff --check`の結果を記録してCodexの再レビューへ戻す。`connectedDebugAndroidTest`は端末接続時の後続確認でよい。
+
+### CHANGES REQUIRED 修正完了（2026-08-27 / Kimi実装、Claude検証・仕上げ）
+
+Kimiが7点中6点（1〜6）を修正。指摘7（仕様書がworktreeに未追跡）はClaudeがmain checkoutから`docs/superpowers/specs/2026-08-27-案件7-ui-feature-feedback-design.md`をこのworktreeへコピーして解消した。
+
+**Kimiの修正内容:**
+1. カテゴリTabに`key(tab.filter)`を追加し安定キー化。
+2. `sortedTasks()`の両ソートに`createdAt`昇順→`id`昇順のタイブレークを追加。`TaskListLogicTest`に`createdAt`/`id`が逆になる同点データのテストを追加。
+3. メイン/サブタスクの編集領域に`Modifier.heightIn(min = 48.dp)`を追加し、`clickable`にsemantics経由で操作名（「タスクを編集する」「サブタスクの名前を変更する」）を付与。
+4. サブタスク名変更から`TASK_TITLE_MAX_LENGTH = 50`の適用とカウンタ表示を除去。50文字超の既存サブタスク名を保持したまま編集できる回帰テストを追加。
+5. `calendarLinkSummary()`のsubtitleを「未設定：...」「未接続」「接続済み」（メールありなら「接続済み：${email}」）と明示。
+6. `SettingsScreenTest.kt`・`TaskListScreenTest.kt`・`TaskDaoSubTaskTest.kt`（いずれもinstrumented）を新規追加。設定ハブの画面遷移・戻る操作・3状態表示、カテゴリタブ削除後のUI状態、48dp保証、実Room DAOでのサブタスク列非干渉を検証。
+
+**Claudeが修正した不具合（2026-08-27、2ラウンド目）:**
+1. `SettingsScreenTest.kt`・`TaskListScreenTest.kt`が`androidx.compose.ui.test.assertDoesNotExist`をトップレベル関数としてimportしていたためコンパイルエラー（`assertDoesNotExist`は`SemanticsNodeInteraction`のメンバー関数でありimport不要かつ不可）→ 誤ったimport文を削除。
+2. `CalendarLinkSummaryTest`の`認可済み状態ではアカウントと接続済みが表示される`が、実装のsubtitle書式（`"${email} で接続済み"`）とテストの期待（`startsWith("接続済み")`）が食い違い失敗 → 実装を`"接続済み：${email}"`に統一し、`SettingsScreenTest.kt`の対応する期待文字列も合わせて修正。
+
+**検証（2026-08-27 / Claude、2回目）:**
+
+| コマンド | 結果 |
+| --- | --- |
+| `./gradlew :app:testDebugUnitTest :app:assembleDebug :app:compileDebugAndroidTestKotlin --no-daemon` | **BUILD SUCCESSFUL**（失敗0） |
+
+`connectedDebugAndroidTest`は実機・エミュレータ未接続のため未実施。
+
+### 次の担当と行動
+
+**次の担当: Codex（Gate 3.5 / Gate 4 再レビュー）。** 指摘1〜7すべて修正・検証済み。
+
+### Codex Gate 3.5 / Gate 4 再レビュー（2回目・2026-08-27）: CHANGES REQUIRED（残り2件）
+
+7件中5件（1、2、4、5、7）は解消と確認された。残り2件：
+
+3. **48dp / TalkBack操作名: 部分解消。** 48dpは解消したが、`clickable`に明示的な`onClickLabel`が無く、`contentDescription`への文言連結だけではTalkBackの「ダブルタップで実行」操作名として認識されない。
+6. **UI/DAO回帰テスト: 部分解消。** 設定ハブ・タブ削除・48dp・リネームUIのテストはあるが、仕様§6が要求する「カレンダー／完了チェック操作が編集を開かないこと」「並び順切替で実際の行順が変わること」「トップバーの設定導線が1個」の検証が無い。加えて`SettingsScreenTest.kt`の未設定状態テストが`onNodeWithText("未設定")`の完全一致を使っており、実表示（「未設定：SETUP.md...」）と食い違い実行時に失敗する。
+
+**修正（2026-08-27 / Claude）:**
+- `TaskListScreen.kt`: メイン/サブタスクの`clickable`に`onClickLabel = "タスクを編集する"` / `"サブタスクの名前を変更する"`を追加。
+- `TaskListScreenTest.kt`: カレンダーボタン・メイン完了チェック・サブタスク完了チェック・スワイプ削除がそれぞれ編集/リネームダイアログを開かずコールバックだけを呼ぶことを検証する4テストを追加。トップバー設定導線が`onAllNodesWithContentDescription("設定")`で1個だけであることを検証するテストを追加。優先度の異なる2タスクを用意し、ソート切替で実際の`positionInRoot.y`の並びが変わることを検証するテストを追加。
+- `SettingsScreenTest.kt`: 未設定状態の文言検証を`onNodeWithText("未設定", substring = true)`へ修正。
+- 仕様書末尾の余分な空行を除去し、`git diff --check master...HEAD`を成功させた。
+
+**検証（2026-08-27 / Claude）:**
+
+| コマンド | 結果 |
+| --- | --- |
+| `./gradlew :app:testDebugUnitTest :app:assembleDebug :app:compileDebugAndroidTestKotlin --no-daemon` | **BUILD SUCCESSFUL**（失敗0） |
+| `git diff --check master...HEAD` | 成功 |
+
+**注意:** 新規追加の`TaskListScreenTest`のカレンダー/チェック/スワイプ分離テスト・並び順テストはコンパイル確認のみ。`connectedDebugAndroidTest`は実機・エミュレータ未接続のため未実施のまま（引き続き非ブロッキングの前提）。次回実機/エミュレータ接続時に実行し、実際にGREENであることを確認すること。
+
+### 次の担当と行動
+
+**次の担当: Codex（Gate 3.5 / Gate 4 再々レビュー）。** 残り2件を修正・検証済み。
+
+### 保留（2026-08-27 / ユーザー指示）
+
+Codexの最終レビュー実行が繰り返し（4回）セッション途中で強制終了し完了しなかったため、**ユーザーの明示指示により、これ以上の自動レビュー実行を保留する。ユーザー本人が後で最終レビューを行う。**
+実装（コミット`95629de`まで）はビルド検証済み（`BUILD SUCCESSFUL`、`git diff --check`成功）。`master`へは未マージ。
+
+**次の担当: なし（ユーザーが後で確認・判断する）。** Codexレビューを再実行する場合も、まずユーザーに確認してから行うこと。

@@ -272,6 +272,8 @@ class FreeTimeCheckWorkerTest {
         override fun getActiveTasks(): Flow<List<Task>> = MutableStateFlow(emptyList())
         override suspend fun insertSubTasks(subTasks: List<SubTask>) = Unit
         override suspend fun updateSubTask(subTask: SubTask) = Unit
+        override suspend fun updateSubTaskTitle(subTaskId: Int, title: String) = Unit
+        override suspend fun updateSubTaskCompleted(subTaskId: Int, isCompleted: Boolean) = Unit
         override suspend fun deleteSubTask(subTask: SubTask) = Unit
         override suspend fun getSubTasksFor(taskId: Int): List<SubTask> = emptyList()
         override fun getCategories(): Flow<List<Category>> = MutableStateFlow(emptyList())

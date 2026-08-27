@@ -63,6 +63,20 @@ open class TaskRepository(private val taskDao: TaskDao) {
 
     open suspend fun updateSubTask(subTask: SubTask) = taskDao.updateSubTask(subTask)
 
+    /**
+     * サブタスクのタイトルだけを更新する。全列上書きでは完了状態など
+     * 他の情報を巻き戻す恐れがあるため。
+     */
+    open suspend fun updateSubTaskTitle(subTaskId: Int, title: String) =
+        taskDao.updateSubTaskTitle(subTaskId, title)
+
+    /**
+     * サブタスクの完了状態だけを更新する。全列上書きではタイトルなど
+     * 他の情報を巻き戻す恐れがあるため。
+     */
+    open suspend fun updateSubTaskCompleted(subTaskId: Int, isCompleted: Boolean) =
+        taskDao.updateSubTaskCompleted(subTaskId, isCompleted)
+
     open suspend fun deleteSubTask(subTask: SubTask) = taskDao.deleteSubTask(subTask)
 
     open suspend fun getSubTasksFor(taskId: Int) = taskDao.getSubTasksFor(taskId)

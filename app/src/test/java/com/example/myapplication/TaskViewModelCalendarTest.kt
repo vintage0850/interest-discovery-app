@@ -493,6 +493,110 @@ class TaskViewModelCalendarTest {
         assertEquals(listOf(1 to 1_700_000_900_000L), repo.notificationTimeUpdates)
     }
 
+    @Test
+    fun `toggleSubTaskCompletedは完了状態だけを部分更新する`() = runTest {
+        val task = createTask(id = 1)
+        val subTask = SubTask(id = 10, taskId = 1, title = "下書き", isCompleted = false)
+        val repo = FakeRepository().apply {
+            save(task)
+            subTasksByTaskId[1] = listOf(subTask)
+        }
+        val viewModel = createViewModel(repo, FakeCalendarSync())
+
+        viewModel.toggleSubTaskCompleted(subTask)
+        advanceUntilIdle()
+
+        assertEquals(listOf(10 to true), repo.subTaskCompletedUpdates)
+        assertTrue(repo.subTaskFullUpdates.isEmpty())
+    }
+
+    @Test
+    fun `サブタスクをリネームするとタイトルだけが部分更新される`() = runTest {
+        val task = createTask(id = 1)
+        val subTask = SubTask(id = 10, taskId = 1, title = "下書き", isCompleted = false)
+        val repo = FakeRepository().apply {
+            save(task)
+            subTasksByTaskId[1] = listOf(subTask)
+        }
+        val viewModel = createViewModel(repo, FakeCalendarSync())
+
+        viewModel.renameSubTask(subTask, "  清書  ")
+        advanceUntilIdle()
+
+        assertEquals(listOf(10 to "清書"), repo.subTaskTitleUpdates)
+        assertTrue(repo.subTaskFullUpdates.isEmpty())
+    }
+
+    @Test
+    fun `連携済みタスクのサブタスクリネームでカレンダー予定も更新される`() = runTest {
+        val task = createTask(id = 1, title = "メイン", calendarEventId = "event_old")
+        val subTask = SubTask(id = 10, taskId = 1, title = "下書き", isCompleted = false)
+        val repo = FakeRepository().apply {
+            save(task)
+            subTasksByTaskId[1] = listOf(subTask)
+        }
+        val calendar = FakeCalendarSync()
+        val viewModel = createViewModel(repo, calendar)
+
+        viewModel.renameSubTask(subTask, "清書")
+        advanceUntilIdle()
+
+        assertEquals(1, calendar.updateCallCount.get())
+        assertEquals("メイン", calendar.lastUpdatedTask?.title)
+        assertEquals(listOf("清書"), calendar.lastUpdatedSubTasks?.map { it.title })
+    }
+
+    @Test
+    fun `未連携タスクのサブタスクリネームではカレンダーAPIを呼ばない`() = runTest {
+        val task = createTask(id = 1, title = "メイン", calendarEventId = null)
+        val subTask = SubTask(id = 10, taskId = 1, title = "下書き", isCompleted = false)
+        val repo = FakeRepository().apply {
+            save(task)
+            subTasksByTaskId[1] = listOf(subTask)
+        }
+        val calendar = FakeCalendarSync()
+        val viewModel = createViewModel(repo, calendar)
+
+        viewModel.renameSubTask(subTask, "清書")
+        advanceUntilIdle()
+
+        assertEquals(0, calendar.updateCallCount.get())
+    }
+
+    @Test
+    fun `空文字や変更なしのサブタスクリネームは何もしない`() = runTest {
+        val task = createTask(id = 1)
+        val subTask = SubTask(id = 10, taskId = 1, title = "下書き", isCompleted = false)
+        val repo = FakeRepository().apply {
+            save(task)
+            subTasksByTaskId[1] = listOf(subTask)
+        }
+        val viewModel = createViewModel(repo, FakeCalendarSync())
+
+        viewModel.renameSubTask(subTask, "   ")
+        viewModel.renameSubTask(subTask, "下書き")
+        advanceUntilIdle()
+
+        assertTrue(repo.subTaskTitleUpdates.isEmpty())
+    }
+
+    @Test
+    fun `サブタスクリネームは50文字超の名前も受け入れる`() = runTest {
+        val task = createTask(id = 1)
+        val longName = "あ".repeat(60)
+        val subTask = SubTask(id = 10, taskId = 1, title = "下書き", isCompleted = false)
+        val repo = FakeRepository().apply {
+            save(task)
+            subTasksByTaskId[1] = listOf(subTask)
+        }
+        val viewModel = createViewModel(repo, FakeCalendarSync())
+
+        viewModel.renameSubTask(subTask, longName)
+        advanceUntilIdle()
+
+        assertEquals(longName, repo.subTaskTitleUpdates.single().second)
+    }
+
     private fun createViewModel(
         repository: FakeRepository,
         calendarSync: FakeCalendarSync,
@@ -556,6 +660,9 @@ class TaskViewModelCalendarTest {
         val subTasksByTaskId = mutableMapOf<Int, List<SubTask>>()
         val eventTimeUpdates = mutableListOf<Triple<Int, Long, Boolean>>()
         val notificationTimeUpdates = mutableListOf<Pair<Int, Long?>>()
+        val subTaskTitleUpdates = mutableListOf<Pair<Int, String>>()
+        val subTaskCompletedUpdates = mutableListOf<Pair<Int, Boolean>>()
+        val subTaskFullUpdates = mutableListOf<SubTask>()
 
         val storedTasks: List<Task> get() = tasks.values.toList()
 
@@ -593,6 +700,34 @@ class TaskViewModelCalendarTest {
             tasks[taskId]?.let { tasks[taskId] = it.copy(notificationTime = notificationTime) }
         }
 
+        override suspend fun updateSubTask(subTask: SubTask) {
+            subTaskFullUpdates.add(subTask)
+            subTasksByTaskId[subTask.taskId] = (subTasksByTaskId[subTask.taskId] ?: emptyList())
+                .map { if (it.id == subTask.id) subTask else it }
+        }
+
+        override suspend fun updateSubTaskTitle(subTaskId: Int, title: String) {
+            subTaskTitleUpdates.add(subTaskId to title)
+            subTasksByTaskId.entries.firstOrNull { (_, subTasks) ->
+                subTasks.any { it.id == subTaskId }
+            }?.let { (taskId, subTasks) ->
+                subTasksByTaskId[taskId] = subTasks.map {
+                    if (it.id == subTaskId) it.copy(title = title) else it
+                }
+            }
+        }
+
+        override suspend fun updateSubTaskCompleted(subTaskId: Int, isCompleted: Boolean) {
+            subTaskCompletedUpdates.add(subTaskId to isCompleted)
+            subTasksByTaskId.entries.firstOrNull { (_, subTasks) ->
+                subTasks.any { it.id == subTaskId }
+            }?.let { (taskId, subTasks) ->
+                subTasksByTaskId[taskId] = subTasks.map {
+                    if (it.id == subTaskId) it.copy(isCompleted = isCompleted) else it
+                }
+            }
+        }
+
         override suspend fun insert(task: Task): Int {
             val id = if (task.id == 0) tasks.keys.maxOrNull()?.plus(1) ?: 1 else task.id
             tasks[id] = task.copy(id = id)
@@ -608,6 +743,7 @@ class TaskViewModelCalendarTest {
         val insertCallCount = AtomicInteger(0)
         val updateCallCount = AtomicInteger(0)
         var lastUpdatedTask: Task? = null
+        var lastUpdatedSubTasks: List<SubTask>? = null
         var lastInsertedSubTasks: List<SubTask>? = null
 
         override suspend fun insertEvent(
@@ -629,6 +765,7 @@ class TaskViewModelCalendarTest {
         ): CalendarResult<Unit> {
             updateCallCount.incrementAndGet()
             lastUpdatedTask = task
+            lastUpdatedSubTasks = subTasks
             // 同時編集の競合を再現するため、呼び出しをわずかに遅延させる
             delay(50)
             return CalendarResult.Success(Unit)
@@ -679,6 +816,8 @@ class TaskViewModelCalendarTest {
         override fun getActiveTasks(): Flow<List<Task>> = MutableStateFlow(emptyList())
         override suspend fun insertSubTasks(subTasks: List<SubTask>) = Unit
         override suspend fun updateSubTask(subTask: SubTask) = Unit
+        override suspend fun updateSubTaskTitle(subTaskId: Int, title: String) = Unit
+        override suspend fun updateSubTaskCompleted(subTaskId: Int, isCompleted: Boolean) = Unit
         override suspend fun deleteSubTask(subTask: SubTask) = Unit
         override suspend fun getSubTasksFor(taskId: Int): List<SubTask> = emptyList()
         override fun getCategories(): Flow<List<Category>> = MutableStateFlow(emptyList())

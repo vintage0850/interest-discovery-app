@@ -336,7 +336,29 @@ class TaskViewModel(
 
     fun toggleSubTaskCompleted(subTask: SubTask) {
         viewModelScope.launch {
-            repository.updateSubTask(subTask.copy(isCompleted = !subTask.isCompleted))
+            // 完了状態だけを部分更新する。全列上書きではタイトルなど他の情報を巻き戻す恐れがある。
+            repository.updateSubTaskCompleted(subTask.id, !subTask.isCompleted)
+        }
+    }
+
+    /**
+     * サブタスク名を変更する。連携済み（calendarEventId != null）ならカレンダー側の
+     * 予定説明欄も合わせて更新する。タスク ID 単位の Mutex で他のカレンダー操作と直列化する。
+     */
+    fun renameSubTask(subTask: SubTask, newTitle: String) {
+        val trimmed = newTitle.trim()
+        if (trimmed.isEmpty() || trimmed == subTask.title) return
+        viewModelScope.launch {
+            mutexFor(subTask.taskId).withLock {
+                // Mutex 取得後に最新状態を再取得。待ち行列で他の処理が変更を済ませていた場合に備える。
+                val currentSubTask = repository.getSubTasksFor(subTask.taskId)
+                    .firstOrNull { it.id == subTask.id } ?: return@withLock
+                if (trimmed.isEmpty() || trimmed == currentSubTask.title) return@withLock
+                repository.updateSubTaskTitle(currentSubTask.id, trimmed)
+
+                val currentTask = repository.getTaskById(subTask.taskId) ?: return@withLock
+                doSyncToCalendar(currentTask)
+            }
         }
     }
 

@@ -98,6 +98,20 @@ interface TaskDao {
     @Update
     suspend fun updateSubTask(subTask: SubTask)
 
+    /**
+     * サブタスクのタイトルだけを更新する。
+     * 全列上書きでは完了状態など他の情報を巻き戻す恐れがあるため。
+     */
+    @Query("UPDATE subtasks SET title = :title WHERE id = :subTaskId")
+    suspend fun updateSubTaskTitle(subTaskId: Int, title: String)
+
+    /**
+     * サブタスクの完了状態だけを更新する。
+     * 全列上書きではタイトルなど他の情報を巻き戻す恐れがあるため。
+     */
+    @Query("UPDATE subtasks SET isCompleted = :isCompleted WHERE id = :subTaskId")
+    suspend fun updateSubTaskCompleted(subTaskId: Int, isCompleted: Boolean)
+
     @Delete
     suspend fun deleteSubTask(subTask: SubTask)
 
