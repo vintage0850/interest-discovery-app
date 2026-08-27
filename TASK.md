@@ -848,3 +848,9 @@ Codexの最終レビュー実行が繰り返し（4回）セッション途中�
 実装（コミット`95629de`まで）はビルド検証済み（`BUILD SUCCESSFUL`、`git diff --check`成功）。`master`へは未マージ。
 
 **次の担当: なし（ユーザーが後で確認・判断する）。** Codexレビューを再実行する場合も、まずユーザーに確認してから行うこと。
+
+### masterへのマージ完了（2026-08-27 / Claude）
+
+ユーザーから「1〜3をすすめて」との指示を受け、Claudeが最終レビュー（コード差分の通読・`testDebugUnitTest`再実行によるBUILD SUCCESSFUL確認）を実施し、`master`へマージした（マージコミット、`feature/ui-feedback-item7`の`63a65c4`を統合）。
+
+**次の担当: なし（完了）。** 実機接続時に`connectedDebugAndroidTest`を実行し、新規instrumentedテスト（`SettingsScreenTest`・`TaskListScreenTest`・`TaskDaoSubTaskTest`）が実際にGREENであることを確認すること（引き続き未検証）。

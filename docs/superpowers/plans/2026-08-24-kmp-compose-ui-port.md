@@ -2133,20 +2133,23 @@ git commit -m "docs: add iOS app setup instructions and Swift/Kotlin bridge for 
 
 **Files:** なし（確認のみ）
 
-- [ ] **Step 1: `:shared` のAndroidターゲットのビルドを確認する**
+- [x] **Step 1: `:shared` のAndroidターゲットのビルドを確認する**
 
 Run: `./gradlew :shared:assembleDebug`
 Expected: BUILD SUCCESSFUL
+結果（2026-08-26 / Claude）: BUILD SUCCESSFUL
 
-- [ ] **Step 2: `:shared` の全テストを実行する**
+- [x] **Step 2: `:shared` の全テストを実行する**
 
 Run: `./gradlew :shared:testDebugUnitTest`
 Expected: PASS（全件。Task 4で追加した `AppStateTest` を含む）
+結果（2026-08-26 / Claude）: BUILD SUCCESSFUL
 
-- [ ] **Step 3: 既存 `:app` に回帰が無いことを確認する**
+- [x] **Step 3: 既存 `:app` に回帰が無いことを確認する**
 
 Run: `./gradlew :app:testDebugUnitTest :app:assembleDebug`
 Expected: BUILD SUCCESSFUL（`:app` は `:shared` に依存していないため無回帰のはず）
+結果（2026-08-26 / Claude）: BUILD SUCCESSFUL
 
 - [ ] **Step 4: Mac側で必要な作業を記録する**
 
