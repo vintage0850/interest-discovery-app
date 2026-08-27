@@ -4,14 +4,18 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.unit.dp
 import com.example.myapplication.data.Category
 import com.example.myapplication.data.SubTask
@@ -21,6 +25,7 @@ import com.example.myapplication.data.TaskWithSubTasks
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
@@ -211,6 +216,220 @@ class TaskListScreenTest {
 
         composeTestRule.onNodeWithText("優先順位順").assertIsNotSelected()
         composeTestRule.onNodeWithText("締切が近い順").assertIsSelected()
+    }
+
+    @Test
+    fun `カレンダーボタンをタップしても編集ダイアログは開かずカレンダー連携コールバックだけが呼ばれる`() {
+        val task = taskWithSubTasks(id = 1, title = "メインタスク")
+        var linkChanged = false
+        var editOpened = false
+
+        composeTestRule.setContent {
+            TaskListScreen(
+                tasks = listOf(task),
+                categories = emptyList(),
+                snackbarHostState = noOpSnackbarHostState,
+                onAddTask = {},
+                onOpenSettings = {},
+                onTaskToggle = {},
+                onSubTaskToggle = {},
+                onSubTaskRename = { _, _ -> },
+                onTaskDelete = {},
+                onUndoDelete = {},
+                onTaskEdit = { _, _ -> editOpened = true },
+                authState = com.example.myapplication.data.calendar.CalendarAuthState.NotAuthorized,
+                onCalendarLinkChange = { _, _ -> linkChanged = true }
+            )
+        }
+
+        composeTestRule.onNodeWithContentDescription("カレンダーに登録").performClick()
+
+        assertEquals(true, linkChanged)
+        assertEquals(false, editOpened)
+        composeTestRule.onNodeWithText("タスクを編集").assertDoesNotExist()
+    }
+
+    @Test
+    fun `メイン完了チェックをタップしても編集ダイアログは開かずトグルコールバックだけが呼ばれる`() {
+        val task = taskWithSubTasks(id = 1, title = "メインタスク")
+        var toggled = false
+        var editOpened = false
+
+        composeTestRule.setContent {
+            TaskListScreen(
+                tasks = listOf(task),
+                categories = emptyList(),
+                snackbarHostState = noOpSnackbarHostState,
+                onAddTask = {},
+                onOpenSettings = {},
+                onTaskToggle = { toggled = true },
+                onSubTaskToggle = {},
+                onSubTaskRename = { _, _ -> },
+                onTaskDelete = {},
+                onUndoDelete = {},
+                onTaskEdit = { _, _ -> editOpened = true },
+                authState = com.example.myapplication.data.calendar.CalendarAuthState.NotAuthorized,
+                onCalendarLinkChange = { _, _ -> }
+            )
+        }
+
+        composeTestRule.onNode(androidx.compose.ui.test.isToggleable()).performClick()
+
+        assertEquals(true, toggled)
+        assertEquals(false, editOpened)
+        composeTestRule.onNodeWithText("タスクを編集").assertDoesNotExist()
+    }
+
+    @Test
+    fun `サブタスク完了チェックをタップしてもリネームダイアログは開かずトグルコールバックだけが呼ばれる`() {
+        val subTask = SubTask(id = 1, taskId = 1, title = "サブタスクA")
+        val task = taskWithSubTasks(id = 1, title = "メインタスク", subTasks = listOf(subTask))
+        var toggled = false
+        var renameOpened = false
+
+        composeTestRule.setContent {
+            TaskListScreen(
+                tasks = listOf(task),
+                categories = emptyList(),
+                snackbarHostState = noOpSnackbarHostState,
+                onAddTask = {},
+                onOpenSettings = {},
+                onTaskToggle = {},
+                onSubTaskToggle = { toggled = true },
+                onSubTaskRename = { _, _ -> renameOpened = true },
+                onTaskDelete = {},
+                onUndoDelete = {},
+                onTaskEdit = { _, _ -> },
+                authState = com.example.myapplication.data.calendar.CalendarAuthState.NotAuthorized,
+                onCalendarLinkChange = { _, _ -> }
+            )
+        }
+
+        composeTestRule.onNode(androidx.compose.ui.test.isToggleable()).performClick()
+
+        assertEquals(true, toggled)
+        assertEquals(false, renameOpened)
+        composeTestRule.onNodeWithText("サブタスク名を変更").assertDoesNotExist()
+    }
+
+    @Test
+    fun `スワイプ削除は編集ダイアログを開かず削除コールバックだけを呼ぶ`() {
+        val task = taskWithSubTasks(id = 1, title = "メインタスク")
+        var deleted = false
+        var editOpened = false
+
+        composeTestRule.setContent {
+            TaskListScreen(
+                tasks = listOf(task),
+                categories = emptyList(),
+                snackbarHostState = noOpSnackbarHostState,
+                onAddTask = {},
+                onOpenSettings = {},
+                onTaskToggle = {},
+                onSubTaskToggle = {},
+                onSubTaskRename = { _, _ -> },
+                onTaskDelete = { deleted = true },
+                onUndoDelete = {},
+                onTaskEdit = { _, _ -> editOpened = true },
+                authState = com.example.myapplication.data.calendar.CalendarAuthState.NotAuthorized,
+                onCalendarLinkChange = { _, _ -> }
+            )
+        }
+
+        composeTestRule.onNodeWithText("メインタスク").performTouchInput { swipeLeft() }
+        composeTestRule.waitForIdle()
+
+        assertEquals(true, deleted)
+        assertEquals(false, editOpened)
+    }
+
+    @Test
+    fun `一覧トップバーの設定導線は1個だけである`() {
+        composeTestRule.setContent {
+            TaskListScreen(
+                tasks = emptyList(),
+                categories = emptyList(),
+                snackbarHostState = noOpSnackbarHostState,
+                onAddTask = {},
+                onOpenSettings = {},
+                onTaskToggle = {},
+                onSubTaskToggle = {},
+                onSubTaskRename = { _, _ -> },
+                onTaskDelete = {},
+                onUndoDelete = {},
+                onTaskEdit = { _, _ -> },
+                authState = com.example.myapplication.data.calendar.CalendarAuthState.NotAuthorized,
+                onCalendarLinkChange = { _, _ -> }
+            )
+        }
+
+        composeTestRule.onAllNodesWithContentDescription("設定").assertCountEquals(1)
+    }
+
+    @Test
+    fun `並び順切替で実際の表示順が変わる`() {
+        val soonDeadline = 1_700_000_000_000L
+        val laterDeadline = 1_700_050_000_000L
+        // 優先度が低いタスクを締切が近い順にし、優先順位順との違いを作る
+        val urgentButLowPriority = TaskWithSubTasks(
+            task = Task(
+                id = 1,
+                title = "締切が近いタスク",
+                deadline = soonDeadline,
+                importance = 1,
+                urgency = 1,
+                isCompleted = false,
+                status = TaskStatus.TODO
+            ),
+            subTasks = emptyList()
+        )
+        val highPriorityLater = TaskWithSubTasks(
+            task = Task(
+                id = 2,
+                title = "優先度が高いタスク",
+                deadline = laterDeadline,
+                importance = 3,
+                urgency = 3,
+                isCompleted = false,
+                status = TaskStatus.TODO
+            ),
+            subTasks = emptyList()
+        )
+
+        composeTestRule.setContent {
+            TaskListScreen(
+                tasks = listOf(urgentButLowPriority, highPriorityLater),
+                categories = emptyList(),
+                snackbarHostState = noOpSnackbarHostState,
+                onAddTask = {},
+                onOpenSettings = {},
+                onTaskToggle = {},
+                onSubTaskToggle = {},
+                onSubTaskRename = { _, _ -> },
+                onTaskDelete = {},
+                onUndoDelete = {},
+                onTaskEdit = { _, _ -> },
+                authState = com.example.myapplication.data.calendar.CalendarAuthState.NotAuthorized,
+                onCalendarLinkChange = { _, _ -> }
+            )
+        }
+
+        // 優先順位順（デフォルト）では優先度が高いタスクが先に来る
+        val priorityOrderTop = composeTestRule.onNodeWithText("優先度が高いタスク")
+            .fetchSemanticsNode().positionInRoot.y
+        val priorityOrderBottom = composeTestRule.onNodeWithText("締切が近いタスク")
+            .fetchSemanticsNode().positionInRoot.y
+        assertTrue("優先順位順では優先度が高いタスクが上に来る", priorityOrderTop < priorityOrderBottom)
+
+        composeTestRule.onNodeWithText("締切が近い順").performClick()
+        composeTestRule.waitForIdle()
+
+        // 締切順に切り替えると、締切が近いタスクが先に来る
+        val deadlineOrderTop = composeTestRule.onNodeWithText("締切が近いタスク")
+            .fetchSemanticsNode().positionInRoot.y
+        val deadlineOrderBottom = composeTestRule.onNodeWithText("優先度が高いタスク")
+            .fetchSemanticsNode().positionInRoot.y
+        assertTrue("締切が近い順では締切が近いタスクが上に来る", deadlineOrderTop < deadlineOrderBottom)
     }
 
     @Test

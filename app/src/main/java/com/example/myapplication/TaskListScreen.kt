@@ -572,7 +572,7 @@ fun TaskItem(
                 modifier = Modifier
                     .weight(1f)
                     .heightIn(min = 48.dp)
-                    .clickable(onClick = onTitleClick)
+                    .clickable(onClickLabel = "タスクを編集する", onClick = onTitleClick)
                     .padding(end = 8.dp)
                     .semantics {
                         role = Role.Button
@@ -688,7 +688,10 @@ private fun SubTaskSection(
                     modifier = Modifier
                         .weight(1f)
                         .heightIn(min = 48.dp)
-                        .clickable { onSubTaskRename(subTask) }
+                        .clickable(
+                            onClickLabel = "サブタスクの名前を変更する",
+                            onClick = { onSubTaskRename(subTask) }
+                        )
                         .padding(vertical = 8.dp)
                         .semantics {
                             role = Role.Button

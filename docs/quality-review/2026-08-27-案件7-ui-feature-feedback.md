@@ -88,3 +88,56 @@
 - Standards/Gate 3.5: blocking 3件、process nonconformance 1件、非ブロッキングのsmell 2件。最大は安定キー・ソート規則・編集操作領域の受入条件不適合。
 - Spec/Gate 4: blocking 3件。最大は禁止された文字数制限と、必須のUI/DAO回帰テスト欠落。
 
+---
+
+## 再レビュー（2026-08-27 / 修正コミット `1689f81`）
+
+- 総合判定: **CHANGES REQUIRED**
+- Gate 3.5判定: **CHANGES REQUIRED**
+- Gate 4判定: **CHANGES REQUIRED**
+- 対象: `git diff master...HEAD`（`master` = `4a9aa4a`、`HEAD` = `1689f81`）
+- コミット: `13df158`、`1689f81`
+
+### 検証記録
+
+- `./gradlew :app:testDebugUnitTest :app:assembleDebug :app:compileDebugAndroidTestKotlin --no-daemon` は、指示に従い `TASK.md` のClaude検証記録 **BUILD SUCCESSFUL（失敗0）** を採用した。
+- `connectedDebugAndroidTest` は端末未接続のため未実施だが、ブロッキング理由にしていない。
+- 再実行した `git diff --check master...HEAD` は、追跡追加された仕様書 `docs/superpowers/specs/2026-08-27-案件7-ui-feature-feedback-design.md:296` の `new blank line at EOF` 1件により失敗した。
+
+### 7件の再確認
+
+1. **カテゴリタブの安定キー: 解消**
+   - `TaskListScreen.kt:315-323` で各 `Tab` を `key(tab.filter)` で包み、カテゴリIDを安定キーとしている。
+   - `TaskListScreenTest.kt:38-69` に、選択中カテゴリ削除後のタブ消滅と「すべて」選択のUI回帰テストがある。
+
+2. **ソートの `createdAt` タイブレーク: 解消**
+   - `TaskListScreen.kt:81-94` の両Comparatorは、主キー同点後に `createdAt` 昇順 → `id` 昇順を適用する。
+   - `TaskListLogicTest.kt:85-186` が両モードの `createdAt` 逆転データと、`createdAt` 同点時の `id` 順を固定している。
+
+3. **48dp / TalkBack操作名: 部分解消、引き続きブロッキング**
+   - 48dpは `TaskListScreen.kt:571-580, 686-696` の `heightIn(min = 48.dp)` と `TaskListScreenTest.kt:71-155` で解消している。
+   - 一方、実装は操作文を `contentDescription` へ連結しただけで、`clickable(onClickLabel = "タスクを編集する", ...)` 等の明示的な `OnClick` 操作ラベルがない。現テストも `onNodeWithContentDescription` のみで、TalkBackのクリック操作名を検証しない。前回指摘の「明示的なTalkBack操作名」は未解消と判定する。
+
+4. **サブタスク名の50文字制限の遡及適用: 解消**
+   - `TaskListScreen.kt:705-735` のリネームUIに文字数制限はなく、trim後の非空・変更ありのみを保存条件にしている。
+   - `TaskListScreenTest.kt:216-250`、`TaskDaoSubTaskTest.kt:71-84`、`TaskViewModelCalendarTest.kt:583-617` に50文字超の回帰テストがある。
+
+5. **設定ハブの3状態明示: 解消**
+   - `SettingsHubScreen.kt:52-70` は「未設定」「未接続」「接続済み」を明示し、メールアドレスがある場合は併記する。
+   - `CalendarLinkSummaryTest.kt:15-57` は3状態とメール無しの接続済みを検証している。
+
+6. **UI/DAO回帰テス不足: 部分解消、引き続きブロッキング**
+   - `SettingsScreenTest.kt`、`TaskListScreenTest.kt`、`TaskDaoSubTaskTest.kt` は追加された。設定項目のコールバック・戻る操作・3状態、カテゴリ削除相当のstate更新、48dp、リネームUI、実Room DAOの列非干渉は新たに検証対象となった。
+   - しかし、仕様書§6の必須項目である「カレンダー／完了チェック操作が編集を開かないこと」の操作分離テストがない。`TaskListScreenTest.kt:49-56, 82-89, 110-117, 140-147, 169-176, 196-203, 230-237` は完了・カレンダーcallbackをすべてno-opにし、この分離を検証できない。スワイプ削除と編集の分離テストもない。
+   - 「並び順の切替で表示順が変わること」に対し、`TaskListScreenTest.kt:187-214` は空リストでFilterChipの選択状態だけを検証し、タスク行の表示順は検証していない。「一覧トップバーの設定導線が1個」の検証もない。
+   - `SettingsScreenTest.kt:79-94` の未設定テストは `onNodeWithText("未設定")` の完全一致を使うが、実表示は `SettingsHubScreen.kt:55` の「未設定：SETUP.md ...」である。デフォルトの部分一致無しでは該当ノードを取得できず、実行時に失敗するテストである。
+
+7. **仕様書の未追跡: 解消**
+   - `docs/superpowers/specs/2026-08-27-案件7-ui-feature-feedback-design.md` は `1689f81` で追加され、`git ls-files --error-unmatch` と `git cat-file -e HEAD:<path>` の両方が成功する。
+
+### 判定理由と必要な修正
+
+- 7件中5件（1、2、4、5、7）は解消したが、3のTalkBack操作ラベルと6の必須UI回帰テスが未解消のため **CHANGES REQUIRED** とする。
+- メイン／サブタスクの `clickable` に明示的な `onClickLabel` を設定し、Semanticsの `OnClick` 操作ラベルを検証するCompose UIテストを追加する。
+- カレンダー・メイン完了チェック・サブタスク完了チェック・スワイプ削除が編集を開かないこと、ソート切替で実際の行順が変わること、トップバーの設定導線が1個であることをCompose UIテストで固定する。未設定状態テストのテキストマッチも修正する。
+- 仕様書末尾の余分な空行を除去し、`git diff --check master...HEAD` を成功させる。

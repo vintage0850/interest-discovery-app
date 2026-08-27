@@ -89,7 +89,7 @@ class SettingsScreenTest {
             )
         }
 
-        composeTestRule.onNodeWithText("未設定").assertIsDisplayed()
+        composeTestRule.onNodeWithText("未設定", substring = true).assertIsDisplayed()
         composeTestRule.onNodeWithText("接続").assertDoesNotExist()
     }
 

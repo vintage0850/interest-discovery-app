@@ -815,3 +815,29 @@ Kimiが7点中6点（1〜6）を修正。指摘7（仕様書がworktreeに未追
 ### 次の担当と行動
 
 **次の担当: Codex（Gate 3.5 / Gate 4 再レビュー）。** 指摘1〜7すべて修正・検証済み。
+
+### Codex Gate 3.5 / Gate 4 再レビュー（2回目・2026-08-27）: CHANGES REQUIRED（残り2件）
+
+7件中5件（1、2、4、5、7）は解消と確認された。残り2件：
+
+3. **48dp / TalkBack操作名: 部分解消。** 48dpは解消したが、`clickable`に明示的な`onClickLabel`が無く、`contentDescription`への文言連結だけではTalkBackの「ダブルタップで実行」操作名として認識されない。
+6. **UI/DAO回帰テスト: 部分解消。** 設定ハブ・タブ削除・48dp・リネームUIのテストはあるが、仕様§6が要求する「カレンダー／完了チェック操作が編集を開かないこと」「並び順切替で実際の行順が変わること」「トップバーの設定導線が1個」の検証が無い。加えて`SettingsScreenTest.kt`の未設定状態テストが`onNodeWithText("未設定")`の完全一致を使っており、実表示（「未設定：SETUP.md...」）と食い違い実行時に失敗する。
+
+**修正（2026-08-27 / Claude）:**
+- `TaskListScreen.kt`: メイン/サブタスクの`clickable`に`onClickLabel = "タスクを編集する"` / `"サブタスクの名前を変更する"`を追加。
+- `TaskListScreenTest.kt`: カレンダーボタン・メイン完了チェック・サブタスク完了チェック・スワイプ削除がそれぞれ編集/リネームダイアログを開かずコールバックだけを呼ぶことを検証する4テストを追加。トップバー設定導線が`onAllNodesWithContentDescription("設定")`で1個だけであることを検証するテストを追加。優先度の異なる2タスクを用意し、ソート切替で実際の`positionInRoot.y`の並びが変わることを検証するテストを追加。
+- `SettingsScreenTest.kt`: 未設定状態の文言検証を`onNodeWithText("未設定", substring = true)`へ修正。
+- 仕様書末尾の余分な空行を除去し、`git diff --check master...HEAD`を成功させた。
+
+**検証（2026-08-27 / Claude）:**
+
+| コマンド | 結果 |
+| --- | --- |
+| `./gradlew :app:testDebugUnitTest :app:assembleDebug :app:compileDebugAndroidTestKotlin --no-daemon` | **BUILD SUCCESSFUL**（失敗0） |
+| `git diff --check master...HEAD` | 成功 |
+
+**注意:** 新規追加の`TaskListScreenTest`のカレンダー/チェック/スワイプ分離テスト・並び順テストはコンパイル確認のみ。`connectedDebugAndroidTest`は実機・エミュレータ未接続のため未実施のまま（引き続き非ブロッキングの前提）。次回実機/エミュレータ接続時に実行し、実際にGREENであることを確認すること。
+
+### 次の担当と行動
+
+**次の担当: Codex（Gate 3.5 / Gate 4 再々レビュー）。** 残り2件を修正・検証済み。
