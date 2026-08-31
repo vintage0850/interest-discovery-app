@@ -30,6 +30,7 @@ import com.example.myapplication.shared.reversefaq.QuestionAnswer
 import com.example.myapplication.shared.reversefaq.ReverseFaqState
 import com.example.myapplication.shared.reversefaq.SqlDelightReverseFaqRepository
 import com.example.myapplication.shared.ui.reversefaq.AddCaseScreen
+import com.example.myapplication.shared.ui.reversefaq.ContextInputScreen
 import com.example.myapplication.shared.ui.reversefaq.HomeScreen
 import com.example.myapplication.shared.ui.reversefaq.QuestionDetailScreen
 import com.example.myapplication.shared.ui.reversefaq.QuestionListScreen
@@ -43,6 +44,7 @@ private const val ROUTE_NOTIFICATION_SETTINGS = "notification_settings"
 
 private const val ROUTE_REVERSE_FAQ_HOME = "reverse_faq_home"
 private const val ROUTE_REVERSE_FAQ_ADD = "reverse_faq_add"
+private const val ROUTE_REVERSE_FAQ_CONTEXT = "reverse_faq_context/{caseId}"
 private const val ROUTE_REVERSE_FAQ_QUESTIONS = "reverse_faq_questions/{caseId}"
 private const val ROUTE_REVERSE_FAQ_QUESTION_DETAIL = "reverse_faq_question/{questionId}"
 
@@ -101,9 +103,20 @@ class MainActivity : ComponentActivity() {
                 val scope = rememberCoroutineScope()
                 val reverseFaqDriverFactory = remember { AndroidDatabaseDriverFactory(application) }
                 val reverseFaqState = remember(reverseFaqDriverFactory) {
-                    ReverseFaqState(SqlDelightReverseFaqRepository(reverseFaqDriverFactory), scope)
+                    // TODO: 実機検証用の一時変更。`adb reverse tcp:8000 tcp:8000` を使う前提で
+                    // 127.0.0.1 を指定している。本来はビルドフレーバー等で切り替え可能にすべき。
+                    ReverseFaqState(
+                        SqlDelightReverseFaqRepository(
+                            reverseFaqDriverFactory,
+                            com.example.myapplication.shared.reversefaq.ReverseFaqApiClient(
+                                baseUrl = "http://127.0.0.1:8000"
+                            )
+                        ),
+                        scope
+                    )
                 }
                 val cases by reverseFaqState.allCases.collectAsStateWithLifecycle()
+                var isAnalyzing by remember { mutableStateOf(false) }
                 LaunchedEffect(Unit) {
                     reverseFaqState.messages.collect { message ->
                         snackbarHostState.currentSnackbarData?.dismiss()
@@ -213,11 +226,42 @@ class MainActivity : ComponentActivity() {
                     composable(ROUTE_REVERSE_FAQ_ADD) {
                         AddCaseScreen(
                             onCaseAdded = { title ->
-                                reverseFaqState.createCaseAndGenerateQuestions(title)
-                                navController.popBackStack()
+                                reverseFaqState.createCaseAndReturnId(title) { caseId ->
+                                    navController.navigate("reverse_faq_context/$caseId") {
+                                        popUpTo(ROUTE_REVERSE_FAQ_ADD) { inclusive = true }
+                                        launchSingleTop = true
+                                    }
+                                }
                             },
                             onBack = { navController.popBackStack() }
                         )
+                    }
+                    composable(ROUTE_REVERSE_FAQ_CONTEXT) { backStackEntry ->
+                        val caseId = backStackEntry.arguments?.getString("caseId")?.toLongOrNull()
+                        val case = cases.find { it.id == caseId }
+                        if (caseId != null && case != null) {
+                            ContextInputScreen(
+                                caseTitle = case.title,
+                                onAnalyze = { documentText, userContextJson ->
+                                    isAnalyzing = true
+                                    reverseFaqState.analyzeCase(
+                                        caseId,
+                                        documentText,
+                                        userContextJson
+                                    ) { success ->
+                                        isAnalyzing = false
+                                        if (success) {
+                                            navController.navigate("reverse_faq_questions/$caseId") {
+                                                popUpTo("reverse_faq_context/$caseId") { inclusive = true }
+                                                launchSingleTop = true
+                                            }
+                                        }
+                                    }
+                                },
+                                onBack = { navController.popBackStack() },
+                                isLoading = isAnalyzing
+                            )
+                        }
                     }
                     composable(ROUTE_REVERSE_FAQ_QUESTIONS) { backStackEntry ->
                         val caseId = backStackEntry.arguments?.getString("caseId")?.toLongOrNull()

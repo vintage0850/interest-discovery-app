@@ -6,6 +6,7 @@ plugins {
     alias(libs.plugins.sqldelight)
     alias(libs.plugins.compose.multiplatform)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.serialization)
 }
 
 kotlin {
@@ -17,8 +18,7 @@ kotlin {
 
     listOf(
         iosArm64(),
-        iosSimulatorArm64(),
-        iosX64()
+        iosSimulatorArm64()
     ).forEach { iosTarget ->
         iosTarget.binaries.framework {
             baseName = "shared"
@@ -36,14 +36,21 @@ kotlin {
             implementation(compose.components.resources)
             implementation(libs.navigation.compose.multiplatform)
             implementation(libs.kotlinx.datetime)
+            implementation(libs.kotlinx.serialization.json)
+            implementation(libs.ktor.client.core)
+            implementation(libs.ktor.client.content.negotiation)
+            implementation(libs.ktor.serialization.kotlinx.json)
+            implementation(libs.ktor.client.logging)
         }
         commonTest.dependencies {
             implementation(kotlin("test"))
+            implementation(libs.kotlinx.coroutines.test)
         }
         androidMain.dependencies {
             implementation(libs.sqldelight.android.driver)
             implementation(compose.uiTooling)
             implementation(compose.preview)
+            implementation(libs.ktor.client.okhttp)
         }
         val androidUnitTest by getting {
             dependencies {
@@ -54,6 +61,7 @@ kotlin {
         }
         iosMain.dependencies {
             implementation(libs.sqldelight.native.driver)
+            implementation(libs.ktor.client.darwin)
         }
     }
 }

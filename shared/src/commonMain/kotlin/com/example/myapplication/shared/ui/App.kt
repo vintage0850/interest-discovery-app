@@ -12,6 +12,7 @@ import androidx.compose.runtime.setValue
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.toRoute
 import com.example.myapplication.shared.TaskRepository
 import com.example.myapplication.shared.db.DatabaseDriverFactory
 import com.example.myapplication.shared.reversefaq.Question
@@ -19,17 +20,29 @@ import com.example.myapplication.shared.reversefaq.QuestionAnswer
 import com.example.myapplication.shared.reversefaq.ReverseFaqState
 import com.example.myapplication.shared.reversefaq.SqlDelightReverseFaqRepository
 import com.example.myapplication.shared.ui.reversefaq.AddCaseScreen
+import com.example.myapplication.shared.ui.reversefaq.ContextInputScreen
 import com.example.myapplication.shared.ui.reversefaq.HomeScreen
 import com.example.myapplication.shared.ui.reversefaq.QuestionDetailScreen
 import com.example.myapplication.shared.ui.reversefaq.QuestionListScreen
 import com.example.myapplication.shared.ui.theme.SharedAppTheme
+import kotlinx.serialization.Serializable
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 
-private const val ROUTE_REVERSE_FAQ_HOME = "reverse_faq_home"
-private const val ROUTE_REVERSE_FAQ_ADD = "reverse_faq_add"
-private const val ROUTE_REVERSE_FAQ_QUESTIONS = "reverse_faq_questions/{caseId}"
-private const val ROUTE_REVERSE_FAQ_QUESTION_DETAIL = "reverse_faq_question/{questionId}"
+@Serializable
+private object ReverseFaqHome
+
+@Serializable
+private object ReverseFaqAdd
+
+@Serializable
+private data class ReverseFaqContext(val caseId: Long)
+
+@Serializable
+private data class ReverseFaqQuestions(val caseId: Long)
+
+@Serializable
+private data class ReverseFaqQuestionDetail(val questionId: Long)
 
 private const val ROUTE_LIST = "list"
 private const val ROUTE_ADD = "add"
@@ -55,6 +68,7 @@ fun App(driverFactory: DatabaseDriverFactory) {
         val tasks by appState.allTasks.collectAsState()
         val categories by appState.categories.collectAsState()
         val cases by reverseFaqState.allCases.collectAsState()
+        var isAnalyzing by remember { mutableStateOf(false) }
 
         val snackbarHostState = remember { SnackbarHostState() }
         LaunchedEffect(Unit) {
@@ -70,7 +84,7 @@ fun App(driverFactory: DatabaseDriverFactory) {
             }
         }
 
-        NavHost(navController = navController, startDestination = ROUTE_REVERSE_FAQ_HOME) {
+        NavHost(navController = navController, startDestination = ReverseFaqHome) {
             composable(ROUTE_LIST) {
                 TaskListScreen(
                     tasks = tasks,
@@ -121,78 +135,106 @@ fun App(driverFactory: DatabaseDriverFactory) {
             }
 
             // Reverse FAQ（Phase 1）
-            composable(ROUTE_REVERSE_FAQ_HOME) {
+            composable<ReverseFaqHome> {
                 HomeScreen(
                     cases = cases,
                     onAddCase = {
-                        navController.navigate(ROUTE_REVERSE_FAQ_ADD) { launchSingleTop = true }
+                        navController.navigate(ReverseFaqAdd) { launchSingleTop = true }
                     },
                     onCaseClick = { case ->
-                        navController.navigate("reverse_faq_questions/${case.id}") {
+                        navController.navigate(ReverseFaqQuestions(case.id)) {
                             launchSingleTop = true
                         }
                     }
                 )
             }
-            composable(ROUTE_REVERSE_FAQ_ADD) {
+            composable<ReverseFaqAdd> {
                 AddCaseScreen(
                     onCaseAdded = { title ->
-                        reverseFaqState.createCaseAndGenerateQuestions(title)
-                        navController.popBackStack()
+                        reverseFaqState.createCaseAndReturnId(title) { caseId ->
+                            navController.navigate(ReverseFaqContext(caseId)) {
+                                popUpTo<ReverseFaqAdd> { inclusive = true }
+                                launchSingleTop = true
+                            }
+                        }
                     },
                     onBack = { navController.popBackStack() }
                 )
             }
-            composable(ROUTE_REVERSE_FAQ_QUESTIONS) { backStackEntry ->
-                val caseId = backStackEntry.arguments?.getString("caseId")?.toLongOrNull()
-                if (caseId != null) {
-                    val questions by reverseFaqState.questionsForCase(caseId).collectAsState()
-                    val progress by reverseFaqState.progressForCase(caseId).collectAsState()
-                    val case = cases.find { it.id == caseId }
-                    if (case != null) {
-                        QuestionListScreen(
-                            caseTitle = case.title,
-                            questions = questions,
-                            progress = progress,
-                            onBack = { navController.popBackStack() },
-                            onQuestionClick = { question ->
-                                navController.navigate("reverse_faq_question/${question.id}") {
-                                    launchSingleTop = true
+            composable<ReverseFaqContext> { backStackEntry ->
+                val args = backStackEntry.toRoute<ReverseFaqContext>()
+                val case = cases.find { it.id == args.caseId }
+                if (case != null) {
+                    ContextInputScreen(
+                        caseTitle = case.title,
+                        onAnalyze = { documentText, userContextJson ->
+                            isAnalyzing = true
+                            reverseFaqState.analyzeCase(
+                                args.caseId,
+                                documentText,
+                                userContextJson
+                            ) { success ->
+                                isAnalyzing = false
+                                if (success) {
+                                    navController.navigate(ReverseFaqQuestions(args.caseId)) {
+                                        popUpTo<ReverseFaqContext> { inclusive = true }
+                                        launchSingleTop = true
+                                    }
                                 }
                             }
-                        )
-                    }
+                        },
+                        onBack = { navController.popBackStack() },
+                        isLoading = isAnalyzing
+                    )
                 }
             }
-            composable(ROUTE_REVERSE_FAQ_QUESTION_DETAIL) { backStackEntry ->
-                val questionId = backStackEntry.arguments?.getString("questionId")?.toLongOrNull()
-                if (questionId != null) {
-                    var question by remember(questionId) { mutableStateOf<Question?>(null) }
-                    var answer by remember(questionId) { mutableStateOf<QuestionAnswer?>(null) }
-                    LaunchedEffect(questionId) {
-                        question = reverseFaqState.getQuestionById(questionId)
-                        answer = reverseFaqState.getAnswerForQuestion(questionId)
-                    }
-                    question?.let { q ->
-                        QuestionDetailScreen(
-                            question = q,
-                            answer = answer,
-                            onBack = { navController.popBackStack() },
-                            onConfirm = {
-                                reverseFaqState.confirmQuestion(questionId)
-                                navController.popBackStack()
-                            },
-                            onSaveAnswer = { text, by ->
-                                reverseFaqState.saveAnswer(
-                                    questionId,
-                                    text,
-                                    by,
-                                    currentTimeMillis()
-                                )
-                                navController.popBackStack()
+            composable<ReverseFaqQuestions> { backStackEntry ->
+                val args = backStackEntry.toRoute<ReverseFaqQuestions>()
+                val questions by reverseFaqState.questionsForCase(args.caseId).collectAsState()
+                val progress by reverseFaqState.progressForCase(args.caseId).collectAsState()
+                val case = cases.find { it.id == args.caseId }
+                if (case != null) {
+                    QuestionListScreen(
+                        caseTitle = case.title,
+                        questions = questions,
+                        progress = progress,
+                        onBack = { navController.popBackStack() },
+                        onQuestionClick = { question ->
+                            navController.navigate(ReverseFaqQuestionDetail(question.id)) {
+                                launchSingleTop = true
                             }
-                        )
-                    }
+                        }
+                    )
+                }
+            }
+            composable<ReverseFaqQuestionDetail> { backStackEntry ->
+                val args = backStackEntry.toRoute<ReverseFaqQuestionDetail>()
+                val questionId = args.questionId
+                var question by remember(questionId) { mutableStateOf<Question?>(null) }
+                var answer by remember(questionId) { mutableStateOf<QuestionAnswer?>(null) }
+                LaunchedEffect(questionId) {
+                    question = reverseFaqState.getQuestionById(questionId)
+                    answer = reverseFaqState.getAnswerForQuestion(questionId)
+                }
+                question?.let { q ->
+                    QuestionDetailScreen(
+                        question = q,
+                        answer = answer,
+                        onBack = { navController.popBackStack() },
+                        onConfirm = {
+                            reverseFaqState.confirmQuestion(questionId)
+                            navController.popBackStack()
+                        },
+                        onSaveAnswer = { text, by ->
+                            reverseFaqState.saveAnswer(
+                                questionId,
+                                text,
+                                by,
+                                currentTimeMillis()
+                            )
+                            navController.popBackStack()
+                        }
+                    )
                 }
             }
         }

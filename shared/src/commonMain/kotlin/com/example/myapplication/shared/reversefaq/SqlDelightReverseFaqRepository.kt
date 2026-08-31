@@ -7,13 +7,17 @@ import com.example.myapplication.shared.db.SharedDatabase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
 
 /**
  * SQLDelightを使った[ReverseFaqRepository]の実装。
  */
-class SqlDelightReverseFaqRepository(driverFactory: DatabaseDriverFactory) : ReverseFaqRepository {
+class SqlDelightReverseFaqRepository(
+    driverFactory: DatabaseDriverFactory,
+    private val apiClient: ReverseFaqApiClient = ReverseFaqApiClient()
+) : ReverseFaqRepository {
 
     private val database = SharedDatabase(driverFactory.createDriver())
     private val queries = database.reverseFaqQueries
@@ -75,41 +79,22 @@ class SqlDelightReverseFaqRepository(driverFactory: DatabaseDriverFactory) : Rev
 
     // ---- Question ----
 
-    override suspend fun generateDummyQuestions(caseId: Long): List<Question> = withContext(Dispatchers.Default) {
-        val existing = queries.selectQuestionsForCase(caseId, ::toQuestion).executeAsList()
-        if (existing.isNotEmpty()) {
-            return@withContext existing
-        }
+    override suspend fun analyzeQuestions(
+        caseId: Long,
+        documentText: String,
+        userContextJson: String
+    ): List<Question> = withContext(Dispatchers.Default) {
+        // 本人条件を JSON 文字列から Map に戻す。解析できなければ空の Map で続行する。
+        val userContext = parseUserContext(userContextJson)
 
-        val dummies = listOf(
-            Question(
-                caseId = caseId,
-                title = "退去時のクリーニング費用は必ず発生しますか？",
-                reason = "退去時の費用負担条件が明確ではありません。実際にいくらかかるか、契約書の記載と担当者の説明が一致するか確認してください。",
-                riskLevel = RiskLevel.HIGH,
-                sourceText = "退去時には所定のクリーニング費用を...",
-                sourcePage = 8
-            ),
-            Question(
-                caseId = caseId,
-                title = "更新料はいくらですか？",
-                reason = "契約更新時の料金が記載されているか確認が必要です。",
-                riskLevel = RiskLevel.MEDIUM,
-                sourceText = "更新料は...",
-                sourcePage = 5
-            ),
-            Question(
-                caseId = caseId,
-                title = "鍵交換費用の負担はどうなりますか？",
-                reason = "鍵の紛失・交換時の費用負担について確認してください。",
-                riskLevel = RiskLevel.LOW,
-                sourceText = null,
-                sourcePage = null
-            )
-        )
+        // 本人条件を保存してからバックエンドへ問い合わせる。
+        saveUserContext(caseId, userContextJson)
+
+        val dtos = apiClient.analyze(caseId, documentText, userContext)
+        val questions = dtos.map { it.toQuestion(caseId) }
 
         queries.transaction {
-            dummies.forEach { q ->
+            questions.forEach { q ->
                 queries.insertQuestion(
                     case_id = q.caseId,
                     title = q.title,
@@ -123,6 +108,14 @@ class SqlDelightReverseFaqRepository(driverFactory: DatabaseDriverFactory) : Rev
         }
 
         queries.selectQuestionsForCase(caseId, ::toQuestion).executeAsList()
+    }
+
+    private fun parseUserContext(json: String): Map<String, kotlinx.serialization.json.JsonElement> {
+        return try {
+            Json.decodeFromString<Map<String, kotlinx.serialization.json.JsonElement>>(json)
+        } catch (_: Exception) {
+            emptyMap()
+        }
     }
 
     override fun observeQuestionsForCase(caseId: Long): Flow<List<Question>> =

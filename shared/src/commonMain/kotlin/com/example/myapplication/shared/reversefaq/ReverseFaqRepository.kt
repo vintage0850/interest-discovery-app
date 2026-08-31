@@ -25,7 +25,11 @@ interface ReverseFaqRepository {
     suspend fun getUserContext(caseId: Long): UserContext?
 
     // Question
-    suspend fun generateDummyQuestions(caseId: Long): List<Question>
+    suspend fun analyzeQuestions(
+        caseId: Long,
+        documentText: String,
+        userContextJson: String
+    ): List<Question>
     fun observeQuestionsForCase(caseId: Long): Flow<List<Question>>
     suspend fun getQuestionById(id: Long): Question?
     suspend fun confirmQuestion(id: Long)

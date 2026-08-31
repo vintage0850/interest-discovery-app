@@ -56,7 +56,11 @@ class FakeReverseFaqRepository : ReverseFaqRepository {
 
     override suspend fun getUserContext(caseId: Long): UserContext? = contexts[caseId]
 
-    override suspend fun generateDummyQuestions(caseId: Long): List<Question> {
+    override suspend fun analyzeQuestions(
+        caseId: Long,
+        documentText: String,
+        userContextJson: String
+    ): List<Question> {
         val newQuestions = listOf(
             Question(
                 id = nextQuestionId++,

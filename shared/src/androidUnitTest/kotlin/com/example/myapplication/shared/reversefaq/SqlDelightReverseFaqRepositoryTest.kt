@@ -28,7 +28,10 @@ class SqlDelightReverseFaqRepositoryTest {
         driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
         driver.execute(null, "PRAGMA foreign_keys = ON;", 0)
         SharedDatabase.Schema.create(driver)
-        repository = SqlDelightReverseFaqRepository(InMemoryDriverFactory(driver))
+        repository = SqlDelightReverseFaqRepository(
+            InMemoryDriverFactory(driver),
+            FakeReverseFaqApiClient()
+        )
     }
 
     @After
@@ -53,7 +56,7 @@ class SqlDelightReverseFaqRepositoryTest {
     }
 
     @Test
-    fun `ダミー質問を生成すると案件に紐づく質問が保存される`() = runBlocking {
+    fun `質問を分析して生成すると案件に紐づく質問が保存される`() = runBlocking {
         val caseId = repository.createCase(
             title = "テスト案件",
             documentUri = null,
@@ -61,7 +64,7 @@ class SqlDelightReverseFaqRepositoryTest {
             deadline = null
         )
 
-        val questions = repository.generateDummyQuestions(caseId)
+        val questions = repository.analyzeQuestions(caseId, "テスト契約書の本文です。", "{}")
 
         assertEquals(3, questions.size)
         assertTrue(questions.all { it.caseId == caseId })
@@ -74,7 +77,7 @@ class SqlDelightReverseFaqRepositoryTest {
     @Test
     fun `質問を確認済みにできる`() = runBlocking {
         val caseId = repository.createCase("テスト案件", null, DocumentType.NONE, null)
-        val questions = repository.generateDummyQuestions(caseId)
+        val questions = repository.analyzeQuestions(caseId, "テスト契約書の本文です。", "{}")
         val question = questions.first()
 
         repository.confirmQuestion(question.id)
@@ -86,7 +89,7 @@ class SqlDelightReverseFaqRepositoryTest {
     @Test
     fun `回答を保存できる`() = runBlocking {
         val caseId = repository.createCase("テスト案件", null, DocumentType.NONE, null)
-        val questions = repository.generateDummyQuestions(caseId)
+        val questions = repository.analyzeQuestions(caseId, "テスト契約書の本文です。", "{}")
         val question = questions.first()
 
         repository.saveAnswer(
@@ -116,7 +119,7 @@ class SqlDelightReverseFaqRepositoryTest {
     fun `案件削除時に紐づく質問と回答と本人条件も削除される`() = runBlocking {
         val caseId = repository.createCase("テスト案件", null, DocumentType.NONE, null)
         repository.saveUserContext(caseId, "{}")
-        val questions = repository.generateDummyQuestions(caseId)
+        val questions = repository.analyzeQuestions(caseId, "テスト契約書の本文です。", "{}")
         repository.saveAnswer(questions.first().id, "回答", null, 1_700_000_000_000L)
 
         repository.deleteCase(caseId)

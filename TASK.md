@@ -1111,3 +1111,168 @@ Codexレビューを省略した分、通常Gate 3.5で拾うはずの設計・�
 **次の担当と行動:**
 
 **次の担当: なし（Phase 0〜1完了）。** Phase 2（バックエンド・LLM連携）に進む場合は、Claudeによる新規の設計判断（案件6の「スコープ外・ユーザー判断待ち」節参照：バックエンド構成、LLM API選定）から着手すること。
+
+### ユーザーによる実機確認完了（2026-08-31）
+
+ユーザー本人が実機（Pixel 10a）で、案件カード「TestApartment」タップ以降（質問一覧→質問詳細→回答入力→確認済みへの変更→進捗表示）を含む一連の流れを確認し、「できてる」と報告。
+
+**Phase 0〜1、完全に完了。** 受入条件（案件作成→質問表示→回答入力→確認済みに変更→進捗更新がダミーデータで動作すること）を満たしたことをユーザー自身が確認済み。
+
+## Phase 2〜3：バックエンド・LLM連携
+
+**状態:** `設計判断済み・実装待ち`
+**担当:** Claude（設計裁定のみ）→ 次工程 Kimi
+
+### 設計判断（2026-08-31 / Claude、ユーザー指示に基づく）
+
+ユーザー指示: 「1(バックエンド構成)は時間がかからない方の（で 2(LLM)はGemini、3(APIキー扱い)は時間がかからない方法を提案」を受けて以下を決定した。
+
+**1. バックエンド構成 — ローカル開発サーバー（採用）**
+
+クラウドデプロイ（Render/Railway等のアカウント作成・CI設定）は今回行わない。開発機（`C:\Users\vinta\Claude_Test`と同じPC）で`uvicorn`によるFastAPIローカルサーバーを起動し、Androidアプリからはエミュレータなら`http://10.0.2.2:8000`、実機なら開発機のLAN内IP（例:`http://192.168.x.x:8000`、Wi-Fi同一ネットワーク前提）でアクセスする。
+理由: アカウント作成・環境変数設定・デプロイパイプライン構築が一切不要で最速。計画書Phase2の目的（「スマホ→Backend通信経路を完成させること」）を満たすのに本番デプロイは不要。実際の対外公開・常時稼働が必要になった時点（ストア配布時等）で、改めてクラウドデプロイを設計判断する（今回はスコープ外）。
+
+**2. LLM — Gemini（ユーザー指定）**
+
+Google Gemini API（`google-genai` Python SDK）を使う。計画書14〜15節の「hallucination対策」「構造化出力」の要件を満たすため、Geminiの`response_schema`機能で`Question[]`の構造化出力を強制する。
+
+**3. APIキーの扱い — 既存のGoogle AI Studioキーを再利用（最速）**
+
+新規にAPIキーを発行・登録する時間を省くため、`_ai-routing\env.ps1`に既に設定済みの`$env:GEMINI_API_KEY`（Google AI Studioキー、`gemini.ps1`用に既存）と同じ値を、バックエンド用の`backend/.env`（新規、`.gitignore`対象）にコピーして使う。
+バックエンドは`.env`から環境変数として読み込む。スマホアプリ側にはAPIキーを一切埋め込まない（計画書12節の要件どおり）。
+理由: 新規キー発行の手間・審査待ちがなく、既に動作確認済みのキーを流用できるため最速。将来的に本番運用でクォータを分離したくなった場合は、その時点で別キーへ切り替える（今回はスコープ外）。
+
+**Android側のHTTP通信 — Ktor Client（新規依存追加、承認）**
+
+`shared/commonMain`にネットワーキング層が無いため、KMP標準の`Ktor Client`を新規依存として追加する（Android/iOS両対応、将来のiOS実装を妨げない）。`app/`側で既に使っているRetrofitは`:shared`からは使えない（Retrofitは`androidMain`専用）ため流用しない。
+
+**Phase 2/3のスコープに合わせた最小限のUI追加（承認）**
+
+計画書のScreen 3（ContextInputScreen、本人条件入力）はPhase1で未実装のため、今回追加する。契約書PDF読込（Phase4）はまだ実装しないため、暫定的に契約書本文を直接テキスト入力する暫定欄を設ける（Phase4でPDF抽出に置き換える前提の一時的なUI、削除しやすいようコメントで明示させる）。
+
+### 対象ファイル（担当宣言：Kimi）
+
+新規:
+- `backend/`（新規ディレクトリ、FastAPI）
+  - `main.py`（`GET /health`、`POST /cases/analyze`）
+  - `models.py`（Pydanticモデル：リクエスト/レスポンス、計画書13節のAPI仕様に準拠）
+  - `gemini_client.py`（Gemini API呼び出し、`response_schema`で構造化出力・計画書14/15節のプロンプト制約を実装）
+  - `requirements.txt`
+  - `.env.example`（`GEMINI_API_KEY=`のプレースホルダのみ、実値は書かない）
+  - `.gitignore`（`.env`を除外）
+  - `README.md`（起動方法：`uvicorn main:app --reload --host 0.0.0.0 --port 8000`）
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/reversefaq/`配下（追加）:
+  - Ktor Client経由でバックエンドを呼ぶ`ReverseFaqApiClient`（仮称）
+  - `UserContext`入力用の`ContextInputScreen`（Screen 3）
+- `shared/build.gradle.kts`（Ktor Client依存追加）
+
+変更:
+- `ReverseFaqRepository` / `SqlDelightReverseFaqRepository` / `ReverseFaqState`：ダミー質問生成を`ReverseFaqApiClient`呼び出しに置き換え（バックエンド未起動時のエラー処理も追加すること。ネットワークエラー時は計画書15節の「契約書内に記載を確認できませんでした」的な安全側の挙動ではなく、明確なエラーメッセージ表示に留める＝存在しない質問を捏造しない）
+- `AddCaseScreen`または新規画面：契約書本文の暫定入力欄追加
+
+**編集してはいけないファイル（引き続き）:** Task/Category/SubTask関連ファイル、既存Reverse FAQ Phase0〜1実装のコアロジック（大きく作り直さない、必要な修正のみ）。
+
+### 受入条件
+
+- `backend/`を`uvicorn main:app`で起動し、`curl`で`POST /cases/analyze`に契約書テキスト＋本人条件を渡すと、根拠(`sourceText`)付きの`Question[]`（3〜5件）がJSONで返る。根拠が契約書内に無い場合は「契約書内に記載を確認できませんでした」等、捏造しない旨が明示される。
+- Androidアプリから実際にバックエンドへ接続し、案件作成時にGemini生成の質問が表示される（ダミーデータ生成を使わなくなること）。
+- `./gradlew :shared:assembleDebug :shared:testDebugUnitTest :app:assembleDebug :app:testDebugUnitTest`が成功する。
+- 既存Task/Category/SubTask機能・Phase0〜1の受入条件に回帰がないこと。
+- APIキーがリポジトリにコミットされていないこと（`.env`が`.gitignore`済みであること）。
+
+### 次の担当と行動
+
+**次の担当: Kimi。** 上記対象ファイルを実装。バックエンド単体の動作確認（`curl`）→Android側wiring→実機確認、の順で進めること。
+完了後、TASK.mdへ作業履歴を追記。Codexレビューは今回も省略可（ユーザーの継続指示と解釈）だが、Phase2〜3はAPIキー・外部通信を含むため、完了後にClaudeが再度動作確認・設計面のセルフレビューを行う。
+
+### 実装未着手・コスト上限検知（2026-08-31 / Claude）
+
+Kimi起動直後、`cost-guard.ps1`がMoonshot残高不足（0.977 < 下限1.0）を検知し、実装は**一切開始されていない**（0ファイル変更）。
+非対話実行（バックグラウンド）だったため「Claudeに切り替えますか？」の確認プロンプトが`Read-Host`エラーで応答できず中断。検知ログは`app-studio\Obsidian_Comapany\Inbox\2026-08-31_コスト上限検知_Kimi.md`に記録済み。
+
+**次の担当と行動（更新）:**
+
+**次の担当: ユーザー（予算判断）。** 以下のいずれかを選んでから再開すること。
+1. Moonshot残高をチャージしてKimiで続行する
+2. Claudeにフォールバックして実装する（課金が発生する。AGENTS.mdの原則上、通常実装はKimi担当が望ましいため例外運用になる）
+3. 一旦ここで中断する
+
+Kimiで続行する場合、上記「対象ファイル」「受入条件」節はそのまま有効（変更不要）。
+
+### Kimi再開・セッション強制終了・Claudeによる引き継ぎ検証（2026-08-31）
+
+ユーザーがMoonshot残高をチャージし、Kimiを再起動。バックエンド一式（`backend/`）、`ReverseFaqApiClient`（Ktor Client）、`ContextInputScreen`、Repository/State側のダミー生成からの置き換えまで実装が進んだが、**セッションが完了報告前に外部から強制終了（killed）された**（TASK.mdへの作業履歴追記は無し）。
+
+Claudeが残された未コミット差分を検証した:
+
+- `backend/.env`にBOM付きUTF-8で書き込まれていたのが原因で`python-dotenv`がキーを読み込めず`RuntimeError`（Claude起因の設定ミス。Kimiの実装ミスではない）。BOM無しで書き直して解消。
+- 上記修正後、`uvicorn main:app`を起動し`curl`で実地検証:
+  - `GET /health` → `{"status":"ok"}` (200)
+  - `POST /cases/analyze`（賃貸契約サンプル文＋本人条件）→ 実際のGemini APIで4件の構造化質問が返却された。根拠が契約書内に無い項目には`"契約書内に記載を確認できませんでした"`が明示され、hallucination対策（計画書15節）が機能していることを確認
+- `./gradlew :shared:assembleDebug :shared:testDebugUnitTest :app:assembleDebug :app:testDebugUnitTest --no-daemon --rerun-tasks` → **BUILD SUCCESSFUL**（全91タスク再実行、全テスト合格）
+- `git status`で`backend/.env`が追跡対象になっていないことを確認（Kimi自身が`backend/.gitignore`も追加済み）
+- 意図しない副産物`shared/src/commonMain/sqldelight/databases/1.db`（テスト実行中に誤って生成されたSQLiteファイル、ソースに不要）をClaudeが削除
+
+**結論: Kimiのセッションは強制終了されたが、実装自体はほぼ完了していた。** Android実機での目視確認（ContextInputScreen経由の実際のAI質問生成フロー）は未実施。
+
+**次の担当と行動:**
+
+**次の担当: ユーザー（実機での目視確認）または Claude（続けて実機確認する場合）。** バックエンドを`cd backend && python -m uvicorn main:app --host 0.0.0.0 --port 8000`で起動した状態で、実機/エミュレータからアプリを操作し、ContextInputScreen（本人条件・契約書本文の暫定入力欄）→AI生成の質問表示、が実際に動くことを確認する。実機の場合はバックエンドのベースURLを開発機のLAN内IPに差し替える必要がある（`ReverseFaqApiClient`のデフォルトはエミュレータ用`10.0.2.2`）。
+
+### 実機（USB）検証で発覚したバグの修正、およびCodexへの引き継ぎ（2026-08-31 / Claude）
+
+ユーザーが実機（Pixel 10a、USB接続、`adb reverse tcp:8000 tcp:8000`でバックエンド疎通、実機テスト用に`ReverseFaqApiClient`のbaseUrlを一時的に`http://127.0.0.1:8000`へ変更——`app/src/main/java/com/example/myapplication/MainActivity.kt`内、TODOコメント付き）で検証したところ「AI生成の質問で、生成していて固まる」と報告。
+
+**原因1（Gemini側・一時的）:** バックエンドログで`google.genai.errors.ServerError: 503 UNAVAILABLE`（Gemini側の高負荷）を確認。設定不備ではない。直後に同じリクエストを`curl`で再実行したところ11.3秒で成功、4件の構造化質問が返ることを確認済み。
+
+**原因2（アプリ側の実装バグ・Claudeが発見・修正済み）:** `ReverseFaqState.analyzeCase`の`onComplete`コールバックが**成功時にしか呼ばれない**設計だったため、バックエンドがエラーを返す（503等）と`isAnalyzing`（ローディング状態）が永久に解除されず、画面が「固まって見える」状態になっていた。
+`onComplete: () -> Unit`を`onFinished: (success: Boolean) -> Unit`に変更し、成功・失敗どちらでも呼ばれる`finally`ブロックに移動して修正した（`ReverseFaqState.kt`）。呼び出し側（`MainActivity.kt`・`shared/App.kt`）も、失敗時はローディング解除のみ行い画面遷移しないよう修正した。ビルド・実機再インストール済み。
+
+**その後、ユーザーから「質問を生成するボタンすら押せなくなった」と再報告があった時点で、ClaudeがCodexへ引き継ぐようユーザーから指示を受けた。**
+
+**未解明のまま引き継ぐ事項:**
+
+1. 「ボタンが押せない」の原因未特定。`ContextInputScreen.kt`のボタンは`enabled = documentText.isNotBlank() && !isLoading`（`shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/reversefaq/ContextInputScreen.kt:192`）。考えられる仮説（いずれも未検証）:
+   - 契約書本文欄（`documentText`）が空のまま押しているため、単に無効化されているだけ（UXとして「押せない」ように見える）
+   - `isAnalyzing`/`isLoading`が依然としてtrueのまま（Claudeの修正が実機へ確実に反映されているか未確認。前回ビルドは`installDebug`成功ログまで確認したが、その後の実機再起動・実際の操作確認はしていない）
+   - `adb reverse`のUSB接続が検証中に切断していたことをClaudeが確認済み（`adb devices`が該当実機を認識できない状態になっていた）。ケーブル再接続後の再検証は未実施
+2. USB切断とアプリの「ボタンが押せない」症状の因果関係は未検証（無関係の可能性もある）
+
+**対象ファイル（今回の変更、Claudeが直接編集・Kimi担当宣言の対象外の緊急対応）:**
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/reversefaq/ReverseFaqState.kt`（`analyzeCase`のコールバック修正）
+- `app/src/main/java/com/example/myapplication/MainActivity.kt`（呼び出し側修正、および実機テスト用baseURL一時変更）
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/App.kt`（呼び出し側修正、iOS用）
+
+**次の担当と行動:**
+
+**次の担当: Codex。** ユーザーから「Claudeでは無理なのでCodexに」との明示指示。上記「未解明のまま引き継ぐ事項」の原因調査・修正をお願いする。
+実機はUSB接続・`adb reverse tcp:8000 tcp:8000`・バックエンド起動（`cd backend && python -m uvicorn main:app --host 127.0.0.1 --port 8000`）が前提。`app/MainActivity.kt`の`ReverseFaqApiClient(baseUrl = "http://127.0.0.1:8000")`は実機テスト専用の一時変更であり、本番/他環境向けの恒久対応（ビルドフレーバー等での切り替え）は別途必要。
+
+### Codexによる原因調査・修正（2026-08-31）
+
+コードと状態遷移を仮説ごとに確認した結果、原因は次の2点だった。
+
+1. **直接の「ボタンが押せない」原因は、契約書本文が空欄のときUIがボタンを無効化していたこと。**
+   `ContextInputScreen.kt`のボタンは`enabled = documentText.isNotBlank() && !isLoading`であり、空欄時には理由を表示せず灰色になるため、ユーザーには故障して押せないように見える実装だった。本人条件だけ入力してもボタンは有効にならない。ボタンは分析中以外は押せるように変更し、空欄で押した場合は本文欄に「質問を生成するには契約書本文を入力してください」と明示するよう修正した。
+2. **`isAnalyzing`が残り得る別経路も実在した。**
+   呼び出し側はクリック直後に`isAnalyzing = true`とする一方、`ReverseFaqState.analyzeCase`は本文をtrimした結果が空なら`onFinished`を呼ばずreturnしていた。この経路ではローディング解除不能になる。空入力でも`onFinished(false)`を必ず呼ぶよう修正し、回帰テスト`空の契約書本文でも分析終了を通知する`を追加した。修正前はこのテストが失敗し、修正後に成功することを確認した。
+
+仮説の判定:
+
+- `documentText`空欄による無効化: **確認済み（直接原因）**。
+- `isAnalyzing`が解除されない: Claude修正の`finally`は通信成功・失敗時には解除できていたが、**通信開始前の空入力returnだけ未修正で、解除されない経路が残っていた**。
+- USB切断／`adb reverse`失効: **ボタンの有効状態とは無関係**。影響するのはボタン押下後の`127.0.0.1:8000`への通信だけ。調査時点では`adb devices -l`が空で実機未接続、`adb reverse --list`も`no devices/emulators found`だったため、logcatと修正APKの実機再確認は実施できなかった。
+
+変更ファイル:
+
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/reversefaq/ContextInputScreen.kt`
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/reversefaq/ReverseFaqState.kt`
+- `shared/src/commonTest/kotlin/com/example/myapplication/shared/reversefaq/ReverseFaqStateTest.kt`
+
+検証結果:
+
+- RED: `./gradlew :shared:testDebugUnitTest --tests "com.example.myapplication.shared.reversefaq.ReverseFaqStateTest"` → 新規テストが想定どおり失敗（修正前）。
+- GREEN: 同コマンド → `BUILD SUCCESSFUL`（修正後、7テスト合格）。
+- 全体: `./gradlew :shared:assembleDebug :shared:testDebugUnitTest :app:assembleDebug :app:testDebugUnitTest` → `BUILD SUCCESSFUL`（91タスク、失敗なし）。
+
+実機再確認時は、USB接続後に`adb devices -l`でPixel 10aを確認し、`adb reverse tcp:8000 tcp:8000`を再設定してから修正APKをインストールすること。空欄でボタンを押すと入力エラーが表示され、本文入力後は分析を開始できることを確認する。

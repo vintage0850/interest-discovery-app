@@ -24,3 +24,6 @@ local.properties
 
 # superpowers subagent-driven-development の作業用worktree
 .worktrees/
+
+# Reverse FAQ バックエンド（Gemini APIキー等の秘密情報を含む。絶対にコミットしない）
+backend/.env
