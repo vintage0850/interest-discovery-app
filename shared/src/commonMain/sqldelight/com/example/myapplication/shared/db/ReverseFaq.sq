@@ -1,0 +1,123 @@
+CREATE TABLE document_case (
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    document_uri TEXT,
+    document_type TEXT NOT NULL DEFAULT 'NONE',
+    created_at INTEGER NOT NULL,
+    deadline INTEGER,
+    status TEXT NOT NULL DEFAULT 'DRAFT'
+);
+
+CREATE TABLE user_context (
+    case_id INTEGER NOT NULL PRIMARY KEY REFERENCES document_case(id) ON DELETE CASCADE,
+    attributes_json TEXT NOT NULL
+);
+
+CREATE TABLE question (
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    case_id INTEGER NOT NULL REFERENCES document_case(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    risk_level TEXT NOT NULL,
+    source_text TEXT,
+    source_page INTEGER,
+    status TEXT NOT NULL DEFAULT 'UNCONFIRMED'
+);
+
+CREATE INDEX question_case_id ON question(case_id);
+
+CREATE TABLE question_answer (
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    question_id INTEGER NOT NULL REFERENCES question(id) ON DELETE CASCADE,
+    answer_text TEXT NOT NULL,
+    answered_by TEXT,
+    answered_at INTEGER NOT NULL
+);
+
+CREATE INDEX question_answer_question_id ON question_answer(question_id);
+
+-- DocumentCase
+selectAllCases:
+SELECT * FROM document_case ORDER BY created_at DESC;
+
+selectCaseById:
+SELECT * FROM document_case WHERE id = ?;
+
+insertCase:
+INSERT INTO document_case(title, document_uri, document_type, created_at, deadline, status)
+VALUES (?, ?, ?, ?, ?, ?);
+
+lastInsertCaseRowId:
+SELECT last_insert_rowid();
+
+updateCase:
+UPDATE document_case
+SET title = :title, document_uri = :document_uri, document_type = :document_type,
+    created_at = :created_at, deadline = :deadline, status = :status
+WHERE id = :id;
+
+updateCaseStatus:
+UPDATE document_case SET status = ? WHERE id = ?;
+
+deleteCase:
+DELETE FROM document_case WHERE id = ?;
+
+-- UserContext
+selectContextByCaseId:
+SELECT * FROM user_context WHERE case_id = ?;
+
+insertContext:
+INSERT INTO user_context(case_id, attributes_json) VALUES (?, ?);
+
+updateContext:
+UPDATE user_context SET attributes_json = :attributes_json WHERE case_id = :case_id;
+
+deleteContext:
+DELETE FROM user_context WHERE case_id = ?;
+
+-- Question
+selectQuestionsForCase:
+SELECT * FROM question WHERE case_id = ? ORDER BY
+    CASE risk_level WHEN 'HIGH' THEN 0 WHEN 'MEDIUM' THEN 1 ELSE 2 END,
+    id ASC;
+
+selectQuestionById:
+SELECT * FROM question WHERE id = ?;
+
+insertQuestion:
+INSERT INTO question(case_id, title, reason, risk_level, source_text, source_page, status)
+VALUES (?, ?, ?, ?, ?, ?, ?);
+
+lastInsertQuestionRowId:
+SELECT last_insert_rowid();
+
+updateQuestion:
+UPDATE question
+SET case_id = :case_id, title = :title, reason = :reason, risk_level = :risk_level,
+    source_text = :source_text, source_page = :source_page, status = :status
+WHERE id = :id;
+
+updateQuestionStatus:
+UPDATE question SET status = ? WHERE id = ?;
+
+deleteQuestion:
+DELETE FROM question WHERE id = ?;
+
+-- QuestionAnswer
+selectAnswerByQuestionId:
+SELECT * FROM question_answer WHERE question_id = ?;
+
+insertAnswer:
+INSERT INTO question_answer(question_id, answer_text, answered_by, answered_at)
+VALUES (?, ?, ?, ?);
+
+lastInsertAnswerRowId:
+SELECT last_insert_rowid();
+
+updateAnswer:
+UPDATE question_answer
+SET question_id = :question_id, answer_text = :answer_text, answered_by = :answered_by, answered_at = :answered_at
+WHERE id = :id;
+
+deleteAnswer:
+DELETE FROM question_answer WHERE id = ?;

@@ -854,3 +854,260 @@ Codexの最終レビュー実行が繰り返し（4回）セッション途中�
 ユーザーから「1〜3をすすめて」との指示を受け、Claudeが最終レビュー（コード差分の通読・`testDebugUnitTest`再実行によるBUILD SUCCESSFUL確認）を実施し、`master`へマージした（マージコミット、`feature/ui-feedback-item7`の`63a65c4`を統合）。
 
 **次の担当: なし（完了）。** 実機接続時に`connectedDebugAndroidTest`を実行し、新規instrumentedテスト（`SettingsScreenTest`・`TaskListScreenTest`・`TaskDaoSubTaskTest`）が実際にGREENであることを確認すること（引き続き未検証）。
+
+---
+
+## 案件8：Reverse FAQ（賃貸契約チェックAI）— 別方向アプリへの分岐
+
+**状態:** `設計判断済み・実装待ち`
+**担当:** Claude（設計裁定のみ）→ 次工程 Kimi（Phase 0〜1実装）
+
+### 依頼内容
+
+ユーザー依頼: 「今までとは別方向のアプリを作る。分岐させて別アプリを作る」。
+元ネタ: `G:\My Drive\05_archive\Download\Reverse FAQ 実装計画書.md`（正本。今後の変更もこのファイルを更新し、本TASK.mdへは差分のみ反映する）。
+
+コンセプト: 賃貸契約書とユーザー本人条件をAIに照合させ、「契約前に確認すべき質問」を3〜5件だけ提示するアプリ。既存のTaskアプリ（案件管理エンジン）を内部エンジンとして再利用し、ユーザー向けUIのみReverse FAQ専用に置き換える（計画書 2.1節）。
+
+### 設計判断（2026-08-31 / Claude）
+
+**1. ブランチ戦略 — 採用**
+
+`master`（Taskアプリ、直近コミット`8564f30`）から新ブランチ`reverse-faq`を作成した（作業ツリークリーン、ローカル作成済み・未push）。
+
+理由: 計画書2.1節が「0から新規開発しない、既存プロジェクトをベースにする」と明記しており、`shared/commonMain`のRepository/State基盤・SQLDelight・Compose Multiplatform一式をそのまま使う方が工数が半減する（計画書17節）。一方でユーザーの言う「分岐」は製品としての方向転換であり、Taskアプリの通常改修（`feature/*`→`master`マージ）とは性質が異なる。そのため`feature/`接頭辞は使わず、`reverse-faq`を**`master`へマージし直すことを前提としない長期分岐ブランチ**として扱う。`master`（Taskアプリ）は現状のまま維持し、案件1〜7の運用に影響を与えない。
+
+**2. モジュール配置 — 採用（計画書17節に準拠）**
+
+- 新規Kotlinパッケージ `com.example.myapplication.shared.reversefaq` を `shared/src/commonMain/kotlin` 配下に新設する。`DocumentCase` / `UserContext` / `Question` / `QuestionAnswer` のドメインモデル・Repository・State・Reverse FAQ用UIをここに置く。
+- 既存の `com.example.myapplication.shared`（Task/Category/SubTask）配下は**変更しない**。Reverse FAQは新規パッケージとして独立させ、既存Taskエンジンのコードは「参照するが変更しない」関係に留める。
+- PDF選択・カメラ・ローカルファイルアクセスなどプラットフォーム依存部分のみ、計画書通り`expect`/`actual`で`androidMain`/`iosMain`へ分離する。
+
+**3. DBスキーマ — 採用（追加のみ、既存テーブル無変更）**
+
+新規SQLDelightファイル `shared/src/commonMain/sqldelight/com/example/myapplication/shared/db/ReverseFaq.sq` を追加する（`DocumentCase` / `UserContext` / `Question` / `QuestionAnswer` の4テーブル）。
+既存の`Task.sq` / `Category.sq` / `SubTask.sq`は**一切変更しない**。AGENTS.mdの「既存情報の削除や大幅な上書きは行わない」原則、および案件1のWU-C判断（列単位更新・スキーマ変更は都度Claude裁定）を踏襲する。
+
+**4. 既存Task UIの扱い — 採用（削除しない、既定エントリだけ差し替え）**
+
+計画書はユーザーから見えるUIをReverse FAQへ全面差し替えると想定しているが、**既存のTask画面群（`TaskListScreen`等）は削除せず残す**。ナビゲーションの既定開始画面（スタート地点）だけをReverse FAQのHomeScreenへ切り替える。理由: AGENTS.mdの非破壊原則に加え、`reverse-faq`ブランチが最終的に別アプリとして独立公開されるか、Taskアプリに統合されるかは現時点で未確定（ユーザー判断待ち）であり、後戻り可能な状態を保つ。
+
+**5. 開発順序 — 計画書23節どおり承認**
+
+Phase 0（既存コード整理・ビルド確認）→ Phase 1（Reverse FAQの箱、ダミーデータで一連の体験）を最初のKimi実装スコープとする。AIバックエンド連携（Phase 2〜3、FastAPI＋LLM）は**今回のスコープ外**。理由: 計画書21節「最初にAIを作らない」という開発順序そのものが設計方針であり、AI連携（外部API・バックエンド新設）は改めてClaudeが設計判断する別工程とする。
+
+**6. スコープ外・ユーザー判断待ち（今回は着手しない）**
+
+- **`applicationId`・アプリ名・ストア公開の要否。** 別アプリとして独立公開するか、Taskアプリのブランチのまま留めるかはユーザーが決める事業判断。案件2の前例（`applicationId`変更はOAuthクライアント再登録を伴う外部システム変更）と同じ理由で、Claude/Kimiの判断だけでは変更しない。
+- **バックエンド（FastAPI）の新規サービス構築。** LLM APIキーの取り扱いを含む外部公開構成のため、Phase 2着手時に改めてClaudeが設計判断する。
+- **LLM API選定・費用。** 計画書には具体的なLLM API名の指定がない。Phase 2着手時にモデル・費用をユーザーへ確認する。
+
+### 対象ファイル（担当宣言：Kimi、Phase 0〜1）
+
+新規:
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/reversefaq/**`（DocumentCase / UserContext / Question / QuestionAnswer、Repository、State）
+- `shared/src/commonMain/sqldelight/com/example/myapplication/shared/db/ReverseFaq.sq`
+- Reverse FAQ用Compose画面（`HomeScreen` / `AddCaseScreen` / `QuestionListScreen` / `QuestionDetailScreen`、ダミーデータ表示のみ。計画書16節のScreen 1〜6のうちScreen 1・2・5・6を対象、Screen 3・4・7はPhase 2以降）
+- `shared/src/commonTest/**`（新規テスト、TDD）
+
+変更:
+- ナビゲーションの既定開始画面をReverse FAQのHomeScreenへ切り替える箇所のみ（画面自体は削除しない）
+
+**編集してはいけないファイル（Phase 0〜1時点）:**
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared` 配下の既存Task/Category/SubTask関連ファイル
+- `shared/src/commonMain/sqldelight/.../Task.sq` / `Category.sq` / `SubTask.sq`
+- `app/`配下（Android固有）はexpect/actual実装が必要になった場合のみ、対象を宣言してから着手する
+
+### 受入条件（Phase 0〜1）
+
+- `./gradlew :shared:assembleDebug` と `./gradlew :shared:testDebugUnitTest` が成功する（Phase 0完了条件）。
+- 案件作成 → 質問表示（ダミー） → 回答入力 → 確認済みに変更 → 進捗更新、の一連の流れがダミーデータで動作する（Phase 1完成条件、計画書18節）。
+- `./gradlew :app:assembleDebug :app:testDebugUnitTest` が既存Taskアプリ側で引き続き成功する（回帰なし）。
+- 既存Task/Category/SubTaskのSQLDelightスキーマに差分が出ない。
+
+### 次の担当と行動
+
+**次の担当: Kimi（Phase 0〜1実装）。** `reverse-faq`ブランチ上で作業する。着手前に`_ai-routing\kimi.ps1`または`kimi-task.ps1`を`C:\Users\vinta\AndroidStudioProjects\MyApplication`（`reverse-faq`ブランチcheckout済み）で起動する。
+Phase 1完了後、Codexへ品質ゲート（Gate 3.5）を依頼する。
+
+### 設計判断の確定（2026-08-31 / ユーザー指示 + Claude）
+
+Claudeが自己レビューで挙げた改善点について、ユーザーから以下の指示を受け確定した。
+
+**Phase 0ベースライン確認 — 実施済み。** `reverse-faq`ブランチ（`master` 8564f30から分岐した直後、Reverse FAQ関連の変更はまだ無い状態）で
+`./gradlew :shared:assembleDebug :shared:testDebugUnitTest` を実行し `BUILD SUCCESSFUL` を確認した（既存の非推奨API警告のみ、エラーなし）。
+これにより、Kimiが今後直面する問題は全てReverse FAQ実装由来と切り分けられる状態になった。
+
+**既存Task UIの扱い — 「まず残す、その後判断」を確定。** ナビゲーションの既定開始画面をReverse FAQのHomeScreenへ切り替える一方、
+Task画面群は削除しない現状の設計判断のまま実装する。別アプリとして独立させるか、Taskアプリへ統合するかは
+Phase 1完了後、動くものを見てからユーザーが判断する。**Kimiは今回、Task UIの削除・非表示化以上の変更は行わないこと。**
+
+**ブランチの同期方針 — 「完全に分岐」を確定。** `reverse-faq`は`master`（Taskアプリ）のバグ修正・機能追加を今後も取り込まない、
+独立した開発ラインとして扱う。将来`master`側で`shared/commonMain`の既存Task/Category/SubTask関連に修正が入っても、
+`reverse-faq`へは反映しない（必要なら都度個別に判断する）。計画書2.1節の「内部エンジンとして再利用」は
+**分岐した時点のスナップショットを再利用する**という意味に限定し、継続的な同期は行わない。
+
+**Codex／Geminiの仕様確定・作業分解ステップ — 今回は省略。** 実装計画書自体がPhase・受入条件まで詳細に定義済みのため、
+本案件に限り、AGENTS.mdの標準フロー（Codexによる仕様精緻化 → Geminiによる作業分解）を通さず、
+TASK.md本文の「対象ファイル」「受入条件」を実装単位の指示としてKimiへ直接渡す（ユーザー承認済みの例外運用）。
+
+**保留（今回のユーザー指示では扱わず）：** 「docs\ai-company\README.mdが実在しない」問題はスルー指示のため本案件では対応しない。
+「KMP/マルチモジュール構成を維持すべきか（コンテスト時間対効果）」も今回は指示が無かったため現行方針（計画書17節通りshared再利用）を維持する。
+
+### 作業履歴（2026-08-31 / Kimi）
+
+Phase 0〜1のコンパイルエラー修正とTDD Red/Greenサイクルを完了した。
+
+**実行コマンドと結果:**
+
+| 日付 | 担当 | コマンド | 結果 |
+| --- | --- | --- | --- |
+| 2026-08-31 | Kimi | `./gradlew :shared:assembleDebug :shared:testDebugUnitTest --no-daemon` | **BUILD SUCCESSFUL**（46 tests completed, 0 failed） |
+| 2026-08-31 | Kimi | `./gradlew :app:assembleDebug :app:testDebugUnitTest --no-daemon` | **BUILD SUCCESSFUL**（既存Taskアプリ側の回帰なし） |
+
+**修正した内容（実装・テスト）:**
+
+1. **`shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/reversefaq/HomeScreen.kt`**
+   - `androidx.compose.foundation.layout.Column` の import 漏れを追加。
+
+2. **`shared/src/commonMain/kotlin/com/example/myapplication/shared/reversefaq/SqlDelightReverseFaqRepository.kt`**
+   - 時計APIを `kotlinx.datetime.Clock.System` から既存コードに合わせて `kotlin.time.Clock.System` に修正（`@OptIn(ExperimentalTime::class)` 付与）。
+   - SQLDelight の生成クラス名を訂正：`documentCaseQueries` / `userContextQueries` / `questionQueries` / `questionAnswerQueries` は存在せず、 `ReverseFaq.sq` からは単一の `reverseFaqQueries` が生成されるため、全クエリ呼び出しを `queries` に統合。
+   - `Unit` を返す `updateCaseStatus` / `deleteCase` / `confirmQuestion` / `unconfirmQuestion` を `= withContext(...)` 形式からブロック形式 `{ withContext(...) { ... } }` に変更し、SQLDelightの `QueryResult<Long>` 戻り値がそのまま返却型になるのを防ぐ。
+
+3. **`shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/App.kt`**
+   - `kotlinx.datetime.Clock` の import を `kotlin.time.Clock` に変更し、 `Clock.System.now()` の呼び出し箇所を `currentTimeMillis()` ヘルパーに集約。
+
+4. **`shared/src/androidUnitTest/kotlin/com/example/myapplication/shared/reversefaq/SqlDelightReverseFaqRepositoryTest.kt`**
+   - `JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)` は呼び出しごとに新しいインメモリDBを作るため、 `Schema.create` 用の driver と `SqlDelightReverseFaqRepository` 用の driver を同一インスタンスにするようテストセットアップを修正。
+   - SQLite の外部キー制約を有効化（`PRAGMA foreign_keys = ON`）し、 `ON DELETE CASCADE` が正しく機能するようにした。
+
+5. **`shared/src/commonTest/kotlin/com/example/myapplication/shared/reversefaq/ReverseFaqStateTest.kt`**
+   - `ReverseFaqState` の `createCase` 等が `supervisedScope.launch` で非同期的に実行されるため、 `advanceUntilIdle()` 後の `Flow.first()` ではレース状態になりうる。更新後の値を本物の suspend として待つため、 `Flow.first { 条件 }` に書き換えた。
+
+**制約・注意事項:**
+
+- 既存の `shared/src/commonMain/kotlin/com/example/myapplication/shared` 配下の Task/Category/SubTask 関連ファイル、および `Task.sq` / `Category.sq` / `SubTask.sq` は**一切変更していない**。
+- `:app` 配下も変更していない（expect/actual は Phase 0〜1 では不要だった）。
+- ビルドログに `KMP Dependencies Resolution Failure` 警告（iosX64 向け Compose 依存の解決）が出力されるが、 `:shared:assembleDebug` / `:shared:testDebugUnitTest`（Android ターゲット）および `:app` ビルドの成功を阻害していない。iOS ターゲットの検証は Windows 環境では不可能なため、Mac 環境での確認が必要。
+
+**次の担当と行動:**
+
+**次の担当: Codex（Gate 3.5 品質レビュー）。**
+Phase 0〜1の受入条件（`./gradlew :shared:assembleDebug :shared:testDebugUnitTest` 成功、 `:app` 側回帰なし、既存スキーマ無変更）は満たしている。Codexは以下を重点的にレビューすること。
+- `SqlDelightReverseFaqRepository` の SQLDelight クエリ統合とトランザクション扱い
+- `ReverseFaqState` の `supervisedScope` + `stateIn` による状態管理とコルーチンライフサイクル
+- テストの非同期待ち方針（`Flow.first { 条件 }`）が既存 `AppStateTest` の教訓と整合しているか
+- Phase 1 のダミーデータ生成・進捗計算・案件ステータス遷移の網羅性
+
+レビュー指摘が出た場合は、TASK.md本欄へ追記し、修正後に再度 `./gradlew :shared:assembleDebug :shared:testDebugUnitTest` と `./gradlew :app:assembleDebug :app:testDebugUnitTest` を実行して検証すること。
+
+### 実機検証で発覚した設計不備と追加の設計判断（2026-08-31 / Claude）
+
+実機（Pixel 10a、`adb install` → `am start`）でアプリを起動したところ、Reverse FAQ HomeScreenではなく従来のTask一覧画面（すべて/スキル/提出タブ等）が表示された。
+
+**原因（Claudeの設計判断ミス）:**
+
+`app/`モジュール（実機にインストールされる本体）の`MainActivity.kt`は、Room版`TaskViewModel`を使う独自の`NavHost`（起点`ROUTE_LIST`）を持っており、Kimiが変更した`shared/src/commonMain/.../App.kt`の`startDestination`は**参照していない**。`shared.ui.App()`を実際に呼んでいるのはiOS側（`iosApp`/`MainViewController.kt`）だけで、`app/build.gradle.kts`には`:shared`への依存自体が存在しなかった。
+
+案件4（KMP移行Phase1）の引き継ぎメモに「Android実機での`App()`目視確認は未実施、コンパイル確認のみ」とあった通り、Android本体は今もKMP移行前のRoom実装のまま独立稼働しており、`:shared`はiOS専用の並行世界だった。この前提を確認せずに`shared/commonMain`への実装のみで「Android含め動く」と判断したのが設計判断の誤り。
+
+**修正方針 — 採用（2026-08-31 / ユーザー承認済み）**
+
+Task/Calendar/通知機能（Room・WorkManager依存で`:shared`に未移植）を壊さないよう、**Task UIの実装（`app/`側の既存NavHost・TaskViewModel・Room関連）は一切変更しない**。その上で：
+
+1. `app/build.gradle.kts` に `implementation(project(":shared"))` を追加する。
+2. `app/MainActivity.kt` の（既存Task用とは別の）NavHostに、`shared/ui/reversefaq/*`のCompose画面と`ReverseFaqState`/`SqlDelightReverseFaqRepository`を組み込み、**Android本体の既定開始画面をReverse FAQ Homeへ切り替える**（Task画面は既存のまま`ROUTE_LIST`等の別ルートとして残し、削除しない）。
+3. `shared/App.kt`側（iOS用）の変更はそのまま維持する。
+
+### 対象ファイル（担当宣言：Kimi、追加分）
+
+変更:
+- `app/build.gradle.kts`（`:shared`への依存追加のみ）
+- `app/src/main/java/com/example/myapplication/MainActivity.kt`（Reverse FAQ用ルートの追加、既定開始画面の切り替え。既存のTask用`composable`ブロックは削除しない）
+
+**編集してはいけないファイル（引き続き）:** Task/Category/SubTask関連の`app/`内既存ファイル（`TaskViewModel.kt`、`TaskDao.kt`、Room関連、カレンダー・通知関連）は今回も変更しない。
+
+### 受入条件（追加分）
+
+- `./gradlew :app:assembleDebug :app:testDebugUnitTest` が成功する。
+- 実機/エミュレータへ`installDebug`し起動すると、**Reverse FAQ HomeScreenが既定表示される**こと（`adb shell` でのUI dumpまたはscreencapで目視確認できること）。
+- 既存Task画面（`ROUTE_LIST`等）が引き続き到達可能であること（削除されていないこと）。
+- Calendar連携・通知機能に回帰がないこと（`TaskViewModel`関連の既存テストが変更なしに合格すること）。
+
+### 次の担当と行動（更新後）
+
+**次の担当: Claude。** 実機（Pixel 10a またはエミュレータ）へ `./gradlew :app:installDebug` し、`am start -n com.example.myapplication/.MainActivity` で起動。既定画面が Reverse FAQ HomeScreen であることを screencap または `adb shell uiautomator dump` で目視確認すること。Task 画面（`ROUTE_LIST`等）への到達可能性も確認。
+
+### 作業履歴（追加分、2026-08-31 / Kimi）
+
+**変更ファイル:**
+
+- `app/build.gradle.kts`
+  - `implementation(project(":shared"))` を追加。
+  - `:shared` 追加によって app 側の Compose Material Icons が解決しなくなったため、明示的に `androidx.compose.material:material-icons-extended` を追加。
+- `app/src/main/java/com/example/myapplication/MainActivity.kt`
+  - Reverse FAQ 用ルート定数を追加。
+  - `AndroidDatabaseDriverFactory(application)` を使い、`ReverseFaqState` / `SqlDelightReverseFaqRepository` を生成。
+  - `NavHost` の `startDestination` を `ROUTE_REVERSE_FAQ_HOME` に切り替え。
+  - 既存 Task 用 `composable` ブロックは一切削除せず、そのまま残す。
+  - `NotificationSettingsScreen` の `onSave` 引数を `viewModel.saveNotificationWindow` から `viewModel::saveNotificationWindow` に修正（ビルドエラー解消）。
+
+**実行コマンドと結果:**
+
+| 日付 | 担当 | コマンド | 結果 |
+| --- | --- | --- | --- |
+| 2026-08-31 | Kimi | `./gradlew :app:assembleDebug :app:testDebugUnitTest --no-daemon` | **BUILD SUCCESSFUL** |
+
+**検証詳細:**
+
+- `:app:assembleDebug` が成功。APK 生成完了。
+- `:app:testDebugUnitTest` が成功。既存 `TaskViewModelCalendarTest` 等の Task/Calendar 関連テストも含め、全テスト合格。
+- 既存 Task/Category/SubTask 関連ファイル、Room スキーマ、カレンダー・通知関連ファイルには一切変更なし。
+- `shared/` 側の既存 Reverse FAQ 実装も変更なし。
+
+**注意・既知の問題:**
+
+- `:shared` 追加に伴い、KMP Dependencies Resolution Failure 警告（iOS X64 ターゲット向け Compose 依存の解決失敗）が出力されるが、Android ビルド・テストの成功を阻害していない（Windows 環境では iOS ターゲットのコンパイル不可）。
+- 実機での Reverse FAQ HomeScreen 表示確認は未実施。次の担当（Claude）が実施する。
+
+**引き継ぎメモ（Claude へ）:**
+
+- `app/` 側の Task/Calendar/通知機能は変更していないため、これらの既存機能への回帰はテストで確認済み。
+- Reverse FAQ 用の SQLDelight DB ファイル名は `shared.db`（`AndroidDatabaseDriverFactory` 内で指定）。既存 Room DB `task_database` とは別ファイルなので干渉しない。
+- 実機確認時は、起動直後に表示される画面が「Reverse FAQ」タイトルのホーム画面（案件が空なら空状態メッセージ）であることを確認。
+- 必要に応じて、Task 画面へは既存の `ROUTE_LIST` ルートが残っているため、後から導線を追加可能（今回は未追加）。
+
+### Claudeによる実機再確認（2026-08-31）
+
+Kimi報告を鵜呑みにせず、`./gradlew :app:assembleDebug :app:testDebugUnitTest :shared:assembleDebug :shared:testDebugUnitTest`をClaudeが独立して再実行し`BUILD SUCCESSFUL`を確認した。
+
+実機（Pixel 10a）へ`installDebug`し、`adb`のUI階層ダンプ・スクリーンショットで以下を確認した:
+
+- 起動直後、**Reverse FAQ HomeScreenが既定表示される**こと（タイトル「Reverse FAQ」、空状態メッセージ「賃貸契約の確認案件がありません。右下の「＋」から新しく確認しましょう。」）
+- 「＋」→AddCaseScreen（「案件名」入力欄、「確認質問を作成する」ボタン）への遷移
+- 案件名「TestApartment」を入力し作成 → HomeScreenに「TestApartment」「下書き」ステータスのカードとして表示されること
+
+**未確認のまま中断:** 案件カードをタップしQuestionListScreen（ダミー質問一覧）へ遷移する手前で実機が自動ロックし、以降（質問表示→回答入力→確認済みに変更→進捗更新）は未実施。ユーザーから「私が動作確認する」との申し出があったため、Claudeによるadb操作確認はここで終了する。
+
+**次の担当と行動:**
+
+**次の担当: ユーザー（実機での目視確認）。** アプリは起動済み・案件「TestApartment」も作成済みの状態。案件カードをタップし、質問一覧（ダミーデータ）→質問詳細→回答入力→確認済みへの変更→進捗表示、の一連の流れを確認してください。
+問題があればTASK.mdへ追記のうえKimiへ差し戻す。問題なければ次はCodexによるGate 3.5レビューへ進む。
+
+### Codexレビューの省略（2026-08-31 / ユーザー指示）
+
+ユーザーから「Codexレビュー飛ばして手続きへ」との明示指示を受けた。AGENTS.mdの標準フロー（Gate 3.5：Codexによる設計・保守性レビュー）を、本案件のPhase 0〜1に限り省略する。
+
+**状態を`Phase 0〜1 完了（Codexレビュー省略・ユーザー承認済み）`とする。**
+
+根拠として残る検証:
+- ビルド・テスト: `:shared`・`:app`とも`assembleDebug`/`testDebugUnitTest`をClaudeが独立して再実行し合格（Kimi報告の鵜呑みではない）
+- 実機動作: Claude（adb経由）で起動・案件作成・HomeScreen表示まで確認、残り（質問一覧〜進捗更新）はユーザー自身が確認予定
+- スキーマ・既存Task/Calendar/通知機能への回帰なしをテストで確認
+
+Codexレビューを省略した分、通常Gate 3.5で拾うはずの設計・保守性観点（`SqlDelightReverseFaqRepository`のクエリ設計、`ReverseFaqState`のコルーチンライフサイクル等）は未レビューのまま残る。次にこのコードへ手を入れる際（Phase 2着手時等）に改めて見直すことを推奨する。
+
+**次の担当と行動:**
+
+**次の担当: なし（Phase 0〜1完了）。** Phase 2（バックエンド・LLM連携）に進む場合は、Claudeによる新規の設計判断（案件6の「スコープ外・ユーザー判断待ち」節参照：バックエンド構成、LLM API選定）から着手すること。
