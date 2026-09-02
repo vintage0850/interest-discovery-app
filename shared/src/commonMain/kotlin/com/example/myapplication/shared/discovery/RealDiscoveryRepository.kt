@@ -91,16 +91,39 @@ class RealDiscoveryRepository(
     override suspend fun getHomeState(): HomeData = HomeData()
     override suspend fun getExperiment(experimentId: String): Experiment =
         cachedExperiments.first { it.id == experimentId }
-    override suspend fun selectExperiment(experimentId: String) {}
+    override suspend fun selectExperiment(experimentId: String) {
+        val response = client.post("/experiments/$experimentId/select") {
+            contentType(ContentType.Application.Json)
+            setBody(ExperimentSelectRequest(selectionNote = DEFAULT_SELECTION_NOTE))
+        }
+        if (!response.status.isSuccess()) {
+            throw DiscoveryApiException("実験の選択に失敗しました (HTTP ${response.status.value})")
+        }
+    }
+
     override suspend fun cycleNextExperiment(): Experiment = cachedExperiments.first()
-    override suspend fun startExperiment(experimentId: String) {}
+
+    override suspend fun startExperiment(experimentId: String) {
+        val response = client.post("/experiments/$experimentId/start")
+        if (!response.status.isSuccess()) {
+            throw DiscoveryApiException("実験の開始に失敗しました (HTTP ${response.status.value})")
+        }
+    }
     override suspend fun completeExperiment(
         experimentId: String,
         enjoyment: Int,
         curiosity: Int,
         retryIntent: Int
     ) {}
-    override suspend fun skipExperiment(experimentId: String) {}
+    override suspend fun skipExperiment(experimentId: String) {
+        val response = client.post("/experiments/$experimentId/skip") {
+            contentType(ContentType.Application.Json)
+            setBody(ExperimentSkipRequest())
+        }
+        if (!response.status.isSuccess()) {
+            throw DiscoveryApiException("実験のスキップに失敗しました (HTTP ${response.status.value})")
+        }
+    }
     override suspend fun getDiscovery(): DiscoveryData = DiscoveryData(observation = "", hypothesis = "")
     override suspend fun getNextExperiment(): Experiment = cachedExperiments.first()
     override suspend fun getDomainFields(): List<DomainField> = emptyList()
@@ -139,6 +162,14 @@ private data class ExperimentResponseDto(
     val domain: String,
     val plannedMinutes: Int
 )
+
+private const val DEFAULT_SELECTION_NOTE = "アプリから選択"
+
+@Serializable
+private data class ExperimentSelectRequest(val selectionNote: String)
+
+@Serializable
+private data class ExperimentSkipRequest(val reason: String? = null)
 
 private fun defaultDiscoveryHttpClient(baseUrl: String): HttpClient {
     return HttpClient {

@@ -87,4 +87,49 @@ class RealDiscoveryRepositoryTest {
 
         assertEquals(listOf("/sessions", "/sessions/1/experiments/generate"), paths)
     }
+
+    @Test
+    fun selectExperiment_postsToSelectEndpoint() = runTest {
+        val (client, paths) = mockClient { path ->
+            when (path) {
+                "/experiments/10/select" -> HttpStatusCode.OK to experimentsBody().removeSurrounding("[", "]")
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client)
+
+        repo.selectExperiment("10")
+
+        assertEquals(listOf("/experiments/10/select"), paths)
+    }
+
+    @Test
+    fun startExperiment_postsToStartEndpoint() = runTest {
+        val (client, paths) = mockClient { path ->
+            when (path) {
+                "/experiments/10/start" -> HttpStatusCode.OK to experimentsBody().removeSurrounding("[", "]")
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client)
+
+        repo.startExperiment("10")
+
+        assertEquals(listOf("/experiments/10/start"), paths)
+    }
+
+    @Test
+    fun skipExperiment_postsToSkipEndpoint() = runTest {
+        val (client, paths) = mockClient { path ->
+            when (path) {
+                "/experiments/10/skip" -> HttpStatusCode.OK to experimentsBody().removeSurrounding("[", "]")
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client)
+
+        repo.skipExperiment("10")
+
+        assertEquals(listOf("/experiments/10/skip"), paths)
+    }
 }
