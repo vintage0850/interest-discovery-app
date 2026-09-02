@@ -87,8 +87,13 @@ class RealDiscoveryRepository(
         return cachedExperiments
     }
 
-    // 以下は Task 3〜6 で実装する。現時点ではコンパイルを通すための最小実装。
-    override suspend fun getHomeState(): HomeData = HomeData()
+    override suspend fun getHomeState(): HomeData {
+        val experiments = getSuggestedExperiments()
+        return HomeData(
+            todayExperiments = experiments,
+            featuredExperiment = experiments.firstOrNull()
+        )
+    }
     override suspend fun getExperiment(experimentId: String): Experiment {
         if (cachedExperiments.isEmpty()) getSuggestedExperiments()
         return cachedExperiments.firstOrNull { it.id == experimentId }
