@@ -53,6 +53,36 @@ private fun mockClient(handler: (path: String) -> Pair<HttpStatusCode, String>):
 class RealDiscoveryRepositoryTest {
 
     @Test
+    fun completeExperiment_computesConfidenceFromThreeScores() = runTest {
+        var capturedBody = ""
+        val engine = MockEngine { request ->
+            capturedBody = (request.body as io.ktor.http.content.TextContent).text
+            respond(
+                content = """
+                    {"id": 1, "experiment_id": 10, "enjoyment": 5, "curiosity": 4,
+                     "retry_intent": 3, "confidence": 0.8, "reflection": null,
+                     "created_at": "2026-09-02T00:00:00+00:00"}
+                """.trimIndent(),
+                status = HttpStatusCode.Created,
+                headers = headersOf(HttpHeaders.ContentType, "application/json")
+            )
+        }
+        val client = HttpClient(engine) {
+            install(ContentNegotiation) {
+                json(Json {
+                    ignoreUnknownKeys = true
+                    namingStrategy = JsonNamingStrategy.SnakeCase
+                })
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client)
+
+        repo.completeExperiment(experimentId = "10", enjoyment = 5, curiosity = 4, retryIntent = 3)
+
+        assertEquals(true, capturedBody.contains("\"confidence\":0.8"))
+    }
+
+    @Test
     fun getSuggestedExperiments_createsSessionThenGeneratesExperiments() = runTest {
         val (client, paths) = mockClient { path ->
             when (path) {

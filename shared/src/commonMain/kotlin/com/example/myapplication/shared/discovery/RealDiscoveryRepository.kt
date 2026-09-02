@@ -114,7 +114,23 @@ class RealDiscoveryRepository(
         enjoyment: Int,
         curiosity: Int,
         retryIntent: Int
-    ) {}
+    ) {
+        val confidence = (enjoyment + curiosity + retryIntent) / 15.0f
+        val response = client.post("/experiments/$experimentId/complete") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                ExperimentResultRequest(
+                    enjoyment = enjoyment,
+                    curiosity = curiosity,
+                    retryIntent = retryIntent,
+                    confidence = confidence
+                )
+            )
+        }
+        if (!response.status.isSuccess()) {
+            throw DiscoveryApiException("実験の完了報告に失敗しました (HTTP ${response.status.value})")
+        }
+    }
     override suspend fun skipExperiment(experimentId: String) {
         val response = client.post("/experiments/$experimentId/skip") {
             contentType(ContentType.Application.Json)
@@ -170,6 +186,15 @@ private data class ExperimentSelectRequest(val selectionNote: String)
 
 @Serializable
 private data class ExperimentSkipRequest(val reason: String? = null)
+
+@Serializable
+private data class ExperimentResultRequest(
+    val enjoyment: Int,
+    val curiosity: Int,
+    val retryIntent: Int,
+    val confidence: Float,
+    val reflection: String? = null
+)
 
 private fun defaultDiscoveryHttpClient(baseUrl: String): HttpClient {
     return HttpClient {
