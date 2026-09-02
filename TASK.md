@@ -2780,3 +2780,34 @@ adb reverse tcp:8000 tcp:8000
 **検証:** 修正後、バックエンドログに実機からの`POST /sessions`（201）→`POST /sessions/{id}/experiments/generate`（201）が記録され、ホーム画面にGemini生成の実際の実験（例:「5枚の写真でショート動画」）が表示されることを確認した。
 
 **次の担当: ユーザー確認継続。** ホーム画面から実験を選択→開始→タイマー→振り返り→完了までの一連の操作を試し、問題が無ければ案件12をGate4（Codex）へ進める。
+
+**案件12は一旦保留。** ユーザー指示により、案件13（LINEリマインダー連携）を優先する。
+
+## 案件13：LINEリマインダー連携（MVPスコープ、`backend/`）（`discovery-backend`ブランチ）
+
+**状態:** `設計・計画確定・実装中`
+**担当:** Claude（設計裁定・作業分割）→ Kimi（Task 1〜4）→ Codex（Task 5〜6）→ Claude（ngrok経由のWebhook実地検証・Gate4依頼）
+
+### 依頼内容
+
+ユーザーからLINE Messaging APIの認証情報（Channel ID/Secret/Access Token、`backend/.env`に保存済み・Git管理外）が提供され、「アプリ内で作成したリマインダーをLINEで受け取れるようにしたい」との依頼。詳細な本番向け仕様書もユーザーから提供されたが、このbackendには`users`テーブルや認証機構が存在しないため、ユーザー承認のもとMVPスコープに縮小した（ユーザー管理なし・LINEアカウントは常に1件・正式Account Linkは作らない・スケジューラはAPSchedulerによる60秒ポーリング）。
+
+### 設計・計画
+
+- 設計書: `docs/superpowers/specs/2026-09-03-line-reminder-integration-design.md`
+- 実装計画（Task 1〜6の完全なコード・テスト・受け入れ基準を含む）: `docs/superpowers/plans/2026-09-03-line-reminder-integration.md`
+
+### 担当割り当て
+
+| Task | 内容 | 担当 |
+| --- | --- | --- |
+| Task 1 | データモデル・リポジトリ層 | Kimi |
+| Task 2 | Webhook署名検証 | Kimi |
+| Task 3 | LINE Messaging APIクライアント | Kimi |
+| Task 4 | スケジューラ処理ロジック | Kimi |
+| Task 5 | Webhook・リマインダーAPIルーター | Codex |
+| Task 6 | main.pyへの統合・スケジューラ起動 | Codex |
+
+Task 1〜4はKimiが逐次実装しコミットする。完了後、Task 5〜6はCodexが引き継ぐ。各Taskの完了ごとに、本節に作業履歴を追記すること（案件12と同じ形式）。
+
+**次の担当: Kimi。** `docs/superpowers/plans/2026-09-03-line-reminder-integration.md`のTask 1〜4を、記載のコード・テストどおりに実装すること。Task 4完了後、本節に作業履歴を追記し、次の担当をCodexとして引き継ぐこと。
