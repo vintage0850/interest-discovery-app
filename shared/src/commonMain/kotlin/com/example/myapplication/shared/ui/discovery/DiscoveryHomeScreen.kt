@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -20,6 +19,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -38,8 +38,8 @@ import com.example.myapplication.shared.discovery.FakeScenario
 import com.example.myapplication.shared.discovery.HomeUiState
 
 /**
- * 興味発見アプリのホーム画面。
- * 今日の状態 ＋ 3つのExperiment（タスクリスト形式）から選んで即実行できる。
+ * 高校生向け興味発見アプリのホーム画面。
+ * 「今日これやってみない？」を1つ大きく目立たせ、迷わずすぐ始められるUI。
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -52,6 +52,8 @@ fun DiscoveryHomeScreen(
     modifier: Modifier = Modifier
 ) {
     var showScenarioDialog by remember { mutableStateOf(false) }
+    var isAlternativesOpen by remember { mutableStateOf(false) }
+    var featuredIndex by remember { mutableStateOf(0) }
 
     Box(
         modifier = modifier
@@ -63,34 +65,28 @@ fun DiscoveryHomeScreen(
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = DiscoverySpacing.pageHorizontal)
-                .padding(top = DiscoverySpacing.xxxl, bottom = 80.dp) // ボトムナビの余白
+                .padding(top = DiscoverySpacing.xxxl, bottom = 80.dp)
         ) {
             // ヘッダー
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Top
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(DiscoverySpacing.xs)
+                ) {
+                    Text(text = "🌱", fontSize = 22.sp)
                     Text(
-                        text = uiState.homeData?.greetingTitle ?: "こんにちは",
+                        text = "興味発見",
                         color = DiscoveryColors.TextPrimary,
-                        fontSize = 28.sp,
-                        fontWeight = FontWeight.Bold,
-                        lineHeight = 34.sp
-                    )
-
-                    Spacer(modifier = Modifier.height(DiscoverySpacing.xs))
-
-                    Text(
-                        text = uiState.homeData?.greetingSubtitle ?: "今日、5分だけ試してみよう",
-                        color = DiscoveryColors.TextSecondary,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Normal
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Black
                     )
                 }
 
-                // デバッグ・シナリオ切替用バッジ
+                // デバッグ・シナリオ切替バッジ
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(DiscoveryRadius.badge))
@@ -99,7 +95,7 @@ fun DiscoveryHomeScreen(
                             role = Role.Button,
                             onClick = { showScenarioDialog = true }
                         )
-                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                        .padding(horizontal = 10.dp, vertical = 5.dp)
                 ) {
                     Text(
                         text = "設定: ${when (uiState.activeScenario) {
@@ -116,7 +112,7 @@ fun DiscoveryHomeScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(DiscoverySpacing.xl))
+            Spacer(modifier = Modifier.height(DiscoverySpacing.md))
 
             // エラー状態の表示
             if (uiState.errorMessage != null) {
@@ -124,7 +120,7 @@ fun DiscoveryHomeScreen(
                     errorMessage = uiState.errorMessage,
                     onRetry = onRetry
                 )
-                Spacer(modifier = Modifier.height(DiscoverySpacing.xl))
+                Spacer(modifier = Modifier.height(DiscoverySpacing.base))
             }
 
             // ローディング状態
@@ -133,74 +129,101 @@ fun DiscoveryHomeScreen(
             } else {
                 val data = uiState.homeData
 
-                // 1. 今日の状態カード (Today's Status)
                 if (data != null) {
+                    val completed = data.completedThisWeek
+                    val target = 3
+                    val progress = (completed.toFloat() / target.toFloat()).coerceIn(0f, 1f)
+
+                    // 1. 達成感プログレスバー（最上部）
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(DiscoveryRadius.card))
-                            .background(if (data.todayCompleted) DiscoveryColors.AccentSoft else DiscoveryColors.Surface)
+                            .background(DiscoveryColors.Surface)
                             .border(1.dp, DiscoveryColors.BorderSubtle, RoundedCornerShape(DiscoveryRadius.card))
                             .padding(DiscoverySpacing.base)
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(DiscoverySpacing.md)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(CircleShape)
-                                    .background(if (data.todayCompleted) DiscoveryColors.Accent else DiscoveryColors.SurfaceSecondary),
-                                contentAlignment = Alignment.Center
+                        Column {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(DiscoverySpacing.xs)
+                                ) {
+                                    Text(text = "🔥", fontSize = 14.sp)
+                                    Text(
+                                        text = "今週の実験: ",
+                                        color = DiscoveryColors.TextPrimary,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = "$completed / $target 完了",
+                                        color = DiscoveryColors.Accent,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Black
+                                    )
+                                }
+
                                 Text(
-                                    text = if (data.todayCompleted) "✓" else "⚡",
-                                    fontSize = 18.sp,
-                                    color = if (data.todayCompleted) DiscoveryColors.AccentText else DiscoveryColors.TextPrimary
+                                    text = if (completed >= target) "🎉 目標達成！" else "あと ${target - completed} 回で達成！",
+                                    color = DiscoveryColors.TextTertiary,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium
                                 )
                             }
 
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = if (data.todayCompleted) "今日の実験を完了しました！" else "今日の実験：まだ未実施です",
-                                    color = DiscoveryColors.TextPrimary,
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    text = if (data.todayCompleted) "あなたのシグナルが更新されました。" else "下の3つから好きなものを1つ選んでみよう",
-                                    color = DiscoveryColors.TextSecondary,
-                                    fontSize = 13.sp
-                                )
-                            }
+                            Spacer(modifier = Modifier.height(DiscoverySpacing.sm))
+
+                            LinearProgressIndicator(
+                                progress = { progress },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(6.dp)
+                                    .clip(RoundedCornerShape(3.dp)),
+                                color = DiscoveryColors.Accent,
+                                trackColor = DiscoveryColors.SurfaceSecondary
+                            )
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(DiscoverySpacing.xxl))
+                    Spacer(modifier = Modifier.height(DiscoverySpacing.lg))
 
-                    // 2. 3つのExperiment（タスクリスト形式）
-                    Text(
-                        text = "今日のおすすめ実験 3選",
-                        color = DiscoveryColors.TextPrimary,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                    // 2. 🔥 主役カード (Hero Card): 今日これやってみない？
+                    val experiments = data.todayExperiments
+                    val heroExperiment = experiments.getOrNull(featuredIndex) ?: experiments.firstOrNull()
 
-                    Spacer(modifier = Modifier.height(DiscoverySpacing.md))
+                    if (heroExperiment != null) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "✨ 今日これやってみない？",
+                                color = DiscoveryColors.TextPrimary,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Black
+                            )
+                            Text(
+                                text = "イチオシ！",
+                                color = DiscoveryColors.Accent,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
 
-                    data.todayExperiments.forEachIndexed { index, experiment ->
+                        Spacer(modifier = Modifier.height(DiscoverySpacing.sm))
+
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = DiscoverySpacing.xs)
-                                .clip(RoundedCornerShape(DiscoveryRadius.insightCard))
+                                .clip(RoundedCornerShape(DiscoveryRadius.card))
                                 .background(DiscoveryColors.Surface)
-                                .border(1.dp, DiscoveryColors.BorderSubtle, RoundedCornerShape(DiscoveryRadius.insightCard))
-                                .clickable(
-                                    role = Role.Button,
-                                    onClick = { onStartExperiment(experiment) }
-                                )
+                                .border(1.5.dp, DiscoveryColors.Accent.copy(alpha = 0.3f), RoundedCornerShape(DiscoveryRadius.card))
                                 .padding(DiscoverySpacing.cardPadding)
                         ) {
                             Column {
@@ -213,90 +236,170 @@ fun DiscoveryHomeScreen(
                                         horizontalArrangement = Arrangement.spacedBy(DiscoverySpacing.sm),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        DurationBadge(minutes = experiment.plannedMinutes)
-                                        BehaviorBadge(signal = experiment.actionType)
+                                        DurationBadge(minutes = heroExperiment.plannedMinutes)
+                                        BehaviorBadge(signal = heroExperiment.actionType)
                                     }
-
-                                    Text(
-                                        text = "やってみる →",
-                                        color = DiscoveryColors.Accent,
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
                                 }
 
-                                Spacer(modifier = Modifier.height(DiscoverySpacing.md))
+                                Spacer(modifier = Modifier.height(DiscoverySpacing.base))
 
                                 Text(
-                                    text = experiment.title,
+                                    text = heroExperiment.title,
                                     color = DiscoveryColors.TextPrimary,
-                                    fontSize = 17.sp,
-                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Black,
                                     lineHeight = 24.sp
                                 )
 
                                 Spacer(modifier = Modifier.height(DiscoverySpacing.xs))
 
                                 Text(
-                                    text = experiment.description,
+                                    text = heroExperiment.description,
                                     color = DiscoveryColors.TextSecondary,
                                     fontSize = 13.sp,
-                                    lineHeight = 19.sp
+                                    lineHeight = 18.sp
                                 )
-                            }
-                        }
-                    }
 
-                    Spacer(modifier = Modifier.height(DiscoverySpacing.xxl))
+                                Spacer(modifier = Modifier.height(DiscoverySpacing.base))
 
-                    // 3. 今週の進捗 & 行動シグナル
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(DiscoveryRadius.card))
-                            .background(DiscoveryColors.Surface)
-                            .border(1.dp, DiscoveryColors.BorderSubtle, RoundedCornerShape(DiscoveryRadius.card))
-                            .padding(DiscoverySpacing.cardPadding)
-                    ) {
-                        Text(
-                            text = if (data.completedThisWeek > 0)
-                                "今週 ${data.completedThisWeek}件 の実験を完了"
-                            else
-                                "最初の実験をやってみよう",
-                            color = DiscoveryColors.TextPrimary,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-
-                        Spacer(modifier = Modifier.height(DiscoverySpacing.xs))
-
-                        Text(
-                            text = if (data.signals.isNotEmpty())
-                                "あなたが夢中になりやすい行動のパターンが見え始めています。"
-                            else
-                                "5分のアクティビティを試して、自然と惹かれることを見つけてみよう。",
-                            color = DiscoveryColors.TextSecondary,
-                            fontSize = 13.sp,
-                            lineHeight = 19.sp
-                        )
-
-                        if (data.signals.isNotEmpty()) {
-                            Spacer(modifier = Modifier.height(DiscoverySpacing.base))
-
-                            FlowRow(
-                                horizontalArrangement = Arrangement.spacedBy(DiscoverySpacing.sm),
-                                verticalArrangement = Arrangement.spacedBy(DiscoverySpacing.sm)
-                            ) {
-                                data.signals.forEach { signal ->
-                                    SignalChip(signalModel = signal)
+                                // 特大「やってみる」ボタン
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(DiscoveryRadius.button))
+                                        .background(DiscoveryColors.Accent)
+                                        .clickable(
+                                            role = Role.Button,
+                                            onClick = { onStartExperiment(heroExperiment) }
+                                        )
+                                        .padding(vertical = 14.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(DiscoverySpacing.xs)
+                                    ) {
+                                        Text(text = "▶", color = DiscoveryColors.AccentText, fontSize = 12.sp)
+                                        Text(
+                                            text = "今すぐやってみる（${heroExperiment.plannedMinutes}分）",
+                                            color = DiscoveryColors.AccentText,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(DiscoverySpacing.xl))
+                    Spacer(modifier = Modifier.height(DiscoverySpacing.md))
 
-                    // 4. 発見・インサイトセクション
+                    // 3. ほかの実験を見る（アコーディオン）
+                    if (experiments.size > 1) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(DiscoveryRadius.button))
+                                .background(DiscoveryColors.Surface)
+                                .border(1.dp, DiscoveryColors.BorderSubtle, RoundedCornerShape(DiscoveryRadius.button))
+                                .clickable { isAlternativesOpen = !isAlternativesOpen }
+                                .padding(horizontal = DiscoverySpacing.base, vertical = 12.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "ほかの実験も見てみる（あと ${experiments.size - 1}件）",
+                                    color = DiscoveryColors.TextSecondary,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = if (isAlternativesOpen) "▲" else "▼",
+                                    color = DiscoveryColors.TextTertiary,
+                                    fontSize = 10.sp
+                                )
+                            }
+                        }
+
+                        if (isAlternativesOpen) {
+                            Spacer(modifier = Modifier.height(DiscoverySpacing.sm))
+
+                            experiments.forEachIndexed { index, exp ->
+                                if (index != featuredIndex) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 4.dp)
+                                            .clip(RoundedCornerShape(DiscoveryRadius.card))
+                                            .background(DiscoveryColors.Surface)
+                                            .border(1.dp, DiscoveryColors.BorderSubtle, RoundedCornerShape(DiscoveryRadius.card))
+                                            .padding(DiscoverySpacing.base)
+                                    ) {
+                                        Column {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Row(
+                                                    horizontalArrangement = Arrangement.spacedBy(DiscoverySpacing.xs),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    DurationBadge(minutes = exp.plannedMinutes)
+                                                    BehaviorBadge(signal = exp.actionType)
+                                                }
+
+                                                Text(
+                                                    text = "メインにする",
+                                                    color = DiscoveryColors.TextTertiary,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.clickable {
+                                                        featuredIndex = index
+                                                        isAlternativesOpen = false
+                                                    }
+                                                )
+                                            }
+
+                                            Spacer(modifier = Modifier.height(DiscoverySpacing.sm))
+
+                                            Text(
+                                                text = exp.title,
+                                                color = DiscoveryColors.TextPrimary,
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+
+                                            Spacer(modifier = Modifier.height(DiscoverySpacing.sm))
+
+                                            Box(
+                                                modifier = Modifier
+                                                    .align(Alignment.End)
+                                                    .clip(RoundedCornerShape(DiscoveryRadius.badge))
+                                                    .background(DiscoveryColors.SurfaceSecondary)
+                                                    .clickable { onStartExperiment(exp) }
+                                                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                                            ) {
+                                                Text(
+                                                    text = "これにする →",
+                                                    color = DiscoveryColors.Accent,
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(DiscoverySpacing.base))
+
+                    // 4. 見えてきた傾向ミニバナー
                     val insight = data.discoveryInsight
                     if (insight != null) {
                         DiscoveryInsightCard(
