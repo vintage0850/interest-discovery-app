@@ -8,12 +8,14 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from discovery.router import router as discovery_router
 from gemini_client import GeminiClient
+from line.router import router as line_router
 from models import AnalyzeRequest, AnalyzeResponse
 
 load_dotenv()
 
 app = FastAPI(title="Reverse FAQ Backend")
 app.include_router(discovery_router)
+app.include_router(line_router)
 
 # Android エミュレータ / 実機からの開発アクセスを許可する最小限の CORS。
 # 本番デプロイ時は origins を絞り込むこと。
