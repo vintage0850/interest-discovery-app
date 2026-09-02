@@ -39,7 +39,7 @@ fun App(
         val scope = rememberCoroutineScope()
         val discoveryState = remember {
             DiscoveryState(
-                RealDiscoveryRepository(baseUrl = "http://10.47.192.172:8000"),
+                RealDiscoveryRepository(baseUrl = "http://localhost:8000"),
                 scope
             )
         }
