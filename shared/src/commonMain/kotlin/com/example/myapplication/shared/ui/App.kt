@@ -15,7 +15,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.example.myapplication.shared.db.DatabaseDriverFactory
 import com.example.myapplication.shared.discovery.DiscoveryState
-import com.example.myapplication.shared.discovery.FakeDiscoveryRepository
+import com.example.myapplication.shared.discovery.RealDiscoveryRepository
 import com.example.myapplication.shared.ui.discovery.DiscoveryMainScaffold
 import com.example.myapplication.shared.ui.discovery.DiscoveryResultScreen
 import com.example.myapplication.shared.ui.discovery.ExperimentDetailScreen
@@ -38,7 +38,10 @@ fun App(
     MaterialTheme {
         val scope = rememberCoroutineScope()
         val discoveryState = remember {
-            DiscoveryState(FakeDiscoveryRepository(), scope)
+            DiscoveryState(
+                RealDiscoveryRepository(baseUrl = "http://10.47.192.172:8000"),
+                scope
+            )
         }
 
         val navController = rememberNavController()
