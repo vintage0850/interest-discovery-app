@@ -2741,3 +2741,22 @@ Task 1〜3はKimiが逐次実装しコミットする。完了後、Task 4〜6�
 - Task 6 Step 4: 実機で中核ループとバックエンドログを確認。
 
 次の担当: Claude。Task 6のStep 3〜4を実施すること。
+
+### Claudeによる実機確認（2026-09-03）— 2件の不具合を発見・修正
+
+**不具合1: `getHomeState()`が実データを一度も取得していなかった**
+
+`DiscoveryState.kt`を確認したところ、`getSuggestedExperiments()`（Task 2〜5で実データ化した本体）はUIのどこからも呼ばれていないことが判明した。ホーム画面（`AppTab.HOME`）は`repository.getHomeState()`を呼ぶが、これはTask 2の計画で「非目標」として静的な`HomeData()`のまま残していたため、実機でタブ移動はできても実験候補が一切表示されない状態だった（ユーザー報告「UIしか動かないです」の原因）。「発見」「探索」タブもそれぞれ`getDiscovery()`/`getDomainFields()`という別の未実装スタブを呼んでおり、これらも非目標のまま。
+
+`getHomeState()`を`getSuggestedExperiments()`を呼んで`todayExperiments`/`featuredExperiment`を実データで埋めるよう修正した（コミット `081090b`）。`docs/superpowers/plans/...`のTask 2设計における非目標スコープ判断の見落とし。
+
+**不具合2: 実機でCLEARTEXTエラー**
+
+修正1の反映後、実機で `CLEARTEXT communication to 10.47.192.172 not permitted by network security policy` が発生。Android既定のネットワークセキュリティ設定でHTTP平文通信がブロックされていた。`app/src/debug/res/xml/network_security_config.xml`（debugビルド限定、`10.0.2.2`/開発機LAN IP/`localhost`へのcleartextのみ許可）と`app/src/debug/AndroidManifest.xml`を追加して解消（コミット `f16e23c`）。リリースビルドには影響しない。
+
+**検証:**
+- `./gradlew :shared:testDebugUnitTest --tests "com.example.myapplication.shared.discovery.*" --rerun-tasks` → BUILD SUCCESSFUL（両修正後）
+- 実機（Pixel 10a、シリアル61081JEA315098）へ再インストール、バックエンドは`http://10.47.192.172:8000`で稼働確認済み（`/health`・`/sessions`とも200/201）
+- アプリ起動後、CLEARTEXTエラーは解消し「今日の実験を読み込み中...」のローディングまで進行確認済み。ここから先（実験カード表示〜選択→開始→完了の一連操作）はユーザー自身が実機で確認中。
+
+**次の担当: ユーザー確認待ち。** 一連の操作を試して問題があれば報告し、無ければ案件12はGate4（Codex）へ進める。
