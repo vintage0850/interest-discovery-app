@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">My Application</string>
+    <string name="app_name">Mikke</string>
 
     <!-- 空き時間検知による「始めさせる」通知 -->
     <string name="free_time_notification_channel_name">空き時間の通知</string>

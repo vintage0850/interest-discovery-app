@@ -77,9 +77,9 @@ fun DiscoveryHomeScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(DiscoverySpacing.xs)
                 ) {
-                    Text(text = "🌱", fontSize = 22.sp)
+                    Text(text = "✨", fontSize = 22.sp)
                     Text(
-                        text = "興味発見",
+                        text = "Mikke",
                         color = DiscoveryColors.TextPrimary,
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Black

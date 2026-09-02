@@ -383,9 +383,9 @@ export default function App() {
           <div>
             {/* 上部ヘッダー */}
             <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-1.5">
-                <span className="text-xl">🌱</span>
-                <span className="font-black text-lg text-textPrimary">興味発見</span>
+              <div className="flex items-center gap-2">
+                <img src="./icon.png" alt="Mikke" className="w-7 h-7 rounded-xl object-cover shadow-xs border border-borderSubtle" />
+                <span className="font-black text-lg text-textPrimary tracking-tight">Mikke</span>
               </div>
               <span className="text-[11px] font-semibold text-textTertiary bg-surface px-2.5 py-1 rounded-full border border-borderSubtle">
                 高校生向け 5分実験
