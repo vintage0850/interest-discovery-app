@@ -27,6 +27,19 @@ private fun experimentsBody(id: Int = 10, domain: String = "tech") = """
       "actual_minutes": null, "created_at": "2026-09-02T00:00:00+00:00"}]
 """.trimIndent()
 
+private fun twoExperimentsBody() = """
+    [{"id": 10, "session_id": 1, "title": "t1", "description": "d1",
+      "domain": "tech", "planned_minutes": 5, "status": "generated",
+      "selected_at": null, "started_at": null, "completed_at": null,
+      "skipped_at": null, "selection_note": null, "skip_reason": null,
+      "actual_minutes": null, "created_at": "2026-09-02T00:00:00+00:00"},
+     {"id": 11, "session_id": 1, "title": "t2", "description": "d2",
+      "domain": "art", "planned_minutes": 10, "status": "generated",
+      "selected_at": null, "started_at": null, "completed_at": null,
+      "skipped_at": null, "selection_note": null, "skip_reason": null,
+      "actual_minutes": null, "created_at": "2026-09-02T00:00:00+00:00"}]
+""".trimIndent()
+
 private fun mockClient(handler: (path: String) -> Pair<HttpStatusCode, String>): Pair<HttpClient, MutableList<String>> {
     val requestedPaths = mutableListOf<String>()
     val engine = MockEngine { request ->
@@ -51,6 +64,42 @@ private fun mockClient(handler: (path: String) -> Pair<HttpStatusCode, String>):
 }
 
 class RealDiscoveryRepositoryTest {
+
+    @Test
+    fun cycleNextExperiment_advancesWithoutExtraHttpCall() = runTest {
+        val (client, paths) = mockClient { path ->
+            when (path) {
+                "/sessions" -> HttpStatusCode.Created to SESSION_BODY
+                "/sessions/1/experiments/generate" -> HttpStatusCode.Created to twoExperimentsBody()
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client)
+        repo.getSuggestedExperiments()
+        paths.clear()
+
+        val next = repo.cycleNextExperiment()
+
+        assertEquals(emptyList<String>(), paths)
+        assertEquals("11", next.id)
+    }
+
+    @Test
+    fun getExperiment_returnsFromCache() = runTest {
+        val (client, _) = mockClient { path ->
+            when (path) {
+                "/sessions" -> HttpStatusCode.Created to SESSION_BODY
+                "/sessions/1/experiments/generate" -> HttpStatusCode.Created to twoExperimentsBody()
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client)
+        repo.getSuggestedExperiments()
+
+        val experiment = repo.getExperiment("11")
+
+        assertEquals("11", experiment.id)
+    }
 
     @Test
     fun completeExperiment_computesConfidenceFromThreeScores() = runTest {

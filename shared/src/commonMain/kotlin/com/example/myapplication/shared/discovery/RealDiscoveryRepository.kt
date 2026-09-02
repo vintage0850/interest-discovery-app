@@ -89,8 +89,11 @@ class RealDiscoveryRepository(
 
     // 以下は Task 3〜6 で実装する。現時点ではコンパイルを通すための最小実装。
     override suspend fun getHomeState(): HomeData = HomeData()
-    override suspend fun getExperiment(experimentId: String): Experiment =
-        cachedExperiments.first { it.id == experimentId }
+    override suspend fun getExperiment(experimentId: String): Experiment {
+        if (cachedExperiments.isEmpty()) getSuggestedExperiments()
+        return cachedExperiments.firstOrNull { it.id == experimentId }
+            ?: throw DiscoveryApiException("実験が見つかりません: $experimentId")
+    }
     override suspend fun selectExperiment(experimentId: String) {
         val response = client.post("/experiments/$experimentId/select") {
             contentType(ContentType.Application.Json)
@@ -101,7 +104,14 @@ class RealDiscoveryRepository(
         }
     }
 
-    override suspend fun cycleNextExperiment(): Experiment = cachedExperiments.first()
+    override suspend fun cycleNextExperiment(): Experiment {
+        if (cachedExperiments.isEmpty()) getSuggestedExperiments()
+        if (cachedExperiments.isEmpty()) {
+            throw DiscoveryApiException("表示できる実験がありません")
+        }
+        cycleIndex = (cycleIndex + 1) % cachedExperiments.size
+        return cachedExperiments[cycleIndex]
+    }
 
     override suspend fun startExperiment(experimentId: String) {
         val response = client.post("/experiments/$experimentId/start")
@@ -141,7 +151,14 @@ class RealDiscoveryRepository(
         }
     }
     override suspend fun getDiscovery(): DiscoveryData = DiscoveryData(observation = "", hypothesis = "")
-    override suspend fun getNextExperiment(): Experiment = cachedExperiments.first()
+    override suspend fun getNextExperiment(): Experiment {
+        if (cachedExperiments.isEmpty()) getSuggestedExperiments()
+        if (cachedExperiments.isEmpty()) {
+            throw DiscoveryApiException("表示できる実験がありません")
+        }
+        val nextIndex = (cycleIndex + 1) % cachedExperiments.size
+        return cachedExperiments[nextIndex]
+    }
     override suspend fun getDomainFields(): List<DomainField> = emptyList()
     override suspend fun getReportData(): ReportData = ReportData()
     override suspend fun getSettings(): MyDataSettings = MyDataSettings()
