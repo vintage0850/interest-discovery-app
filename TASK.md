@@ -2717,3 +2717,27 @@ Task 1〜3はKimiが逐次実装しコミットする。完了後、Task 4〜6�
 - `./gradlew :shared:testDebugUnitTest --tests "com.example.myapplication.shared.discovery.RealDiscoveryRepositoryTest"` → BUILD SUCCESSFUL（Task 2: 2 tests passed；Task 3: 5 tests passed）
 
 次の担当: Codex。Task 4〜6を実施すること。
+
+### 作業履歴（Codex: Task 4〜6 Step 1〜2完了）
+
+**変更ファイル:**
+- M `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/RealDiscoveryRepository.kt`
+- M `shared/src/commonTest/kotlin/com/example/myapplication/shared/discovery/RealDiscoveryRepositoryTest.kt`
+- M `shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/App.kt`
+
+**コミット:**
+- `d0597f0` `feat(discovery): complete experiment with auto-computed confidence`
+- `c3fe9f6` `feat(discovery): resolve cycleNextExperiment/getNextExperiment/getExperiment from cache`
+- `02cab61` `feat(discovery): switch app DI from FakeDiscoveryRepository to RealDiscoveryRepository`
+
+**実行したコマンドと結果:**
+- `./gradlew :shared:testDebugUnitTest --tests "com.example.myapplication.shared.discovery.RealDiscoveryRepositoryTest"` → Task 4 RED確認。計画書記載の`io.ktor.client.request.forms.TextContent`は現行Ktorで解決できなかったため、`io.ktor.http.content.TextContent`へ修正後、対象テストがFAIL（6 tests completed, 1 failed）。実装後はBUILD SUCCESSFUL（全6 tests合格）。
+- 同コマンド → Task 5 RED確認。`cycleNextExperiment_advancesWithoutExtraHttpCall`がFAIL（8 tests completed, 1 failed）。`getExperiment_returnsFromCache`は既存実装ですでに要件を満たして合格。実装後はBUILD SUCCESSFUL（全8 tests合格）。
+- `ipconfig` → Wi-FiのIPv4アドレス`10.47.192.172`を確認し、`RealDiscoveryRepository(baseUrl = "http://10.47.192.172:8000")`へ配線。
+- `./gradlew :shared:assembleDebug :shared:testDebugUnitTest :app:assembleDebug` → BUILD SUCCESSFUL（84 actionable tasks）。
+
+**未実施（引継ぎ対象）:**
+- Task 6 Step 3: バックエンド起動。
+- Task 6 Step 4: 実機で中核ループとバックエンドログを確認。
+
+次の担当: Claude。Task 6のStep 3〜4を実施すること。
