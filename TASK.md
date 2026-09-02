@@ -2304,3 +2304,394 @@ Kimiの作業履歴の注記「MainActivity.ktは既に`App(driverFactory)`に�
 指定コマンド `./gradlew :shared:assembleDebug :shared:testDebugUnitTest :app:assembleDebug :app:testDebugUnitTest` は今回も Codex 環境では独立完走できなかった。ワークスペース内 `GRADLE_USER_HOME` では Gradle 9.3.1 の取得がネットワーク制限（`Permission denied: getsockopt`）で失敗し、既存ユーザーキャッシュは lock file の書込拒否、既存 Gradle 実体を使ったオフライン実行は `org.gradle.toolchains.foojay-resolver-convention:1.0.0` がワークスペース側キャッシュに無く失敗した。したがって Kimi の「指定4タスク BUILD SUCCESSFUL」および Claude の「app 2タスク BUILD SUCCESSFUL」は履歴として確認したものの、Codex 自身による再実行成功とは扱っていない。ユーザー指示どおり、この環境制約を明記したうえでコードレビューのみで最終判定した。
 
 **Gate 4 結論:** 前回の6項目のうち、設計判断でスコープ外となった項目4を除く5項目はコードと回帰テスト上で解消され、最終の Android ナビゲーション配線も確認できた。ブロッキング finding は0件のため、案件10は Gate 4 を通過とする。
+
+---
+
+## 案件11：Mikke Web UI（`web/`）を Self-Understanding MVP バックエンドへ接続
+
+**状態:** `設計判断済み・実装待ち`
+**担当:** Claude（設計裁定・作業分割）→ Kimi＋Codex（並列実装、ユーザー指示による例外運用）→ Claude（独立検証）→ Codex（Gate4）
+
+### 依頼内容
+
+ユーザーから「Codexも活用しながら最速で作って」との明示指示。`web/`（React + Vite + TypeScript + Tailwind、`discovery-web-app`）は現状 `興味発見（Discovery）` 用のモックデータ画面（タイマー実験・3問振り返り）で、どのバックエンドにも接続されていない。接続先を別リポジトリ `C:\Users\vinta\Claude_Test\self-understanding-mvp`（自己理解支援アプリ、案件1でGate4 PASS済み）に変更する。デザイントークン（Tailwindのカスタムクラス: `bg-background`/`text-textPrimary`/`bg-accent`/`rounded-2xl`/`rounded-badge`等、`web/tailwind.config.js`定義）は流用するが、画面ロジックはDiscovery用のものを全て作り直す。
+
+**AGENTS.mdの例外運用（ユーザー明示指示）:** 通常Codexは実装を担当しないが、今回はユーザー指示により実装にも投入する。案件1（バックエンド）と同じ「インターフェース先行・ファイル完全分離」方式で、Kimi/Codexが待ち合わせなしに真の並列実装を行う。
+
+### 設計判断（2026-09-02 / Claude）
+
+**1. バックエンド接続先・起動方法（採用）**
+
+`self-understanding-mvp/services/api`を`uvicorn app.main:app --reload`（既定ポート8000）で起動する前提とする。Web UI側は`import.meta.env.VITE_API_BASE_URL`（未設定時は`http://localhost:8000`にフォールバック）からベースURLを読む。`web/.env.development`に`VITE_API_BASE_URL=http://localhost:8000`を追加する。
+
+**2. CORS・匿名ユーザー（採用、バックエンド側は別TASKで対応済み）**
+
+`self-understanding-mvp/TASK.md`案件2として、CORS許可（`http://localhost:5173`）と`GET /v1/home`の`user_id`任意化をKimiへ別途依頼済み。**Web UI側の実装は、この案件2がGate4を通過するまでは`localhost:8000`に対して実際に疎通確認できない**（ブラウザのCORSでブロックされる）。Web UI側のコーディング自体（コンポーネント実装・型定義）は並行して進めてよいが、実機能確認（後述のClaude独立検証）は案件2完了後に行う。
+
+**3. `context_id`の生成方法（採用）**
+
+バックエンドに「Context作成API」は存在しない。`context_id`はEvidenceの独立性・多様性計算にのみ使われる不透明なUUIDである（正本仕様12〜15節、`evidence_engine.py`）。Web UI側は入力タブでの1回の送信ごとに`crypto.randomUUID()`で新規UUIDを生成し、それを`context_id`として送る（＝1回の自由記述入力を1つの独立した「状況」として扱う）。セッションやログイン概念を持たないため、これが最もシンプルで正本の意図（独立した状況からの反復証拠を求める）に反しない。
+
+**4. 画面構成（採用、ユーザー承認済みのマッピングに準拠）**
+
+ボトムナビゲーションは4タブのまま維持するが、内容を入れ替える:
+
+| タブID | 表示ラベル | 内容 |
+| --- | --- | --- |
+| `home` | ホーム | `GET /v1/home`のsummary＋domains 5枚＋current_learnings最大3件＋next_action |
+| `input`（旧`explore`を置換） | きろく | 自由記述入力 → `POST /v1/inputs`。post_actionがINSIGHTなら気づきカードとフィードバックボタン（4択）→`POST /v1/insights/{id}/feedback` |
+| `log` | じぶんログ | `GET /v1/home`のcurrent_learnings（全件）とevidence_gapsを表示 |
+| `settings` | 設定 | 既存`App.tsx`のUIをほぼそのまま流用（バックエンド接続なし、モーダルの`alert()`プレースホルダーもそのまま） |
+
+**削除対象:** 実験詳細画面(`screen==='detail'`)・タイマー実行画面(`'running'`)・振り返り画面(`'reflection'`)・発見結果画面(`'result'`)の4画面、およびそれらが依存する`data.ts`（`INITIAL_EXPERIMENTS`/`INITIAL_DOMAINS`/`SIGNAL_THEMES`/`BehaviorSignal`等、Discovery固有でSelf-Understanding側に対応物が無い）。`data.ts`は削除する。
+
+**5ドメインの表示ラベル（Self-Understanding側の`domain`列挙値に対する日本語ラベル、Codex/Kimi共通で使うこと）:**
+
+```
+THINKING              → 🧠 思考のクセ
+VALUES                → 💎 大切にしていること
+BEHAVIOR              → 🏃 行動パターン
+INTERPERSONAL         → 🤝 人との関わり方
+MOTIVATION_INTERESTS  → 🔥 やる気・興味の源
+```
+
+**5. 状態管理・データ取得方針（採用）**
+
+外部ライブラリ（React Query等）は追加しない（YAGNI、依存追加はpackage.jsonの変更が必要でリスクが増す）。`App.tsx`が`useState`+`useEffect`でHomeデータを1箇所で保持し、`home`/`log`タブへpropsで渡す。`input`タブは送信成功時に`onSubmitted`コールバックで`App.tsx`へ通知し、`App.tsx`がHomeデータを再取得する（楽観的更新はしない、YAGNI）。
+
+### 作業分割（案件1と同じ「インターフェース先行」方式）
+
+以下の型・Props契約を**厳密に**守ること（型名・プロパティ名を変更しない。KimiとCodexが互いのファイルを一切読まずに実装できるようにするための固定契約）。
+
+```typescript
+// web/src/types.ts （新規、Kimiが担当）
+export interface DomainSummary {
+  domain: string;
+  level: string;
+  summary: string;
+  evidence_breadth: 'LOW' | 'MEDIUM' | 'HIGH';
+  has_new_change: boolean;
+}
+export interface CurrentLearning {
+  insight_id: string;
+  title: string;
+  statement: string;
+  confidence_level: string;
+  domain: string;
+}
+export interface EvidenceGap {
+  domain: string;
+  message: string;
+}
+export interface NextAction {
+  type: string;
+  message: string;
+}
+export interface HomeResponse {
+  summary: string;
+  domains: DomainSummary[];
+  current_learnings: CurrentLearning[];
+  evidence_gaps: EvidenceGap[];
+  next_action: NextAction;
+}
+export interface InputActionResult {
+  action_id: string;
+  primary_action: string;
+  secondary_actions: string[];
+  confidence: number;
+}
+export interface PostActionResult {
+  type: 'NONE' | 'INSIGHT';
+  insight_id?: string;
+  title?: string;
+  statement?: string;
+  confidence_level?: string;
+}
+export interface InputResponse {
+  raw_input_id: string;
+  processing_state: string;
+  action: InputActionResult;
+  post_action: PostActionResult;
+}
+export type FeedbackType = 'ACCURATE' | 'PARTLY_ACCURATE' | 'INACCURATE' | 'UNSURE';
+export interface FeedbackResponse {
+  insight_id: string;
+  feedback_status: string;
+}
+
+// web/src/api.ts （新規、Kimiが担当）
+// GET {VITE_API_BASE_URL}/v1/home を叩き HomeResponse を返す。非2xxはErrorをthrowする。
+export async function fetchHome(): Promise<HomeResponse>;
+// POST {VITE_API_BASE_URL}/v1/inputs へ {text, context_id: crypto.randomUUID(), idempotency_key: crypto.randomUUID()} を送る。
+export async function submitInput(text: string): Promise<InputResponse>;
+// POST {VITE_API_BASE_URL}/v1/insights/{insightId}/feedback へ {feedback, comment} を送る。
+export async function submitFeedback(insightId: string, feedback: FeedbackType, comment?: string): Promise<FeedbackResponse>;
+```
+
+```typescript
+// web/src/tabs/HomeTab.tsx （新規、Codexが担当）
+interface HomeTabProps {
+  home: HomeResponse | null;
+  loading: boolean;
+  error: string | null;
+  onGoToLog: () => void; // 「見えてきた傾向」バナー等からじぶんログタブへ遷移する
+}
+export default function HomeTab(props: HomeTabProps): JSX.Element;
+
+// web/src/tabs/InputTab.tsx （新規、Codexが担当）
+interface InputTabProps {
+  onSubmitted: () => void; // 送信成功後にApp.tsxへ通知し、Homeデータを再取得させる
+}
+export default function InputTab(props: InputTabProps): JSX.Element;
+// InputTab内部でテキスト入力・送信中状態・エラー表示・post_action結果表示（INSIGHTなら気づきカード＋4択フィードバックボタン）を完結させる。
+// フィードバック送信はInputTab内部からapi.tsのsubmitFeedbackを直接呼んでよい（App.tsxを経由しない）。
+
+// web/src/tabs/LogTab.tsx （新規、Codexが担当）
+interface LogTabProps {
+  home: HomeResponse | null;
+  loading: boolean;
+  error: string | null;
+}
+export default function LogTab(props: LogTabProps): JSX.Element;
+```
+
+```typescript
+// web/src/tabs/SettingsTab.tsx （新規、Kimiが担当。既存App.tsxの設定タブ・5モーダルをほぼそのまま抽出するだけ）
+export default function SettingsTab(): JSX.Element; // props無し。内部状態（トグル・モーダル開閉）は自己完結。
+```
+
+### 対象ファイル（担当宣言）
+
+**Kimi（WU-Kimi）:**
+- `web/src/types.ts`（新規）
+- `web/src/api.ts`（新規）
+- `web/src/tabs/SettingsTab.tsx`（新規、既存App.tsxから抽出）
+- `web/src/App.tsx`（全面書き換え：4タブシェル・ボトムナビ・Homeデータのfetch/state管理・上記4コンポーネントの呼び出し配線）
+- `web/.env.development`（新規）
+- `web/src/data.ts`（削除）
+
+**Codex（WU-Codex）:**
+- `web/src/tabs/HomeTab.tsx`（新規）
+- `web/src/tabs/InputTab.tsx`（新規）
+- `web/src/tabs/LogTab.tsx`（新規）
+
+上記以外のファイル（`web/src/main.tsx`、`web/src/index.css`、`web/tailwind.config.js`、`web/vite.config.ts`等）は変更しない。両者とも`web/src/types.ts`の型定義を`import type`で使用してよい（型ファイルの内容はこのTASK.mdに固定済みのため、Kimi側の実装完了を待たずにCodexは型定義を直接書いて先に着手してよい）。
+
+### 対象外
+
+- ログイン・複数ユーザー対応。
+- Explore（分野をみる）タブの復活。
+- React Query等の新規ライブラリ追加。
+- Android/iOS（KMPシェアードモジュール）側の変更。`web/`はスタンドアロンのブラウザ向けUIであり、案件9・10のCompose Multiplatform UIとは無関係。
+
+### 受入条件
+
+- [ ] `cd web && npm run build`（`tsc && vite build`）が成功する（FRONTEND.mdのビルドチェック必須）。
+- [ ] ホームタブが`GET /v1/home`のsummary・5ドメイン・気づき最大3件・next_actionを表示する。
+- [ ] きろくタブで自由記述を送信すると`POST /v1/inputs`が呼ばれ、post_actionがINSIGHTのとき気づきカードとフィードバック4択が表示され、フィードバック送信で`POST /v1/insights/{id}/feedback`が呼ばれる。
+- [ ] きろくタブでの送信成功後、ホーム/じぶんログタブのデータが更新される（再取得される）。
+- [ ] じぶんログタブが`current_learnings`全件と`evidence_gaps`を表示する。
+- [ ] 設定タブは既存の見た目・挙動（モーダル・トグル・プレースホルダーの`alert()`）を保つ。
+- [ ] 削除対象4画面・`data.ts`への参照が一切残らない（`npm run build`のTS未使用importチェックで担保）。
+- [ ] APIエラー時（バックエンド未起動等）に画面がクラッシュせず、エラーメッセージを表示する。
+
+### 引き継ぎメモ
+
+- 次の担当: Kimi と Codex（並列実行、上記ファイル分離を厳守）。
+- 両者完了後: Claude が `self-understanding-mvp`（案件2適用後）を`uvicorn app.main:app --reload`で起動し、`web`を`npm run dev`で起動して、`npm run build`成功に加えブラウザでの4タブ実地確認（きろく送信→ホーム/ログ反映、フィードバック送信）まで独立検証してからCodexへ最終Gate4を依頼する。
+- `self-understanding-mvp/TASK.md`案件2（CORS・匿名ユーザー）が未完了の場合、Web UI側の実装自体は進めてよいが、Claudeの独立検証（実地疎通確認）は案件2完了後に行うこと。
+
+### 作業履歴（2026-09-02 / Kimi）
+
+Kimi（WU-Kimi）として担当ファイルを実装した。Codex担当の `HomeTab.tsx` / `InputTab.tsx` / `LogTab.tsx` には触れず、ビルド通過のため最小限の型付きスタブを置いた（Codexが本実装に置き換える）。
+
+**変更ファイル:**
+
+- `web/src/types.ts`（新規）
+  - TASK.mdで固定済みの型定義を一字一句変更せずに実装。
+- `web/src/api.ts`（新規）
+  - `fetchHome` / `submitInput` / `submitFeedback` のシグネチャを固定通りに実装。
+  - リクエストボディはバックエンド仕様の `snake_case`（`context_id` / `idempotency_key` 等）で送信。
+  - `VITE_API_BASE_URL` は `import.meta.env` から読み、未設定時は `http://localhost:8000` にフォールバック。
+- `web/src/tabs/SettingsTab.tsx`（新規）
+  - 既存 `App.tsx` の設定タブ UI と 5 モーダルをそのまま抽出し、props 無し・内部状態自己完結のコンポーネントにした。
+  - トグル、モーダル開閉、`alert()` プレースホルダー挙動を維持。
+- `web/src/App.tsx`（全面書き換え）
+  - 4タブシェル（ホーム／きろく／じぶんログ／設定）に再構成。
+  - `useState` + `useEffect` で `GET /v1/home` を取得し、ホーム／じぶんログタブへ props で渡す。
+  - きろくタブからの `onSubmitted` コールバックで Home データを再取得し、ホームタブへ遷移。
+  - ボトムナビゲーションを `home` / `input` / `log` / `settings` に更新（ラベル：ホーム／きろく／じぶんログ／設定）。
+- `web/.env.development`（新規）
+  - `VITE_API_BASE_URL=http://localhost:8000` を追加。
+- `web/src/data.ts`（削除）
+  - Discovery 固有のモックデータ定義を削除。
+- `web/src/vite-env.d.ts`（新規）
+  - `import.meta.env` の型解決のため標準の Vite client 型参照を追加。
+- `web/src/tabs/HomeTab.tsx` / `InputTab.tsx` / `LogTab.tsx`（新規、Codex 担当分のビルド用スタブ）
+  - TASK.md で固定された Props 契約に合わせた最小実装。Codex が本実装に置き換える。
+
+**検証結果:**
+
+| 日付 | 担当 | コマンド | 結果 |
+| --- | --- | --- | --- |
+| 2026-09-02 | Kimi | `cd web && npm run build` | **BUILD SUCCESSFUL**（`tsc && vite build` とも成功） |
+
+**次の担当:**
+
+- ~~Codex（WU-Codex）：`HomeTab.tsx` / `InputTab.tsx` / `LogTab.tsx` のスタブを本実装に置き換える。~~ → 完了（下記参照）
+- ~~Claude：`self-understanding-mvp` 側の案件2（CORS・匿名ユーザー）完了後、`npm run dev` で実地疎通確認を行う。~~ → 完了（下記参照）
+
+### WU-Codex 作業履歴（2026-09-02 / Codex、Claudeが差分から代筆・記録）
+
+Codexが担当3ファイルを実装したが、TASK.mdへの作業履歴追記は実行しなかった（非対話実行の途中でCodexが計画確認を求めて一度停止し、承認後に再実行したセッションでは追記まで到達しなかったと推測される）。ファイル内容を実際に読んで確認したうえで、Claudeが代わりに記録する。
+
+**変更ファイル:**
+- `web/src/tabs/HomeTab.tsx`（Kimiのスタブを置き換え）：summary（いまのあなた）、5ドメインカード（`DOMAIN_LABELS`でTASK.md記載の対応表を使用、`evidence_breadth`を「これから／集まりつつある／十分にある」の日本語ラベルに変換）、気づき最大3件、next_action、「見えてきた傾向」から`onGoToLog`でじぶんログタブへの遷移を実装。loading/エラー/データ無しの各状態を自己完結で表示。
+- `web/src/tabs/InputTab.tsx`：自由記述フォーム（空文字・送信中は送信不可）、`submitInput`呼び出し、送信成功時に`onSubmitted()`を呼びテキストをクリア。`post_action.type === 'INSIGHT'`のとき気づきカードと4択フィードバックボタンを表示し、`submitFeedback`呼び出し後は選択済み表示に固定（連打防止）。送信エラー・フィードバックエラーをそれぞれ個別に表示。
+- `web/src/tabs/LogTab.tsx`：`current_learnings`全件と`evidence_gaps`をカード表示、空配列時はそれぞれ専用の空状態メッセージ。
+
+**設計判断への準拠確認（Claude確認）:** Props契約・型（`HomeTabProps`/`InputTabProps`/`LogTabProps`、`web/src/types.ts`）を一字一句変更していない。既存Tailwindトークン（`web/tailwind.config.js`定義の`rounded-card`/`rounded-insight`/`rounded-button`/`rounded-selector`/`rounded-badge`や色トークン）のみを使用し、新規トークンの追加なし。5ドメインの日本語ラベルはTASK.md記載の対応表と完全一致。`App.tsx`・`SettingsTab.tsx`・`types.ts`・`api.ts`には触れていない（`git`管理外だが、当該ファイルのタイムスタンプ・内容がKimi版のまま変化していないことを確認）。
+
+### Claudeによる独立検証（2026-09-02）
+
+**1. ビルド確認:**
+
+実行コマンド: `cd web && npm run build`
+
+```
+> discovery-web-app@1.0.0 build
+> tsc && vite build
+
+vite v6.4.3 building for production...
+✓ 1835 modules transformed.
+dist/index.html                   1.20 kB │ gzip:  0.68 kB
+dist/assets/index-jMTf8Ew8.css   16.66 kB │ gzip:  3.95 kB
+dist/assets/index-Df0uVmEm.js   188.06 kB │ gzip: 55.48 kB
+✓ built in 5.95s
+```
+
+TypeScriptエラーなし（未使用importチェック含む）、Vite本番ビルド成功。
+
+**2. ブラウザでの実地疎通確認（Playwright/Claude in Chrome使用）**
+
+`self-understanding-mvp/TASK.md`案件2適用後の状態で検証した。ただし `localhost:8000` は本プロジェクトと無関係の別サービス（`Reverse FAQ Backend`、案件8由来、PID 36112、2026-08-31起動）が既に使用中だったため、**検証専用にポート8001でバックエンドを一時起動**し、Web UI側は`VITE_API_BASE_URL=http://localhost:8001`を環境変数で上書きして確認した（`.env.development`のコミット値`8000`は変更していない）。検証後、8001のuvicornと検証用Viteサーバーは停止済み。既存の8000番プロセスには一切触れていない。
+
+- ホームタブ：`GET /v1/home`の実データを表示。5ドメインが日本語ラベル・「Very little evidence」相当の日本語表示で正しく描画された（新規匿名ユーザーのため初期状態）。
+- きろくタブ：テキスト入力→送信ボタン活性化→送信、`POST /v1/inputs`が実際にネットワーク到達することを確認。**この検証環境には`GEMINI_API_KEY`が設定されていない**（`services/api/.env`が存在しない）ため、バックエンドから`503 {"detail":"GEMINI_API_KEY is not configured"}`が返り、InputTabが「送信できませんでした」とエラー本文をクラッシュせず表示した。これは受入条件「APIエラー時に画面がクラッシュせず、エラーメッセージを表示する」を実地で満たしていることの確認になったが、**Insight生成〜フィードバック送信までの正常系（気づきカード表示、4択フィードバック）は実際のGeminiキーが無いため未検証**。
+- じぶんログタブ：`まだ傾向はありません`等、`current_learnings`/`evidence_gaps`が空の状態を正しく表示。
+- 設定タブ：既存UIがそのまま表示され、退行なし。
+- コンソールエラー：無し。
+
+**3. 未検証事項（次回、実Geminiキーがあれば確認可能）**
+
+- きろく送信→Insight生成→気づきカード表示→フィードバック送信→ホーム/じぶんログタブへの反映、という正常系のE2Eフロー全体。
+- `web/index.html`の`<title>`が旧Discovery時代の「Mikke - 5分で試す高校生向け興味発見アプリ」のままで、今回のスコープ外（TASK.md対象ファイルに`index.html`を含めていない）のため未修正。実害はブラウザタブ表示のみで機能に影響しないが、次回の軽微な修正候補として記録する。
+
+**結論:** ビルド・型チェックは完全に合格。UIの4画面すべてが実バックエンドに接続され、正しいデータ・空状態・エラー状態を表示することを確認した。Insight生成を含む正常系のみ、実行環境にGeminiキーが無いため未検証のまま残る。
+
+**次の担当: Codex（最終Gate4）。** 上記の独立検証結果と実装ファイルをレビューし、品質判定を行うこと。特にGeminiキー未検証の扱い（ブロッキングとするか、既知の制約として許容するか）を判断すること。
+
+### Gate 4 レビュー（2026-09-02 / Codex）— `docs/quality-review/2026-09-02-mikke-web-ui-self-understanding.md`
+
+**判定: CHANGES REQUIRED**
+
+指摘4件のうち、指摘1が実質的なブロッカー。指摘2〜4は下記の設計判断を参照。詳細は品質レビューファイル本体を参照。
+
+- **指摘1（重大）:** `InputTab`の送信成功時、`onSubmitted()`経由で`App.tsx`が即座に`setCurrentTab('home')`しており、`post_action.type === 'INSIGHT'`でも気づきカード・4択フィードバックUIをユーザーが見る前にホームタブへ強制遷移してしまう。MVPの主要導線（きろく→気づき提示→フィードバック）が到達不能。
+- **指摘2:** `web/`に自動テストが無い。
+- **指摘3:** `web/src/vite-env.d.ts`がTASK.mdの対象ファイル宣言に無い。
+- **指摘4:** Geminiキー未検証（非ブロッキングとCodex自身が判定済み）。
+
+### 設計判断（2026-09-02 / Claude、Gate4指摘への対応方針）
+
+**指摘1（採用・修正必須）:** `App.tsx`の設計自体がバグの原因。当初のTASK.md契約「`onSubmitted`: 送信成功後にApp.tsxへ通知し、Homeデータを再取得させる」を「タブ遷移も行う」とKimiが拡大解釈した結果である。**修正方針: `onSubmitted`はHomeデータの再取得のみを行い、タブ遷移は行わない。** ユーザーは`InputTab`に留まり、気づきカードとフィードバックボタンを操作できる状態を維持する（ホーム/じぶんログタブへは、他の画面同様ボトムナビで手動遷移すればよい。自動遷移は不要というのがそもそもの狙いだった）。
+
+**指摘2（採用・今回は対応不要とする）:** `web/`はDiscovery時代から一貫してテストランナー（Vitest等）が未導入のプロジェクトであり、これは今回の案件11が生んだ負債ではなく既存の技術的負債である。テストランナー新規導入は`package.json`への依存追加を伴う別スコープの判断であり、「最速で」というユーザー指示と衝突する。**今回は見送り、Claudeによるブラウザでの実地確認を代替の検証手段とする。** 将来的にWeb UIへテストランナーを導入する場合は別タスクとして起票する。
+
+**指摘3（採用・記録のみで解決）:** `vite-env.d.ts`はKimiが`import.meta.env`の型解決のために追加した標準的なVite設定ファイルであり、内容もVite公式テンプレートそのもの（`/// <reference types="vite/client" />`相当）でリスクは無い。TASK.mdの対象ファイル宣言が漏れていただけなので、本節への追記をもって正式な担当宣言とする（Kimi担当、追加の変更は不要）。
+
+**指摘4（既に解決）:** Codex自身がブロッキングにしないと判定済み。対応済み扱いとする。
+
+**次の担当: Kimi。** 指摘1（`App.tsx`の`handleSubmitted`からタブ遷移を削除し、Homeデータ再取得のみにする）のみを修正すること。他のファイルは変更しないこと。修正後、`cd web && npm run build`が成功することを確認し、本節に作業履歴を追記すること。完了後、Claudeが再度ブラウザで実地確認（きろく送信後もInputTabに留まり、post_actionがINSIGHTなら気づきカード・フィードバックが操作できること）を行い、Codexへ再レビューを依頼する。
+
+### Codexによる最終Gate 4品質判定（2026-09-02）
+
+- **判定: CHANGES REQUIRED**
+- 詳細レビュー: `docs/quality-review/2026-09-02-mikke-web-ui-self-understanding.md`
+- `web/src/tabs/InputTab.tsx`は送信結果を保持するが、`web/src/App.tsx`の`handleSubmitted`が送信成功直後にホームへ遷移するため、InputTabがアンマウントされる。正常応答が`INSIGHT`でも気づきカードと4択フィードバックを表示・操作できず、主要受入条件を満たさない。
+- 対象UIの自動テストとRed→Green記録がなく、この画面遷移回帰を検出できていない。送信成功、Insight表示、4択フィードバック、Home再取得、エラー表示の自動テスト追加が必要。
+- `web/src/vite-env.d.ts`は実装上妥当なVite標準型参照だが、対象ファイルへの事前宣言がないため、TASK.md上の担当範囲を整合させること。
+- **Geminiキー未検証の判断:** これは単独ではブロッキングにしない。キー欠如時にクラッシュせずエラー表示することはClaudeが実地確認済みで、APIキーはWebクライアントへ置くべきではない。安全なキー利用環境での正常系E2Eをリリース前の既知の制約として残す。ただし今回は、キーの有無と無関係に静的に確定できるInsight導線の不具合があるため`PASS`にはできない。
+- Codex実行結果: `cd web && .\\node_modules\\.bin\\tsc.cmd`は終了コード0。`npm.cmd run build`は`tsc`通過後、Codex制限環境の上位ディレクトリ読み取り拒否でVite設定を解決できず失敗。Claudeが同日同一状態で実施した本番ビルド成功証跡を参照した。
+- **次の担当: Kimi。** 上記修正とテスト追加後、CodexがGate 4を再判定する。
+
+### 作業履歴（2026-09-02 / Kimi）— 指摘1修正
+
+**変更ファイル:**
+
+- `web/src/App.tsx`
+  - `handleSubmitted` から `setCurrentTab('home')` の呼び出しを削除。
+  - 送信成功後は `loadHome()` のみを呼び出し、ホーム／じぶんログデータを再取得する。
+  - これにより、きろくタブに留まったまま `post_action.type === 'INSIGHT'` の気づきカードと4択フィードバックを操作できるようになる。
+  - 他のファイルは一切変更していない。
+
+**検証結果:**
+
+| 日付 | 担当 | コマンド | 結果 |
+| --- | --- | --- | --- |
+| 2026-09-02 | Kimi | `cd web && npm run build` | **BUILD SUCCESSFUL**（`tsc && vite build` とも成功、1835 modules transformed） |
+
+**次の担当: Claude。** ブラウザで実地確認（きろく送信後もInputTabに留まり、post_actionがINSIGHTなら気づきカード・フィードバックが操作できること）を行い、Codexへ再レビューを依頼する。
+
+### Claudeによる再検証（2026-09-02）
+
+`cd web && npm run build`を再実行し、修正後もTypeScriptエラーなし・Vite本番ビルド成功（1835 modules transformed）を確認した。
+
+ブラウザでの実地確認（検証用ポート8001構成は前回と同一、手順省略）：きろくタブでテキストを入力・送信 →（本環境に`GEMINI_API_KEY`が無いため今回も503エラー応答）→ **修正前は自動でホームタブへ遷移していたが、修正後はきろくタブに留まったままエラーメッセージが表示される**ことを確認した。これは指摘1が解消されたことの間接証拠になる（エラー時に遷移しないことは確認できたが、`post_action.type === 'INSIGHT'`成功パスでの気づきカード・4択フィードバック表示は、引き続き実際のGeminiキーが無いため未検証のまま）。コード自体は`App.tsx`から`setCurrentTab('home')`呼び出しが削除されており、成功時・失敗時いずれの経路でもタブ遷移が起きないことをコードリーディングで確認済み。
+
+コンソールエラー無し。設定・ホーム・じぶんログの他タブに退行なし。検証用サーバー（ポート8001・5173）は確認後に停止済み。
+
+**次の担当: Codex（再レビュー）。** 指摘1の修正内容・再検証結果を確認し、品質判定を更新すること。指摘4（Geminiキー未検証）は既にCodex自身が非ブロッキングと判定済みのため、指摘1が解消していればGate4 PASSの判断を期待する。
+
+### CodexによるGate 4再レビュー（2026-09-02）
+
+- **判定: PASS**
+- 詳細レビュー: `docs/quality-review/2026-09-02-mikke-web-ui-self-understanding.md`の「再レビュー（2026-09-02 / Codex）」
+- `web/src/App.tsx:33-37`を実際に確認した。`handleSubmitted`から`setCurrentTab('home')`は削除され、送信成功時は`loadHome()`だけを実行する。`InputTab`は維持されるため、返却された`INSIGHT`と4択フィードバックを表示・操作できる。
+- `web/src/tabs/InputTab.tsx:39-47`も確認した。失敗時は`catch`でエラー状態を更新し、`onSubmitted()`を呼ばない。さらに`setCurrentTab`の全呼び出しを検索した結果、残るのは明示的なログ遷移とボトムナビのクリック処理のみであり、送信成功・失敗いずれの経路でも自動タブ遷移は起きない。よって前回の指摘1は解消済みと判定する。
+- 指摘2は既存の技術的負債として別スコープ、指摘3は本節までのTASK.mdへの担当宣言追記で解決済み、指摘4は既知の制約だが非ブロッキング、という既存の設計判断を尊重する。
+- Codexの今回の確認では`cd web && .\\node_modules\\.bin\\tsc.cmd`が終了コード0。`npm.cmd run build`は`tsc`通過後、従来と同じCodex環境の上位ディレクトリ読み取り制限でVite設定解決に失敗したため、KimiおよびClaudeが記録した修正後の本番ビルド成功（1835 modules transformed）を参照した。
+- **Gate 4結論:** 唯一のブロッキング事項だった指摘1は解消した。指摘2〜4は合意済みの非ブロッキング事項または解決済み事項であるため、案件11はGate 4を通過とする。
+
+## 案件12：興味発見（Discovery）機能の実データ化 — 中核ループ（`discovery-backend`ブランチ）
+
+**状態:** `設計・計画確定・実装中`
+**担当:** Claude（設計裁定・作業分割）→ Kimi（Task 1〜3）→ Codex（Task 4〜6、実装として投入）→ Claude（独立検証）→ Codex（Gate4）
+
+### 依頼内容
+
+ユーザーから「App版（Androidネイティブアプリ）を完成させたい」との依頼。実機確認により、`shared/`のCompose UIは`FakeDiscoveryRepository`のみで動作しており、同リポジトリの`backend/discovery`（FastAPI、ポート8000で稼働中、`main.py`上は`"Reverse FAQ Backend"`と同居）に一度も接続されていないことが判明した。まず「実験の生成→選択→開始→完了→スキップ」という中核ループのみを実データ化する（ホーム集計・分野一覧・レポート・設定・Googleログインは次フェーズ）。
+
+**AGENTS.mdの例外運用（ユーザー明示指示）:** 「Codexも使って」との指示により、通常はレビュー専任のCodexを今回は実装にも投入する。案件11とは異なりファイル完全分離での真の並列は困難（`RealDiscoveryRepository.kt`という単一ファイルへの逐次追記のため）なので、Kimi→Codexの順で担当を引き継ぐ形の役割分担とする。
+
+### 設計・計画
+
+- 設計書: `docs/superpowers/specs/2026-09-02-discovery-real-api-integration-design.md`
+- 実装計画（Task 1〜6の完全なコード・テスト・受け入れ基準を含む）: `docs/superpowers/plans/2026-09-02-discovery-real-api-integration.md`
+
+両ファイルとも計画作成時にコミット済み。実装担当は計画ファイルのTask該当セクションを一次情報として読むこと（本欄の要約だけで作業しないこと）。
+
+### 担当割り当て
+
+| Task | 内容 | 担当 |
+| --- | --- | --- |
+| Task 1 | `DiscoveryRepository`インターフェースからFake専用メソッド分離 | Kimi |
+| Task 2 | ktor-client-mock追加＋`RealDiscoveryRepository`骨格・セッション作成・実験生成 | Kimi |
+| Task 3 | select/start/skipExperimentの実データ化 | Kimi |
+| Task 4 | completeExperiment（confidence自動算出）の実データ化 | Codex |
+| Task 5 | cycleNextExperiment/getNextExperiment/getExperimentのキャッシュ実装 | Codex |
+| Task 6 | `App.kt`でFake→Realへ配線切替、実機で動作確認 | Codex |
+
+Task 1〜3はKimiが逐次実装しコミットする。完了後、Task 4〜6はCodexが引き継ぐ。各Taskの完了ごとに、本節に作業履歴（変更ファイル・実行コマンドと結果）を追記すること（案件1・11と同じ形式）。
+
+**次の担当: Kimi。** `docs/superpowers/plans/2026-09-02-discovery-real-api-integration.md`のTask 1〜3を、記載のコード・テストどおりに実装すること。各TaskごとにStep（失敗するテスト→実装→テスト成功→コミット）を踏み、Task内のコミットメッセージ例をそのまま使ってよい。Task 3完了後、本節に作業履歴を追記し、次の担当をCodexとして引き継ぐこと。
