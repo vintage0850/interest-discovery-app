@@ -15,8 +15,10 @@ build/
 .cxx
 local.properties
 
-# Kotlin コンパイラの一時ログ
+# Kotlin コンパイラの一時ログ・ストア
 .kotlin
+.gradle-user/
+kotlin-js-store/
 
 # リリース署名鍵（絶対にコミットしない。紛失時は SETUP.md の手順でしか復旧できない）
 *.jks
@@ -27,3 +29,10 @@ local.properties
 
 # Reverse FAQ バックエンド（Gemini APIキー等の秘密情報を含む。絶対にコミットしない）
 backend/.env
+backend/venv/
+backend/.venv/
+backend/__pycache__/
+
+# Web PWA ビルド・依存関係
+web/node_modules/
+web/dist/

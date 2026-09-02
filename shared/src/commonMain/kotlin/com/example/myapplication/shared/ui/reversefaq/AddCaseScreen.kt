@@ -86,7 +86,7 @@ fun AddCaseScreen(
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 Text(
-                    text = "賃貸契約書の確認案件を作成します。",
+                    text = "契約書の確認案件を作成します。",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -98,7 +98,7 @@ fun AddCaseScreen(
                         titleTouched = true
                     },
                     label = { Text("案件名") },
-                    placeholder = { Text("例: ○○マンション 賃貸契約") },
+                    placeholder = { Text("例: ○○マンション 賃貸契約 / △△社 雇用契約") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),

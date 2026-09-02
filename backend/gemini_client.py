@@ -11,7 +11,7 @@ from models import AnalyzeResponse, QuestionResponse
 
 
 class GeminiClient:
-    """Gemini API を使って賃貸契約書から確認すべき質問を生成するクライアント。"""
+    """Gemini API を使って契約書から確認すべき質問を生成するクライアント。"""
 
     def __init__(self, api_key: str | None = None) -> None:
         key = api_key or os.environ.get("GEMINI_API_KEY")
@@ -36,12 +36,12 @@ class GeminiClient:
     def _build_prompt(self, document_text: str, user_context: dict[str, Any]) -> str:
         context_text = json.dumps(user_context, ensure_ascii=False, indent=2)
         return (
-            "以下の賃貸契約書本文と、契約者本人の条件を照合してください。\n\n"
+            "以下の契約書本文と、契約者本人の条件を照合してください。\n\n"
             "【契約書本文】\n"
             f"{document_text}\n\n"
             "【本人条件】\n"
             f"{context_text}\n\n"
-            "契約書本文と本人条件に基づき、契約前に不動産会社等へ確認すべき質問を "
+            "契約書本文と本人条件に基づき、契約前に契約の相手方へ確認すべき質問を "
             "3〜5 件抽出してください。"
         )
 
@@ -58,7 +58,9 @@ class GeminiClient:
 
 
 _SYSTEM_INSTRUCTION = """\
-あなたは賃貸契約の契約前確認を支援するアシスタントです。
+あなたはあらゆる種類の契約書の契約前確認を支援するアシスタントです。
+賃貸借契約、雇用契約、保険契約、業務委託契約など、契約書の種類は問いません。
+文書の内容から契約の種類を判断し、その文脈に沿った質問を生成してください。
 
 【あなたの役割】
 - 文書から条件を抽出する

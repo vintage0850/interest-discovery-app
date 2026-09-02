@@ -52,7 +52,7 @@ fun HomeScreen(
         if (cases.isEmpty()) {
             EmptyState(
                 modifier = Modifier.padding(padding),
-                message = "賃貸契約の確認案件がありません。\n右下の「＋」から新しく確認しましょう。"
+                message = "確認案件がありません。\n右下の「＋」から新しく確認しましょう。"
             )
         } else {
             LazyColumn(

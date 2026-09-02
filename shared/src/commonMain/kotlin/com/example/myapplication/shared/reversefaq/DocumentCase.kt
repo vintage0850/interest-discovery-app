@@ -1,7 +1,7 @@
 package com.example.myapplication.shared.reversefaq
 
 /**
- * Reverse FAQの対象となる文書（賃貸契約書など）を表す案件。
+ * Reverse FAQの対象となる文書（契約書全般）を表す案件。
  */
 data class DocumentCase(
     val id: Long = 0,

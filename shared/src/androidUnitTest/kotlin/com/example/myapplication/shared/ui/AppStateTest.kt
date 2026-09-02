@@ -97,6 +97,8 @@ class AppStateTest {
             categoryId = null,
             subTaskTitles = listOf("  下書き  ", "", "   ", "清書")
         )
+        advanceUntilIdle()
+
         // タスク本体とサブタスクは別クエリの結果をcombineしているため、
         // タスクだけ先に見えてサブタスクがまだ空の中間状態がありうる。
         // サブタスクが入るまで待つ。
@@ -104,7 +106,6 @@ class AppStateTest {
 
         val subTasks = tasks.single().subTasks
         assertEquals(listOf("下書き", "清書"), subTasks.map { it.title })
-        advanceUntilIdle()
     }
 
     @Test

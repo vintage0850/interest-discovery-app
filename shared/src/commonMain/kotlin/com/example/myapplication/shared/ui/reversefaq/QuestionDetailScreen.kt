@@ -236,7 +236,7 @@ private fun AnswerInputSection(
             value = answeredBy,
             onValueChange = onAnsweredByChange,
             label = { Text("回答者（任意）") },
-            placeholder = { Text("例: ○○不動産 担当者") },
+            placeholder = { Text("例: 相手方の担当者") },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true
         )
