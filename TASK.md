@@ -2695,3 +2695,25 @@ TypeScriptエラーなし（未使用importチェック含む）、Vite本番ビ
 Task 1〜3はKimiが逐次実装しコミットする。完了後、Task 4〜6はCodexが引き継ぐ。各Taskの完了ごとに、本節に作業履歴（変更ファイル・実行コマンドと結果）を追記すること（案件1・11と同じ形式）。
 
 **次の担当: Kimi。** `docs/superpowers/plans/2026-09-02-discovery-real-api-integration.md`のTask 1〜3を、記載のコード・テストどおりに実装すること。各TaskごとにStep（失敗するテスト→実装→テスト成功→コミット）を踏み、Task内のコミットメッセージ例をそのまま使ってよい。Task 3完了後、本節に作業履歴を追記し、次の担当をCodexとして引き継ぐこと。
+
+### 作業履歴（Kimi: Task 1〜3完了）
+
+**変更ファイル:**
+- M `gradle/libs.versions.toml`
+- M `shared/build.gradle.kts`
+- M `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/DiscoveryRepository.kt`
+- M `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/DiscoveryState.kt`
+- M `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/FakeDiscoveryRepository.kt`
+- A `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/RealDiscoveryRepository.kt`
+- A `shared/src/commonTest/kotlin/com/example/myapplication/shared/discovery/RealDiscoveryRepositoryTest.kt`
+
+**コミット:**
+- `94aa4a3` `refactor(discovery): move Fake-only scenario methods out of DiscoveryRepository interface`
+- `7d7d097` `feat(discovery): add RealDiscoveryRepository with session creation and experiment generation`
+- `49113e1` `feat(discovery): wire select/start/skip experiment to backend endpoints`
+
+**実行したコマンドと結果:**
+- `./gradlew :shared:testDebugUnitTest --tests "com.example.myapplication.shared.discovery.*"` → BUILD SUCCESSFUL（Task 1前後、既存テストが引き続き通ることを確認）
+- `./gradlew :shared:testDebugUnitTest --tests "com.example.myapplication.shared.discovery.RealDiscoveryRepositoryTest"` → BUILD SUCCESSFUL（Task 2: 2 tests passed；Task 3: 5 tests passed）
+
+次の担当: Codex。Task 4〜6を実施すること。
