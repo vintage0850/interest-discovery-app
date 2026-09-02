@@ -2860,3 +2860,53 @@ $ cd backend && python -m pytest -v
 - `778f691` feat(line): add due-reminder processing scheduler logic
 
 **次の担当: Codex。** Task 5〜6を実施すること。
+
+### 作業履歴（Codex / Task 5〜6）
+
+**計画上の不整合に関する裁定:**
+
+- Task 5のテストが`main.py`へのルーター登録を必要とする一方、当初計画では登録がTask 6 Step 3に置かれていた。
+- ユーザー裁定により、Task 6 Step 3のうち`line_router`のimportと`app.include_router(discovery_router)`直後の`app.include_router(line_router)`だけをTask 5中に先行適用した。
+- APScheduler関連のimport、LINE用エンジン・リポジトリ作成、スケジューラ起動・停止イベントは先行適用せず、Task 6 Step 3で追加した。先行適用済みのルーター登録は重複させていない。
+
+**Task 5変更ファイル:**
+
+- `backend/line/router.py`（Webhook、リマインダー作成・一覧・取消エンドポイント）
+- `backend/tests/test_line_webhook.py`（3 tests）
+- `backend/tests/test_line_reminders_router.py`（3 tests）
+- `backend/main.py`（裁定に基づく`line_router`のimport・登録のみ先行適用）
+
+**Task 5検証:**
+
+```text
+$ cd backend && python -m pytest tests/test_line_webhook.py tests/test_line_reminders_router.py -v
+# 結果: 6 passed, 1 warning
+```
+
+**Task 5コミット:**
+
+- `961805c` feat(line): add webhook and reminder CRUD endpoints
+
+**Task 6変更ファイル:**
+
+- `backend/requirements.txt`（`apscheduler>=3.10.0`を追加）
+- `backend/line/router.py`（`set_repository()`を追加）
+- `backend/main.py`（LINE用SQLiteエンジン・リポジトリ初期化、60秒間隔のAPSchedulerジョブ、起動・停止イベントを追加）
+
+**Task 6実行コマンドと結果:**
+
+```text
+$ cd backend && python -m pip install -r requirements.txt
+# 結果: apscheduler 3.11.3、tzlocal 5.4.4を正常にインストール
+
+$ cd backend && python -m pytest -v
+# 結果: 123 passed, 5 warnings
+```
+
+- Task 6 Step 6のuvicorn起動による手動疎通確認は、ユーザー指示により実施していない。
+
+**Task 6コミット:**
+
+- `5674be7` feat(line): wire line module into main.py and start the reminder scheduler
+
+次の担当: Claude。ngrok経由でのWebhook実地検証を実施すること。
