@@ -2811,3 +2811,52 @@ adb reverse tcp:8000 tcp:8000
 Task 1〜4はKimiが逐次実装しコミットする。完了後、Task 5〜6はCodexが引き継ぐ。各Taskの完了ごとに、本節に作業履歴を追記すること（案件12と同じ形式）。
 
 **次の担当: Kimi。** `docs/superpowers/plans/2026-09-03-line-reminder-integration.md`のTask 1〜4を、記載のコード・テストどおりに実装すること。Task 4完了後、本節に作業履歴を追記し、次の担当をCodexとして引き継ぐこと。
+
+### 作業履歴（Kimi / Task 1〜4）
+
+**変更ファイル:**
+
+- `backend/line/__init__.py`（新規、空ファイル）
+- `backend/line/models.py`（新規：`ReminderStatus`、`LineAccount`、`Reminder`、`ReminderCreate`、`ReminderResponse`）
+- `backend/line/repository.py`（新規：`LineRepository`、`StateTransitionError`）
+- `backend/line/signature.py`（新規：`verify_line_signature`）
+- `backend/line/line_client.py`（新規：`LineClient`、`LineApiException`）
+- `backend/line/scheduler.py`（新規：`process_due_reminders`、`ProcessResult`）
+- `backend/tests/test_line_repository.py`（新規：9 tests）
+- `backend/tests/test_line_signature.py`（新規：4 tests）
+- `backend/tests/test_line_client.py`（新規：2 tests）
+- `backend/tests/test_line_scheduler.py`（新規：5 tests）
+
+**実行コマンドと結果:**
+
+```text
+$ cd backend && python -m pytest tests/test_line_repository.py -v
+# 初回: ModuleNotFoundError: No module named 'line'（計画通り）
+# 実装後: 9 passed
+
+$ cd backend && python -m pytest tests/test_line_signature.py -v
+# 初回: ModuleNotFoundError: No module named 'line.signature'（計画通り）
+# 実装後: 4 passed
+
+$ cd backend && python -m pytest tests/test_line_client.py -v
+# 初回: ModuleNotFoundError: No module named 'line.line_client'（計画通り）
+# 実装後: 2 passed
+
+$ cd backend && python -m pytest tests/test_line_scheduler.py -v
+# 初回: ModuleNotFoundError: No module named 'line.scheduler'（計画通り）
+# 実装後: 1 failed（`test_due_reminder_without_account_is_failed`で processed カウント不整合）
+# 修正後: 5 passed
+# 修正内容: `process_due_reminders()` 内で LINE アカウント未連携時に `processed` をインクリメントしないよう変更
+
+$ cd backend && python -m pytest -v
+# 結果: 117 passed, 1 warning
+```
+
+**コミット:**
+
+- `efdeb73` feat(line): add LineAccount/Reminder models and repository layer
+- `e45d5af` feat(line): add webhook signature verification
+- `4a34c46` feat(line): add LINE Messaging API push client
+- `778f691` feat(line): add due-reminder processing scheduler logic
+
+**次の担当: Codex。** Task 5〜6を実施すること。
