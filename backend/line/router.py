@@ -14,6 +14,11 @@ _ENGINE = None  # main.py が起動時に create_line_engine() の結果を差�
 _repository: LineRepository | None = None
 
 
+def set_repository(repo: LineRepository) -> None:
+    global _repository
+    _repository = repo
+
+
 def get_line_repository() -> LineRepository:
     if _repository is None:
         raise RuntimeError("LineRepository is not initialized")
