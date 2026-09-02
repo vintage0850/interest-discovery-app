@@ -12,14 +12,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.BasicAlertDialog
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -36,10 +33,9 @@ import androidx.compose.ui.unit.sp
 import com.example.myapplication.shared.discovery.SettingsUiState
 
 /**
- * 設定・マイデータ（Settings）タブ画面。
- * 保存されているシグナル、通知設定、プライバシー保護、データ初期化。
+ * 設定（Settings）タブ画面。
+ * 将来のアカウント登録・LINE連携・通知設定・プライバシー設定・規約が自然に追加できる構造。
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsTabScreen(
     settingsState: SettingsUiState,
@@ -47,7 +43,7 @@ fun SettingsTabScreen(
     onResetData: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var showResetConfirm by remember { mutableStateOf(false) }
+    var activeModal by remember { mutableStateOf<String?>(null) }
 
     Box(
         modifier = modifier
@@ -62,200 +58,197 @@ fun SettingsTabScreen(
                 .padding(top = DiscoverySpacing.xxxl, bottom = 80.dp)
         ) {
             Text(
-                text = "設定・データ管理",
+                text = "設定",
                 color = DiscoveryColors.TextPrimary,
-                fontSize = 28.sp,
-                fontWeight = FontWeight.Bold,
-                lineHeight = 34.sp
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Black
             )
 
-            Spacer(modifier = Modifier.height(DiscoverySpacing.xs))
+            Spacer(modifier = Modifier.height(DiscoverySpacing.xl))
 
-            Text(
-                text = "プライバシー保護と学習データの管理です。",
-                color = DiscoveryColors.TextSecondary,
-                fontSize = 15.sp
-            )
-
-            Spacer(modifier = Modifier.height(DiscoverySpacing.xxl))
-
-            // 1. 保存されているSignal
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(DiscoveryRadius.card))
-                    .background(DiscoveryColors.Surface)
-                    .border(1.dp, DiscoveryColors.BorderSubtle, RoundedCornerShape(DiscoveryRadius.card))
-                    .padding(DiscoverySpacing.cardPadding)
-            ) {
-                Text(
-                    text = "📊 保存されている行動シグナル",
-                    color = DiscoveryColors.TextPrimary,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold
-                )
-
-                Spacer(modifier = Modifier.height(DiscoverySpacing.xs))
-
-                Text(
-                    text = "これまでの実験から ${settingsState.settings.savedSignalCount} 件の行動ログを記録しています。性格診断テストではなく、あなたの直感と行動からのみ興味を導き出します。",
-                    color = DiscoveryColors.TextSecondary,
-                    fontSize = 13.sp,
-                    lineHeight = 19.sp
+            // 1. アカウント
+            SectionHeader(title = "アカウント")
+            SettingsCard {
+                SettingsRow(
+                    icon = "👤",
+                    title = "アカウントを作成",
+                    subtitle = "未ログイン",
+                    onClick = { activeModal = "account" }
                 )
             }
 
-            Spacer(modifier = Modifier.height(DiscoverySpacing.base))
+            Spacer(modifier = Modifier.height(DiscoverySpacing.lg))
 
-            // 2. 通知設定
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(DiscoveryRadius.card))
-                    .background(DiscoveryColors.Surface)
-                    .border(1.dp, DiscoveryColors.BorderSubtle, RoundedCornerShape(DiscoveryRadius.card))
-                    .padding(DiscoverySpacing.cardPadding)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "🔔 毎日の5分実験リマインド",
-                            color = DiscoveryColors.TextPrimary,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "毎日 ${settingsState.settings.reminderTime} に通知",
-                            color = DiscoveryColors.TextSecondary,
-                            fontSize = 13.sp
-                        )
-                    }
+            // 2. 連携
+            SectionHeader(title = "連携")
+            SettingsCard {
+                SettingsRow(
+                    icon = "💬",
+                    title = "LINE連携",
+                    badge = "未連携",
+                    description = "公式LINEから今日の実験やリマインドを受け取れます",
+                    onClick = { activeModal = "line" }
+                )
+            }
 
-                    Switch(
-                        checked = settingsState.settings.notificationsEnabled,
-                        onCheckedChange = onToggleNotifications,
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = DiscoveryColors.Surface,
-                            checkedTrackColor = DiscoveryColors.Accent
-                        )
+            Spacer(modifier = Modifier.height(DiscoverySpacing.lg))
+
+            // 3. 通知
+            SectionHeader(title = "通知")
+            SettingsCard {
+                SettingsRow(
+                    icon = "🔔",
+                    title = "通知設定",
+                    onClick = { activeModal = "notification" }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(DiscoverySpacing.lg))
+
+            // 4. プライバシー
+            SectionHeader(title = "プライバシー")
+            SettingsCard {
+                SettingsRow(
+                    icon = "🔒",
+                    title = "プライバシー設定",
+                    onClick = { activeModal = "privacy" }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(DiscoverySpacing.lg))
+
+            // 5. その他
+            SectionHeader(title = "その他")
+            SettingsCard {
+                Column {
+                    SettingsRow(
+                        icon = "📄",
+                        title = "利用規約",
+                        onClick = { activeModal = "terms" }
                     )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(DiscoverySpacing.base))
-
-            // 3. プライバシー保護
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(DiscoveryRadius.card))
-                    .background(DiscoveryColors.SurfaceSecondary)
-                    .border(1.dp, DiscoveryColors.BorderSubtle, RoundedCornerShape(DiscoveryRadius.card))
-                    .padding(DiscoverySpacing.cardPadding)
-            ) {
-                Text(
-                    text = "🔒 プライバシーと安全への約束",
-                    color = DiscoveryColors.TextPrimary,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold
-                )
-
-                Spacer(modifier = Modifier.height(DiscoverySpacing.xs))
-
-                Text(
-                    text = "あなたの行動データや興味の仮説は、学校や第三者、広告会社に共有されることは一切ありません。あなただけの探索のために安全に保管されます。",
-                    color = DiscoveryColors.TextSecondary,
-                    fontSize = 13.sp,
-                    lineHeight = 19.sp
-                )
-            }
-
-            Spacer(modifier = Modifier.height(DiscoverySpacing.xxl))
-
-            // 4. データのリセット
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(DiscoveryRadius.card))
-                    .background(DiscoveryColors.ErrorSurface)
-                    .border(1.dp, DiscoveryColors.ErrorBorder, RoundedCornerShape(DiscoveryRadius.card))
-                    .clickable(
-                        role = Role.Button,
-                        onClick = { showResetConfirm = true }
-                    )
-                    .padding(DiscoverySpacing.cardPadding)
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = "⚠️ すべての実験・シグナルデータをリセット",
-                        color = DiscoveryColors.ErrorText,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold
+                    Spacer(modifier = Modifier.height(1.dp).fillMaxWidth().background(DiscoveryColors.BorderSubtle))
+                    SettingsRow(
+                        icon = "📄",
+                        title = "プライバシーポリシー",
+                        onClick = { activeModal = "policy" }
                     )
                 }
             }
         }
+    }
+}
 
-        // リセット確認ダイアログ
-        if (showResetConfirm) {
-            BasicAlertDialog(
-                onDismissRequest = { showResetConfirm = false }
+@Composable
+private fun SectionHeader(title: String) {
+    Text(
+        text = title,
+        color = DiscoveryColors.TextTertiary,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.Bold,
+        modifier = Modifier.padding(start = 4.dp, bottom = 6.dp)
+    )
+}
+
+@Composable
+private fun SettingsCard(content: @Composable () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(DiscoveryRadius.card))
+            .background(DiscoveryColors.Surface)
+            .border(1.dp, DiscoveryColors.BorderSubtle, RoundedCornerShape(DiscoveryRadius.card))
+    ) {
+        content()
+    }
+}
+
+@Composable
+private fun SettingsRow(
+    icon: String,
+    title: String,
+    subtitle: String? = null,
+    badge: String? = null,
+    description: String? = null,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(DiscoverySpacing.base),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Row(
+            modifier = Modifier.weight(1f),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(DiscoverySpacing.md)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(CircleShape)
+                    .background(DiscoveryColors.SurfaceSecondary),
+                contentAlignment = Alignment.Center
             ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(DiscoveryRadius.card))
-                        .background(DiscoveryColors.Surface)
-                        .padding(DiscoverySpacing.cardPadding)
+                Text(text = icon, fontSize = 16.sp)
+            }
+
+            Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(DiscoverySpacing.xs)
                 ) {
-                    Column {
-                        Text(
-                            text = "データをリセットしますか？",
-                            color = DiscoveryColors.TextPrimary,
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-
-                        Spacer(modifier = Modifier.height(DiscoverySpacing.sm))
-
-                        Text(
-                            text = "これまでに完了した実験履歴や行動シグナルがすべて消去され、初期状態に戻ります。",
-                            color = DiscoveryColors.TextSecondary,
-                            fontSize = 13.sp,
-                            lineHeight = 19.sp
-                        )
-
-                        Spacer(modifier = Modifier.height(DiscoverySpacing.lg))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.End,
-                            verticalAlignment = Alignment.CenterVertically
+                    Text(
+                        text = title,
+                        color = DiscoveryColors.TextPrimary,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    if (badge != null) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(DiscoveryRadius.badge))
+                                .background(DiscoveryColors.SurfaceSecondary)
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
                         ) {
-                            AppSecondaryButton(
-                                text = "キャンセル",
-                                onClick = { showResetConfirm = false }
-                            )
-
-                            Spacer(modifier = Modifier.width(DiscoverySpacing.sm))
-
-                            AppPrimaryButton(
-                                text = "リセットする",
-                                modifier = Modifier.width(130.dp),
-                                onClick = {
-                                    showResetConfirm = false
-                                    onResetData()
-                                }
+                            Text(
+                                text = badge,
+                                color = DiscoveryColors.TextTertiary,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Medium
                             )
                         }
                     }
                 }
+
+                if (subtitle != null) {
+                    Text(
+                        text = subtitle,
+                        color = DiscoveryColors.TextTertiary,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
+
+                if (description != null) {
+                    Text(
+                        text = description,
+                        color = DiscoveryColors.TextSecondary,
+                        fontSize = 11.sp,
+                        lineHeight = 16.sp,
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
             }
         }
+
+        Text(
+            text = "›",
+            color = DiscoveryColors.TextTertiary,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(start = DiscoverySpacing.sm)
+        )
     }
 }
