@@ -168,7 +168,9 @@ class DiscoveryState(
                         isLoading = false,
                         homeData = data,
                         errorMessage = null,
-                        activeScenario = repository.getCurrentScenario()
+                        activeScenario = (repository as? FakeDiscoveryRepository)
+                            ?.getCurrentScenario()
+                            ?: it.activeScenario
                     )
                 }
             } catch (e: CancellationException) {
@@ -392,7 +394,7 @@ class DiscoveryState(
     }
 
     fun changeScenario(scenario: FakeScenario) {
-        repository.setScenario(scenario)
+        (repository as? FakeDiscoveryRepository)?.setScenario(scenario)
         loadHomeData()
         loadDiscovery()
         loadReportData()

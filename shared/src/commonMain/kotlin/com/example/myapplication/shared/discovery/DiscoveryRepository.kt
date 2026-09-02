@@ -24,6 +24,4 @@ interface DiscoveryRepository {
     suspend fun getSettings(): MyDataSettings
     suspend fun updateSettings(settings: MyDataSettings)
     suspend fun resetAllData()
-    fun setScenario(scenario: FakeScenario)
-    fun getCurrentScenario(): FakeScenario
 }

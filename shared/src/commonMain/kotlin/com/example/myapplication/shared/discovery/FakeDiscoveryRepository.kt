@@ -144,7 +144,7 @@ class FakeDiscoveryRepository(
     private var currentObservation = "情報の比較や分析、構造の観察を伴うアクティビティにより長く取り組む傾向が見られます。"
     private var settingsData = MyDataSettings()
 
-    override fun setScenario(scenario: FakeScenario) {
+    fun setScenario(scenario: FakeScenario) {
         this.scenario = scenario
         if (scenario == FakeScenario.FIRST_TIME_USER) {
             completedCount = 0
@@ -160,7 +160,7 @@ class FakeDiscoveryRepository(
         }
     }
 
-    override fun getCurrentScenario(): FakeScenario = scenario
+    fun getCurrentScenario(): FakeScenario = scenario
 
     private suspend fun simulateLatency() {
         if (!enableArtificialDelay) return
