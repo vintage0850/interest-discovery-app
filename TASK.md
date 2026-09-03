@@ -2309,7 +2309,7 @@ Kimiの作業履歴の注記「MainActivity.ktは既に`App(driverFactory)`に�
 
 ## 案件11：Mikke Web UI（`web/`）を Self-Understanding MVP バックエンドへ接続
 
-**状態:** `設計判断済み・実装待ち`
+**状態:** `設計判断済み・実装待ち` → `実装完了・Gate4差し戻し1回` → **`完了（Gate 4 PASS）`**（2026-09-02、本節末尾「CodexによるGate 4再レビュー」参照。状態欄の更新漏れをClaudeが2026-09-03に修正）
 **担当:** Claude（設計裁定・作業分割）→ Kimi＋Codex（並列実装、ユーザー指示による例外運用）→ Claude（独立検証）→ Codex（Gate4）
 
 ### 依頼内容
@@ -2945,3 +2945,97 @@ devtunnel host -p 8000 --allow-anonymous
 - SENT取消409、SENT再処理禁止、異なるIDの単一行維持など、設計で要求された回帰テストにも不足がある。
 - 詳細: `docs/quality-review/2026-09-03-line-reminder-integration.md`
 - `backend/.env`は参照せず、認証情報を出力・文書化していない。
+
+## 案件14：Discoveryアプリ実機動作確認 → ホーム画面キャッシュ未破棄バグ修正
+
+**状態:** `完了`
+**担当:** Claude
+
+### 経緯
+
+ユーザーがAndroid実機（`61081JEA315098`、`adb reverse tcp:8000 tcp:8000`でバックエンドに接続）で「発見」ループ（実験選択→開始→タイマー→振り返り→完了）を実行したところ、「完了しても画面が何も変化しない／発見結果画面のデータが空／ホーム画面の集計が更新されない」と報告があった。
+
+### 調査
+
+- `RealDiscoveryRepository.kt:158` `getDiscovery()`は `DiscoveryData(observation = "", hypothesis = "")` を無条件に返すハードコードされたスタブ。**バグではなく既知の未実装**（本節冒頭「案件目次」および2673行目の記録どおり、ホーム集計・分野一覧・レポート・設定・Googleログインは次フェーズとして意図的に対象外）。
+- `getSuggestedExperiments()`（75行目）は `cachedExperiments` が空でない限りバックエンドへ再取得しない設計。`completeExperiment()` / `skipExperiment()` の成功後もこのキャッシュを破棄していなかったため、完了後に`loadHomeData()`を呼んでも同じ古い実験一覧を返し続けていた。**これがユーザー報告「完了してもホーム画面の集計が変化しない」の直接原因（真のバグ）。**
+
+### 修正（TDD）
+
+- 失敗するテストを先に追加: `RealDiscoveryRepositoryTest.kt`に`completeExperiment_invalidatesCache_soNextGetSuggestedExperimentsRefetches`と`skipExperiment_invalidatesCache_soNextGetSuggestedExperimentsRefetches`を追加。Red確認（2 failed）。
+- 修正: `RealDiscoveryRepository.kt`の`completeExperiment()`・`skipExperiment()`成功時に`cachedExperiments = emptyList()`を追加し、次回`getSuggestedExperiments()`呼び出し時にバックエンドから最新一覧を再取得するようにした。
+- Green確認: `./gradlew :shared:testDebugUnitTest --tests "com.example.myapplication.shared.discovery.RealDiscoveryRepositoryTest"` → BUILD SUCCESSFUL（全10テスト成功）。
+- 回帰確認: `./gradlew :shared:testDebugUnitTest`（shared全体）→ BUILD SUCCESSFUL。
+
+### 対象外（ユーザー裁定によりスコープ外）
+
+- `getDiscovery()` / `getDomainFields()` / `getReportData()` / `getSettings()` の実データ化は今回は対応しない。既知の未実装として別セッションで着手する。
+- `App.kt`の`snackbarHostState`がどの画面にも配線されておらず、`_messages`のエラー通知がUIに表示されない問題を調査中に発見したが、今回の修正スコープには含めていない（未修正）。
+
+**次の担当: ユーザー確認。** 実機で再度「発見」ループを実行し、完了後にホーム画面の実験一覧が更新されることを確認する。
+
+### 追加実装（Claude / 別セッション、日付未記録）— 「対象外」節のgetDiscovery等を実データ化
+
+上記「対象外」節で保留していた`getDiscovery()`/`getDomainFields()`/`getReportData()`/`getSettings()`/`updateSettings()`を、別セッションでClaudeがTDDで実データ化した（本節冒頭の「次の担当」とは別に、案件12の「対象外」節で同じく次フェーズとされていたホーム集計・分野一覧・レポート・設定を先取りする形になる）。
+
+**変更ファイル:**
+- `backend/discovery/aggregation.py`（`BehaviorSummary`に`total_minutes_spent`・`domain_experiment_counts`・`domain_completed_counts`を追加）
+- `backend/discovery/models.py`（同上フィールドの型定義）
+- `backend/tests/test_discovery_aggregation.py`（追加フィールドのテスト）
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/RealDiscoveryRepository.kt`（`getDiscovery`/`getDomainFields`/`getReportData`/`getSettings`/`updateSettings`を`/sessions/{id}/summary`経由の実データで実装、`DiscoverySettingsStorage`抽象を追加）
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/App.kt`（`App()`に`discoverySettingsStorage`パラメータを追加）
+- `shared/src/androidMain/kotlin/com/example/myapplication/shared/discovery/DiscoverySettingsStorage.android.kt`（新規：`SharedPreferences`永続化実装）
+- `app/src/main/java/com/example/myapplication/MainActivity.kt`（`AndroidDiscoverySettingsStorage`を配線）
+
+**このセッション（Claude）による独立検証（2026-09-03）:**
+- `cd backend && python -m pytest -q` → **125 passed, 5 warnings**
+- `./gradlew :shared:testDebugUnitTest --tests "com.example.myapplication.shared.discovery.*"` → **BUILD SUCCESSFUL**
+
+**未完了だった経緯:** 前回セッションでCodexへGate4判定を依頼したが（`.codex-gate4-14.log`参照、未コミットのまま作業ツリーに残存）、Codex実行環境側の`CreateProcess`障害（PowerShell/cmd双方でプロセス起動失敗）により`git diff`もテスト実行もできず、判定未完了のまま終了していた。ここまでの変更はコミットされていなかった。
+
+**次の担当: Codex（Gate4）。** 上記変更ファイルに対しGate4品質判定（PASS / CHANGES REQUIRED / ESCALATE）を行うこと。
+
+### CodexによるGate 4レビュー（2026-09-03）
+
+**判定: CHANGES REQUIRED**
+
+- `getReportData()`が3項目しか上書きせず、`weeklyInsights`・`changeFromPast`・`signalDistribution`に固定デモ値が残るため、実ユーザーへ架空のレポートを表示する。
+- `topSignal`は実測の`action_type_counts`ではなく最多完了分野から固定変換しており、実際の行動シグナルと異なる値になり得る。
+- Android設定ストレージは`savedSignalCount`を保存・取得せず、常に既定値10を返す。
+- Codex独立検証: `cd backend && python -m pytest -q`は**125 passed, 6 warnings**。指定Gradleテストは、既定キャッシュ先の権限制限と、ワークスペース内オフライン実行時のFoojayプラグイン未キャッシュによりCodex環境では完走できなかった。Claudeによる同一コマンドの**BUILD SUCCESSFUL**記録は確認した。
+- 詳細: `docs/quality-review/2026-09-03-discovery-real-data-integration.md`
+
+**次の担当: Claude（追加実装担当）。** 固定デモ値を実データまたは明示的な空状態へ置換し、`action_type_counts`からレポートを集計し、`savedSignalCount`の正しいデータ源を実装・テストする。あわせて変更済みの`RealDiscoveryRepositoryTest.kt`を案件14の変更ファイル一覧とコミット対象に含めるべきか確認し、修正後にCodexへGate 4再レビューを依頼する。
+
+### 設計判断（Claude、2026-09-03）— Gate4指摘への対応方針
+
+AGENTS.mdのルール上、Claudeは通常実装を担当しない。指摘1〜3には`ActionType`（search/view/save/share/create/like/comment/EXPERIMENT_*等）と`BehaviorSignal`（ANALYZE/CREATE/COMPARE/EXPLAIN/ORGANIZE/INVESTIGATE/IMPROVE）という無関係な分類体系の対応付けという曖昧さが残っていたため、実装（Kimi）が迷わないよう方針をここで確定する。
+
+- **調査結果:** `RealDiscoveryRepository.kt`は`POST /sessions/{id}/signals`を一度も呼び出していない。つまり現行のDiscovery体験ループ（選択→開始→完了/スキップ）では`action_type_counts`は実運用で常に空になる。`ActionType`と`BehaviorSignal`の間に既存のマッピング規約は無い（`BehaviorSignal.fromString()`はコード内未使用の死んだヘルパー）。
+- **指摘1・2（`topSignal`・`signalDistribution`）の方針:** `action_type_counts`が非空ならそれを`BehaviorSignal.fromString()`で解決できるキーだけ集計して優先的に使う。空（＝現状ほぼ常にこのケース）なら、既存の完了実験`domain`別集計（`domainCompletedCounts`）を`domainToBehaviorSignal`で変換した実データにフォールバックする（これは架空のデモ値ではなく実際の完了実績なので指摘1は満たす）。`signalDistribution`は「topSignalだけでなく全分野の完了数」を同様に集計したMapとする。完了実験が1件も無い場合は空Mapを返す（`ReportTabScreen.kt`の`forEach`は空Mapで何も描画しないため、UI側の追加改修は不要）。
+- **指摘1（`weeklyInsights`・`changeFromPast`）の方針:** 期間比較（先月比等）を行うには現行の単一スナップショットの`/summary` APIには無い時系列データが必要で、これは新規機能でありスコープ外（案件12の「レポート」次フェーズの範囲）。今回は固定デモ文言をやめ、既定値を空文字列`""`にする（`Text(text = "")`は空文字表示になるだけでクラッシュしない。UI改修不要）。将来、期間比較の実データ化に着手する際は新規TASKとして起票する。
+- **指摘3（`savedSignalCount`）の方針:** これはユーザー設定ではなく実績値。`DiscoverySettingsStorage`からは引き続き除外し（保存・復元の対象にしない）、`RealDiscoveryRepository.getSettings()`内で`settingsStorage.load()`の結果に対し、`fetchSummary().behaviorSummary.totalSignals`（バックエンドで既に提供されている実測値）を`savedSignalCount`として上書きする形にする。
+
+**次の担当: Kimi。** 上記方針に従い、TDDで以下を実装すること。
+1. `BehaviorSummaryDto`に`totalSignals: Int`・`actionTypeCounts: Map<String, Int>`を追加（バックエンド`BehaviorSummary`の`total_signals`・`action_type_counts`に対応、両方とも既存フィールドで追加のバックエンド変更は不要）。
+2. `getReportData()`: `actionTypeCounts`が非空なら`BehaviorSignal.fromString()`で解決できるキーだけを集計して`topSignal`/`signalDistribution`を構築。空なら`domainCompletedCounts`→`domainToBehaviorSignal`による実データ集計にフォールバック（`topSignal`は最多分野、`signalDistribution`は全分野の集計）。完了実験も無い場合は`signalDistribution`は空Map、`topSignal`は既存どおり`ANALYZE`のデフォルトでよい。`weeklyInsights`・`changeFromPast`は固定デモ文言をやめ`""`を返す。
+3. `getSettings()`: `settingsStorage.load()`の結果に対し、`fetchSummary().behaviorSummary.totalSignals`で`savedSignalCount`を上書きする。
+4. `RealDiscoveryRepositoryTest.kt`に、(a) `actionTypeCounts`非空時にそれが優先されるケース、(b) 空時に`domainCompletedCounts`からフォールバックするケース、(c) 完了実験も無い場合に空の`signalDistribution`・デフォルト`topSignal`になるケース、(d) `weeklyInsights`/`changeFromPast`が`""`になること、(e) `getSettings()`が`totalSignals`を`savedSignalCount`へ正しく反映することの回帰テストを追加。
+5. 完了後、`cd backend && python -m pytest -q`と`./gradlew :shared:testDebugUnitTest --tests "com.example.myapplication.shared.discovery.*"`を実行し、本節に作業履歴（変更ファイル・コマンド結果・コミット）を追記した上で、次の担当をCodex（Gate4再レビュー）として引き継ぐこと。`RealDiscoveryRepositoryTest.kt`も対象ファイルに含めること。
+
+#### 作業履歴（Kimi、2026-09-03）
+
+- **変更ファイル:**
+  - `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/RealDiscoveryRepository.kt`
+  - `shared/src/commonTest/kotlin/com/example/myapplication/shared/discovery/RealDiscoveryRepositoryTest.kt`
+- **実装概要:**
+  - `BehaviorSummaryDto`に`totalSignals: Int`・`actionTypeCounts: Map<String, Int>`を追加（バックエンド`total_signals`・`action_type_counts`既存フィールドに対応）。
+  - `getReportData()`で`actionTypeCounts`非空時は`BehaviorSignal.entries`からcase-insensitiveマッチするキーのみ集計し、`topSignal`・`signalDistribution`を構築。空時は`domainCompletedCounts`→`domainToBehaviorSignal`でフォールバック。両方空の場合は`signalDistribution`を空Map・`topSignal`を`ANALYZE`デフォルトとする。`weeklyInsights`・`changeFromPast`を固定デモ文言から`""`へ置換。
+  - `getSettings()`で`settingsStorage.load()`の結果に対し、`fetchSummary().behaviorSummary.totalSignals`で`savedSignalCount`を上書き（設定永続化対象からは引き続き除外）。
+  - `RealDiscoveryRepositoryTest.kt`に(a)〜(e)のテストを追加。既存`getSettings_returnsFromInjectedStorage`も`/summary`呼び出しを含むよう修正。
+- **実行コマンドと結果:**
+  - `cd backend && python -m pytest -q` → **125 passed, 5 warnings**
+  - `./gradlew :shared:testDebugUnitTest --tests "com.example.myapplication.shared.discovery.*"` → **BUILD SUCCESSFUL**（34 tests passed：元24件＋新規5件＋修正1件を含む）
+- **コミット:** `19c28eb`
+
+**次の担当: Codex（Gate4再レビュー）。**
