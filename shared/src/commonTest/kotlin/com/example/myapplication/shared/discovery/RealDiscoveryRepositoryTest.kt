@@ -4,6 +4,8 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.client.plugins.logging.Logging
+import io.ktor.client.plugins.pluginOrNull
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
@@ -13,6 +15,9 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNamingStrategy
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 private val SESSION_BODY = """
     {"id": 1, "student_label": "test_user", "status": "active",
@@ -522,5 +527,90 @@ class RealDiscoveryRepositoryTest {
         repo.getSuggestedExperiments()
 
         assertEquals(listOf("/experiments/10/skip", "/sessions/1/experiments/generate"), paths)
+    }
+
+    @Test
+    fun getHomeState_returnsGeneratedExperimentsFromBackend() = runTest {
+        val (client, paths) = mockClient { path ->
+            when (path) {
+                "/sessions" -> HttpStatusCode.Created to SESSION_BODY
+                "/sessions/1/experiments/generate" -> HttpStatusCode.Created to twoExperimentsBody()
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client)
+
+        val home = repo.getHomeState()
+
+        assertEquals(2, home.todayExperiments.size)
+        assertEquals("10", home.featuredExperiment?.id)
+        assertTrue(paths.contains("/sessions"))
+        assertTrue(paths.contains("/sessions/1/experiments/generate"))
+    }
+
+    @Test
+    fun selectExperiment_throwsWhenServerReturns4xx() = runTest {
+        val (client, _) = mockClient { path ->
+            when (path) {
+                "/experiments/10/select" -> HttpStatusCode.BadRequest to """{"detail":"invalid"}"""
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client)
+
+        val exception = runCatching { repo.selectExperiment("10") }.exceptionOrNull()
+
+        assertTrue(exception is DiscoveryApiException)
+        assertTrue(exception.message?.contains("400") == true)
+    }
+
+    @Test
+    fun startExperiment_throwsWhenServerReturns5xx() = runTest {
+        val (client, _) = mockClient { path ->
+            when (path) {
+                "/experiments/10/start" -> HttpStatusCode.InternalServerError to """{"detail":"error"}"""
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client)
+
+        val exception = runCatching { repo.startExperiment("10") }.exceptionOrNull()
+
+        assertTrue(exception is DiscoveryApiException)
+        assertTrue(exception.message?.contains("500") == true)
+    }
+
+    @Test
+    fun getSuggestedExperiments_throwsWhenSessionCreationFails() = runTest {
+        val (client, _) = mockClient { path ->
+            when (path) {
+                "/sessions" -> HttpStatusCode.ServiceUnavailable to """{"detail":"busy"}"""
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client)
+
+        val exception = runCatching { repo.getSuggestedExperiments() }.exceptionOrNull()
+
+        assertTrue(exception is DiscoveryApiException)
+        assertTrue(exception.message?.contains("503") == true)
+    }
+
+    @Test
+    fun defaultHttpClient_doesNotInstallLoggingWhenDisabled() = runTest {
+        val client = defaultDiscoveryHttpClient("", enableHttpLogging = false)
+
+        assertNull(client.pluginOrNull(Logging))
+
+        client.close()
+    }
+
+    @Test
+    fun defaultHttpClient_installsLoggingWhenEnabled() = runTest {
+        val client = defaultDiscoveryHttpClient("", enableHttpLogging = true)
+
+        assertNotNull(client.pluginOrNull(Logging))
+
+        client.close()
     }
 }

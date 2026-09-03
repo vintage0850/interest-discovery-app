@@ -131,6 +131,9 @@ class DiscoveryState(
     private val _settingsState = MutableStateFlow(SettingsUiState())
     val settingsState: StateFlow<SettingsUiState> = _settingsState.asStateFlow()
 
+    private val _selectedExperiment = MutableStateFlow<Experiment?>(null)
+    val selectedExperiment: StateFlow<Experiment?> = _selectedExperiment.asStateFlow()
+
     private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val messages: SharedFlow<String> = _messages.asSharedFlow()
 
@@ -207,39 +210,46 @@ class DiscoveryState(
         }
     }
 
-    fun selectExperiment(experimentId: String) {
+    fun selectExperiment(experiment: Experiment, onSuccess: () -> Unit) {
         scope.launch {
-            try {
-                repository.selectExperiment(experimentId)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                // non-blocking
+            actionMutex.withLock {
+                try {
+                    repository.selectExperiment(experiment.id)
+                    _selectedExperiment.value = experiment
+                    onSuccess()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    _messages.tryEmit(e.message ?: "実験の選択に失敗しました。もう一度お試しください。")
+                }
             }
         }
     }
 
-    fun startExperiment(experiment: Experiment) {
+    fun startExperiment(onSuccess: () -> Unit) {
+        val experiment = _selectedExperiment.value ?: return
         timerJob?.cancel()
-        _runningState.value = RunningTimerUiState(
-            experiment = experiment,
-            elapsedSeconds = 0,
-            isRunning = true
-        )
         scope.launch {
-            try {
-                repository.startExperiment(experiment.id)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                // non-blocking
-            }
-        }
-
-        timerJob = scope.launch {
-            while (isActive) {
-                delay(1000)
-                _runningState.update { it.copy(elapsedSeconds = it.elapsedSeconds + 1) }
+            actionMutex.withLock {
+                try {
+                    repository.startExperiment(experiment.id)
+                    _runningState.value = RunningTimerUiState(
+                        experiment = experiment,
+                        elapsedSeconds = 0,
+                        isRunning = true
+                    )
+                    timerJob = scope.launch {
+                        while (isActive) {
+                            delay(1000)
+                            _runningState.update { it.copy(elapsedSeconds = it.elapsedSeconds + 1) }
+                        }
+                    }
+                    onSuccess()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    _messages.tryEmit(e.message ?: "実験の開始に失敗しました。もう一度お試しください。")
+                }
             }
         }
     }

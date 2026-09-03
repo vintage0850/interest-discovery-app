@@ -30,10 +30,11 @@ class RealDiscoveryRepository(
     baseUrl: String = DEFAULT_BASE_URL,
     httpClient: HttpClient? = null,
     private val studentLabel: String = "test_user",
-    private val settingsStorage: DiscoverySettingsStorage = InMemoryDiscoverySettingsStorage()
+    private val settingsStorage: DiscoverySettingsStorage = InMemoryDiscoverySettingsStorage(),
+    enableHttpLogging: Boolean = false
 ) : DiscoveryRepository {
 
-    private val client = httpClient ?: defaultDiscoveryHttpClient(baseUrl)
+    private val client = httpClient ?: defaultDiscoveryHttpClient(baseUrl, enableHttpLogging)
 
     private var sessionId: Int? = null
     private var cachedExperiments: List<Experiment> = emptyList()
@@ -361,7 +362,7 @@ class InMemoryDiscoverySettingsStorage : DiscoverySettingsStorage {
     }
 }
 
-private fun defaultDiscoveryHttpClient(baseUrl: String): HttpClient {
+internal fun defaultDiscoveryHttpClient(baseUrl: String, enableHttpLogging: Boolean): HttpClient {
     return HttpClient {
         defaultRequest {
             url(baseUrl)
@@ -372,9 +373,11 @@ private fun defaultDiscoveryHttpClient(baseUrl: String): HttpClient {
                 namingStrategy = JsonNamingStrategy.SnakeCase
             })
         }
-        install(Logging) {
-            logger = Logger.DEFAULT
-            level = LogLevel.ALL
+        if (enableHttpLogging) {
+            install(Logging) {
+                logger = Logger.DEFAULT
+                level = LogLevel.ALL
+            }
         }
     }
 }
