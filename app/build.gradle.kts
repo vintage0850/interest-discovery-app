@@ -19,6 +19,11 @@ val localProperties = Properties().apply {
 }
 val googleOauthClientId: String = localProperties.getProperty("GOOGLE_OAUTH_CLIENT_ID") ?: ""
 
+// Discovery バックエンドの接続先。実機は "localhost" が実機自身を指すため使えない。
+// 開発機とのLAN内IPをデフォルトにし、local.properties の DISCOVERY_BASE_URL で上書き可能にする。
+val discoveryBaseUrl: String =
+    localProperties.getProperty("DISCOVERY_BASE_URL") ?: "http://192.168.68.57:8000"
+
 // リリース署名設定。local.properties に RELEASE_STORE_FILE 等が無ければ null のままにし、
 // release ビルドは未署名になる（Play へは提出できないが、開発中のビルドは通す）。
 val releaseStoreFile: String? = localProperties.getProperty("RELEASE_STORE_FILE")
@@ -47,6 +52,8 @@ android {
         // BuildConfig.GOOGLE_OAUTH_CLIENT_ID として参照できるようにする。
         // 値が空文字の場合は「未設定」を意味する（SETUP.md 参照）。
         buildConfigField("String", "GOOGLE_OAUTH_CLIENT_ID", "\"$googleOauthClientId\"")
+        // BuildConfig.DISCOVERY_BASE_URL として参照できるようにする。
+        buildConfigField("String", "DISCOVERY_BASE_URL", "\"$discoveryBaseUrl\"")
     }
 
     signingConfigs {

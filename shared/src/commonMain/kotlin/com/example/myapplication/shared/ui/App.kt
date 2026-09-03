@@ -37,6 +37,7 @@ fun App(
     driverFactory: DatabaseDriverFactory? = null,
     discoverySettingsStorage: DiscoverySettingsStorage = InMemoryDiscoverySettingsStorage(),
     enableDiscoveryHttpLogging: Boolean = false,
+    discoveryBaseUrl: String = "http://localhost:8000",
     modifier: Modifier = Modifier
 ) {
     MaterialTheme {
@@ -44,7 +45,7 @@ fun App(
         val discoveryState = remember {
             DiscoveryState(
                 RealDiscoveryRepository(
-                    baseUrl = "http://localhost:8000",
+                    baseUrl = discoveryBaseUrl,
                     settingsStorage = discoverySettingsStorage,
                     enableHttpLogging = enableDiscoveryHttpLogging
                 ),

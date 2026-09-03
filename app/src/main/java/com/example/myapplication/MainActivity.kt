@@ -19,7 +19,8 @@ class MainActivity : ComponentActivity() {
             App(
                 driverFactory,
                 discoverySettingsStorage,
-                enableDiscoveryHttpLogging = BuildConfig.DEBUG
+                enableDiscoveryHttpLogging = BuildConfig.DEBUG,
+                discoveryBaseUrl = BuildConfig.DISCOVERY_BASE_URL
             )
         }
     }
