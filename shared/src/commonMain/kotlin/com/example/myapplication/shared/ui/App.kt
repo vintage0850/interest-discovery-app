@@ -1,7 +1,9 @@
 package com.example.myapplication.shared.ui
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -9,6 +11,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -63,11 +66,12 @@ fun App(
             }
         }
 
-        NavHost(
-            navController = navController,
-            startDestination = DiscoveryHome,
-            modifier = modifier.fillMaxSize()
-        ) {
+        Box(modifier = modifier.fillMaxSize()) {
+            NavHost(
+                navController = navController,
+                startDestination = DiscoveryHome,
+                modifier = Modifier.fillMaxSize()
+            ) {
             // 1. メイン画面（ボトムナビゲーション付き: Home, Discover, Explore, Report, Settings）
             composable<DiscoveryHome> {
                 DiscoveryMainScaffold(
@@ -148,6 +152,15 @@ fun App(
                     onRetry = { discoveryState.loadDiscovery() }
                 )
             }
+            }
+
+            // §16: 反応送信の失敗など、discoveryState.messagesで流れるエラー通知を実際に画面へ表示する。
+            // 以前は snackbarHostState.showSnackbar() が呼ばれるだけで、描画するSnackbarHostが
+            // どこにも配置されておらず、ユーザーには何も見えていなかった（実バグ）。
+            SnackbarHost(
+                hostState = snackbarHostState,
+                modifier = Modifier.align(Alignment.BottomCenter)
+            )
         }
     }
 }
