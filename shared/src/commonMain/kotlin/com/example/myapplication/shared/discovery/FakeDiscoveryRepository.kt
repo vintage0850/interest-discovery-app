@@ -143,6 +143,8 @@ class FakeDiscoveryRepository(
     private var currentHypothesis = "情報がどう整理されているかに気づき、より良くする方法を考えることが好きなようです。"
     private var currentObservation = "情報の比較や分析、構造の観察を伴うアクティビティにより長く取り組む傾向が見られます。"
     private var settingsData = MyDataSettings()
+    private var fakeHypothesisConfidence = 0.5f
+    private val fakeCriteria = mutableListOf<CriterionUiModel>()
 
     fun setScenario(scenario: FakeScenario) {
         this.scenario = scenario
@@ -316,13 +318,40 @@ class FakeDiscoveryRepository(
             DiscoveryData(
                 observation = currentObservation,
                 hypothesis = currentHypothesis,
+                hypothesisId = 1,
                 testingFocus = "実際に手を動かして作る（CREATE）ことにも興味が広がるか観察中",
                 recentChanges = "先週と比べて「比べる」「分析する」シグナルが急上昇しています",
                 evidenceReason = "直近3回の実験で高評価（4〜5点）を付け、予定時間より長く取り組んだため",
                 disclaimer = "※ これは現時点の行動から導き出した仮説です。",
-                nextExperiment = nextExp
+                nextExperiment = nextExp,
+                criteria = fakeCriteria.toList()
             )
         }
+    }
+
+    override suspend fun sendHypothesisFeedback(
+        hypothesisId: Int,
+        reaction: HypothesisReaction
+    ): HypothesisFeedbackOutcome {
+        simulateLatency()
+        val delta = HypothesisFeedbackPolicy.deltaFor(reaction)
+        fakeHypothesisConfidence = (fakeHypothesisConfidence + delta).coerceIn(0f, 1f)
+        var criterion: CriterionUiModel? = null
+        if (reaction == HypothesisReaction.AGREE &&
+            fakeHypothesisConfidence >= HypothesisFeedbackPolicy.CRITERION_PROMOTION_THRESHOLD
+        ) {
+            val label = currentHypothesis
+            val existingIndex = fakeCriteria.indexOfFirst { it.label == label }
+            val confidenceLabel = HypothesisFeedbackPolicy.confidenceLabelFor(fakeHypothesisConfidence)
+            val criterionId = if (existingIndex >= 0) fakeCriteria[existingIndex].id else fakeCriteria.size + 1
+            criterion = CriterionUiModel(criterionId, label, fakeHypothesisConfidence, confidenceLabel)
+            if (existingIndex >= 0) fakeCriteria[existingIndex] = criterion else fakeCriteria.add(criterion)
+        }
+        return HypothesisFeedbackOutcome(
+            hypothesisSummary = currentHypothesis,
+            hypothesisConfidence = fakeHypothesisConfidence,
+            criterion = criterion
+        )
     }
 
     override suspend fun getNextExperiment(): Experiment {

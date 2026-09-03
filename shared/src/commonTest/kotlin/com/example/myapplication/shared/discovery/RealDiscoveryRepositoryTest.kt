@@ -597,6 +597,79 @@ class RealDiscoveryRepositoryTest {
     }
 
     @Test
+    fun sendHypothesisFeedback_postsOnceAndReturnsOutcomeWithoutExtraGet() = runTest {
+        val (client, paths) = mockClient { path ->
+            when (path) {
+                "/hypotheses/1/feedback" -> HttpStatusCode.Created to """
+                    {"feedback": {"id": 1, "hypothesis_id": 1, "reaction": "agree",
+                     "created_at": "2026-09-04T00:00:00+00:00"},
+                     "updated_hypothesis": {"id": 1, "session_id": 1,
+                     "summary": "比較してから決める傾向がある", "confidence": 0.65,
+                     "supporting_evidence": [], "suggested_next_domains": [],
+                     "created_at": "2026-09-04T00:00:00+00:00"},
+                     "new_criterion": {"id": 5, "session_id": 1, "label": "比較してから決める傾向がある",
+                     "description": "比較してから決める傾向がある", "confidence": 0.65,
+                     "source_hypothesis_id": 1, "user_confirmed": true,
+                     "created_at": "2026-09-04T00:00:00+00:00", "updated_at": "2026-09-04T00:00:00+00:00"}}
+                """.trimIndent()
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client)
+
+        val outcome = repo.sendHypothesisFeedback(1, HypothesisReaction.AGREE)
+
+        // POSTレスポンスだけで状態が組み立てられ、追加のGETは発生しない（Gate4指摘の是正確認）。
+        assertEquals(listOf("/hypotheses/1/feedback"), paths)
+        assertEquals("比較してから決める傾向がある", outcome.hypothesisSummary)
+        assertEquals(0.65f, outcome.hypothesisConfidence)
+        assertEquals(5, outcome.criterion?.id)
+        assertEquals("Appearing", outcome.criterion?.confidenceLabel)
+    }
+
+    @Test
+    fun sendHypothesisFeedback_withoutPromotion_returnsNullCriterion() = runTest {
+        val (client, _) = mockClient { path ->
+            when (path) {
+                "/hypotheses/1/feedback" -> HttpStatusCode.Created to """
+                    {"feedback": {"id": 2, "hypothesis_id": 1, "reaction": "unsure",
+                     "created_at": "2026-09-04T00:00:00+00:00"},
+                     "updated_hypothesis": {"id": 1, "session_id": 1,
+                     "summary": "まだ判断中", "confidence": 0.4,
+                     "supporting_evidence": [], "suggested_next_domains": [],
+                     "created_at": "2026-09-04T00:00:00+00:00"},
+                     "new_criterion": null}
+                """.trimIndent()
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client)
+
+        val outcome = repo.sendHypothesisFeedback(1, HypothesisReaction.UNSURE)
+
+        assertEquals(0.4f, outcome.hypothesisConfidence)
+        assertNull(outcome.criterion)
+    }
+
+    @Test
+    fun sendHypothesisFeedback_throwsWhenServerReturns4xx() = runTest {
+        val (client, _) = mockClient { path ->
+            when (path) {
+                "/hypotheses/999/feedback" -> HttpStatusCode.NotFound to """{"detail":"not found"}"""
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client)
+
+        val exception = runCatching {
+            repo.sendHypothesisFeedback(999, HypothesisReaction.AGREE)
+        }.exceptionOrNull()
+
+        assertTrue(exception is DiscoveryApiException)
+        assertTrue(exception.message?.contains("404") == true)
+    }
+
+    @Test
     fun defaultHttpClient_doesNotInstallLoggingWhenDisabled() = runTest {
         val client = defaultDiscoveryHttpClient("", enableHttpLogging = false)
 

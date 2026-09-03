@@ -11,15 +11,28 @@ from sqlmodel import Session, select
 
 from discovery.models import (
     ActionType,
+    Criterion,
     DiscoverySession,
     DomainType,
     Experiment,
     ExperimentResult,
     ExperimentStatus,
+    HypothesisFeedback,
+    HypothesisReaction,
     InterestHypothesis,
     InterestSignal,
     InterestSignalSource,
 )
+
+# 仮説へのユーザー反応が確信度に与える増減。同感で強まり、違うで弱まる。
+# わからない は判断保留として確信度を変えない（§15）。
+HYPOTHESIS_CONFIDENCE_DELTA: dict[str, float] = {
+    HypothesisReaction.AGREE.value: 0.15,
+    HypothesisReaction.UNSURE.value: 0.0,
+    HypothesisReaction.DISAGREE.value: -0.15,
+}
+# この確信度を超えて「同感」された仮説は、個人の意思決定基準として昇格させる（§17）。
+CRITERION_PROMOTION_THRESHOLD = 0.6
 
 
 class StateTransitionError(ValueError):
@@ -381,6 +394,65 @@ class DiscoveryRepository:
                 .limit(1)
             )
             return db.exec(statement).first()
+
+    def add_hypothesis_feedback(
+        self, hypothesis_id: int, reaction: HypothesisReaction
+    ) -> tuple[HypothesisFeedback, InterestHypothesis, Criterion | None]:
+        """仮説への反応を記録し、確信度を更新する。閾値を超えて同感されたら基準に昇格する。"""
+        now = datetime.datetime.now(datetime.timezone.utc)
+        with Session(self._engine) as db:
+            hypothesis = db.get(InterestHypothesis, hypothesis_id)
+            if hypothesis is None:
+                raise ValueError(f"Hypothesis {hypothesis_id} not found")
+
+            feedback = HypothesisFeedback(hypothesis_id=hypothesis_id, reaction=reaction.value)
+            db.add(feedback)
+
+            delta = HYPOTHESIS_CONFIDENCE_DELTA[reaction.value]
+            hypothesis.confidence = max(0.0, min(1.0, hypothesis.confidence + delta))
+            db.add(hypothesis)
+
+            criterion: Criterion | None = None
+            if (
+                reaction == HypothesisReaction.AGREE
+                and hypothesis.confidence >= CRITERION_PROMOTION_THRESHOLD
+            ):
+                existing = db.exec(
+                    select(Criterion).where(
+                        Criterion.source_hypothesis_id == hypothesis_id
+                    )
+                ).first()
+                if existing is not None:
+                    existing.confidence = hypothesis.confidence
+                    existing.updated_at = now
+                    db.add(existing)
+                    criterion = existing
+                else:
+                    criterion = Criterion(
+                        session_id=hypothesis.session_id,
+                        label=hypothesis.summary,
+                        description=hypothesis.summary,
+                        confidence=hypothesis.confidence,
+                        source_hypothesis_id=hypothesis_id,
+                        user_confirmed=True,
+                    )
+                    db.add(criterion)
+
+            db.commit()
+            db.refresh(feedback)
+            db.refresh(hypothesis)
+            if criterion is not None:
+                db.refresh(criterion)
+            return feedback, hypothesis, criterion
+
+    def list_criteria(self, session_id: int) -> list[Criterion]:
+        with Session(self._engine) as db:
+            statement = (
+                select(Criterion)
+                .where(Criterion.session_id == session_id)
+                .order_by(desc(Criterion.confidence))
+            )
+            return list(db.exec(statement).all())
 
     def get_summary_data(self, session_id: int) -> dict[str, Any]:
         with Session(self._engine) as db:

@@ -210,6 +210,51 @@ class InterestHypothesis(SQLModel, table=True):
         return value
 
 
+class HypothesisReaction(str, enum.Enum):
+    AGREE = "agree"
+    UNSURE = "unsure"
+    DISAGREE = "disagree"
+
+
+class HypothesisFeedback(SQLModel, table=True):
+    """仮説に対する生徒の反応（同感/わからない/違う）。"""
+
+    __tablename__ = "hypothesis_feedback"
+
+    id: Optional[int] = SQLField(default=None, primary_key=True)
+    hypothesis_id: int = SQLField(foreign_key="interest_hypothesis.id", index=True)
+    reaction: str = SQLField(sa_type=String(16))
+    created_at: datetime.datetime = SQLField(
+        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc)
+    )
+
+
+class Criterion(SQLModel, table=True):
+    """生徒に同感された仮説から昇格した、意思決定の個人的な基準。"""
+
+    __tablename__ = "criterion"
+
+    id: Optional[int] = SQLField(default=None, primary_key=True)
+    session_id: int = SQLField(foreign_key="discovery_session.id", index=True)
+    label: str
+    description: str
+    confidence: float
+    source_hypothesis_id: int = SQLField(foreign_key="interest_hypothesis.id", unique=True)
+    user_confirmed: bool = SQLField(default=True)
+    created_at: datetime.datetime = SQLField(
+        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc)
+    )
+    updated_at: datetime.datetime = SQLField(
+        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc)
+    )
+
+    @validates("confidence")
+    def _validate_confidence(self, key: str, value: float) -> float:
+        if value < 0.0 or value > 1.0:
+            raise ValueError("confidence must be between 0.0 and 1.0")
+        return value
+
+
 # ---------------------------------------------------------------------------
 # Request / response schemas
 # ---------------------------------------------------------------------------
@@ -327,6 +372,35 @@ class HypothesisResponse(SQLModel):
     created_at: datetime.datetime
 
 
+class HypothesisFeedbackCreate(SQLModel):
+    reaction: HypothesisReaction
+
+
+class HypothesisFeedbackResponse(SQLModel):
+    id: int
+    hypothesis_id: int
+    reaction: str
+    created_at: datetime.datetime
+
+
+class CriterionResponse(SQLModel):
+    id: int
+    session_id: int
+    label: str
+    description: str
+    confidence: float
+    source_hypothesis_id: int
+    user_confirmed: bool
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+
+class HypothesisFeedbackResult(SQLModel):
+    feedback: HypothesisFeedbackResponse
+    updated_hypothesis: HypothesisResponse
+    new_criterion: Optional[CriterionResponse] = None
+
+
 class BehaviorSummary(SQLModel):
     total_signals: int
     action_type_counts: dict[str, int]
@@ -350,3 +424,4 @@ class SessionSummary(SQLModel):
     session: SessionResponse
     behavior_summary: BehaviorSummary
     latest_hypothesis: Optional[HypothesisResponse]
+    criteria: list[CriterionResponse] = Field(default_factory=list)

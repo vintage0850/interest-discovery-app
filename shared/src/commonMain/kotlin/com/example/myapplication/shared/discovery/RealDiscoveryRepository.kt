@@ -179,9 +179,38 @@ class RealDiscoveryRepository(
             "これまでに${behavior.completedExperiments}件の実験を完了しました" +
                 (behavior.avgEnjoyment?.let { "（平均興味度 ${it.roundedTo1Decimal()}）。" } ?: "。")
         }
+        // §34: 確信度が足りない仮説はサーバー側で保存されず null になる。
+        // でっち上げの気づきを見せるより「まだ十分な根拠がない」と伝える。
         val hypothesis = summary.latestHypothesis?.summary
-            ?: "まだ仮説は生成されていません。実験を重ねると、興味の傾向から仮説が生成されます。"
-        return DiscoveryData(observation = observation, hypothesis = hypothesis)
+            ?: "まだはっきりした傾向は見えていません。もう少し試してみると、あなたらしい基準が見つかるかもしれません。"
+        return DiscoveryData(
+            observation = observation,
+            hypothesis = hypothesis,
+            hypothesisId = summary.latestHypothesis?.id,
+            criteria = summary.criteria.map { it.toUiModel() }
+        )
+    }
+
+    override suspend fun sendHypothesisFeedback(
+        hypothesisId: Int,
+        reaction: HypothesisReaction
+    ): HypothesisFeedbackOutcome {
+        // POSTレスポンス（HypothesisFeedbackResult）だけで状態更新する。
+        // 追加でGETし直すと、POST成功後にGETが失敗した場合サーバー側は既に更新済みなのに
+        // クライアントは失敗扱いになり、再送でconfidenceが二重に増減し得る（Gate4指摘）。
+        val response = client.post("/hypotheses/$hypothesisId/feedback") {
+            contentType(ContentType.Application.Json)
+            setBody(HypothesisFeedbackRequest(reaction = reaction.name.lowercase()))
+        }
+        if (!response.status.isSuccess()) {
+            throw DiscoveryApiException("仮説への反応の送信に失敗しました (HTTP ${response.status.value})")
+        }
+        val result = response.body<HypothesisFeedbackResultDto>()
+        return HypothesisFeedbackOutcome(
+            hypothesisSummary = result.updatedHypothesis.summary,
+            hypothesisConfidence = result.updatedHypothesis.confidence,
+            criterion = result.newCriterion?.toUiModel()
+        )
     }
 
     override suspend fun getNextExperiment(): Experiment {
@@ -313,13 +342,47 @@ private data class BehaviorSummaryDto(
 
 @Serializable
 private data class HypothesisResponseDto(
-    val summary: String
+    val id: Int,
+    val summary: String,
+    val confidence: Float
+)
+
+@Serializable
+private data class CriterionResponseDto(
+    val id: Int,
+    val label: String,
+    val confidence: Float
+)
+
+private fun CriterionResponseDto.toUiModel(): CriterionUiModel = CriterionUiModel(
+    id = id,
+    label = label,
+    confidence = confidence,
+    confidenceLabel = HypothesisFeedbackPolicy.confidenceLabelFor(confidence)
 )
 
 @Serializable
 private data class SessionSummaryDto(
     val behaviorSummary: BehaviorSummaryDto,
-    val latestHypothesis: HypothesisResponseDto? = null
+    val latestHypothesis: HypothesisResponseDto? = null,
+    val criteria: List<CriterionResponseDto> = emptyList()
+)
+
+@Serializable
+private data class HypothesisFeedbackRequest(val reaction: String)
+
+@Serializable
+private data class HypothesisFeedbackResponseDto(
+    val id: Int,
+    val hypothesisId: Int,
+    val reaction: String
+)
+
+@Serializable
+private data class HypothesisFeedbackResultDto(
+    val feedback: HypothesisFeedbackResponseDto,
+    val updatedHypothesis: HypothesisResponseDto,
+    val newCriterion: CriterionResponseDto? = null
 )
 
 private fun Float.roundedTo1Decimal(): String {

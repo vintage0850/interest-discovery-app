@@ -83,17 +83,77 @@ data class Experiment(
 )
 
 /**
+ * 仮説への生徒の反応（同感/わからない/違う）。
+ */
+@Serializable
+enum class HypothesisReaction {
+    AGREE,
+    UNSURE,
+    DISAGREE
+}
+
+/**
+ * 生徒に同感された、個人の意思決定基準（Criterion）のUI表示用モデル。
+ * confidenceLabel は §18 の通り数値ではなく定性的なラベルにする。
+ */
+@Serializable
+data class CriterionUiModel(
+    val id: Int,
+    val label: String,
+    val confidence: Float,
+    val confidenceLabel: String
+)
+
+/**
+ * 仮説へのフィードバック送信結果。POSTレスポンスを1往復でUIへ反映するための最小情報。
+ * §34のno-insightガードにより仮説そのものが常に存在するとは限らないため、
+ * この結果は「送信対象だった仮説」に対する更新のみを表す。
+ */
+data class HypothesisFeedbackOutcome(
+    val hypothesisSummary: String,
+    val hypothesisConfidence: Float,
+    val criterion: CriterionUiModel?
+)
+
+/**
+ * バックエンド（`backend/discovery/repository.py`）と同じconfidence閾値。
+ * Real/Fake両実装、UIラベル変換で使う値をここに集約し、ドリフトを防ぐ
+ * （Codex Gate4非ブロッキング指摘への対応）。バックエンド側の値を変更する場合はこちらも合わせる。
+ */
+object HypothesisFeedbackPolicy {
+    const val AGREE_DELTA = 0.15f
+    const val UNSURE_DELTA = 0f
+    const val DISAGREE_DELTA = -0.15f
+    const val CRITERION_PROMOTION_THRESHOLD = 0.6f
+    const val CONSISTENT_LABEL_THRESHOLD = 0.85f
+
+    fun deltaFor(reaction: HypothesisReaction): Float = when (reaction) {
+        HypothesisReaction.AGREE -> AGREE_DELTA
+        HypothesisReaction.UNSURE -> UNSURE_DELTA
+        HypothesisReaction.DISAGREE -> DISAGREE_DELTA
+    }
+
+    fun confidenceLabelFor(confidence: Float): String = when {
+        confidence >= CONSISTENT_LABEL_THRESHOLD -> "Consistent"
+        confidence >= CRITERION_PROMOTION_THRESHOLD -> "Appearing"
+        else -> "Beginning"
+    }
+}
+
+/**
  * 発見・仮説データ（Discover画面用）
  */
 @Serializable
 data class DiscoveryData(
     val observation: String,
     val hypothesis: String,
+    val hypothesisId: Int? = null,
     val testingFocus: String = "実際に手を動かして作る（CREATE）ことにも興味が広がるか観察中",
     val recentChanges: String = "先週と比べて「比べる」「分析する」シグナルが急上昇しています",
     val evidenceReason: String = "直近3回の実験で高評価（4〜5点）を付け、予定時間より長く取り組んだため",
     val disclaimer: String = "※ これは現時点の行動から導き出した仮説です。",
-    val nextExperiment: Experiment? = null
+    val nextExperiment: Experiment? = null,
+    val criteria: List<CriterionUiModel> = emptyList()
 )
 
 /**

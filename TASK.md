@@ -3167,3 +3167,184 @@ AGENTS.mdのルール上、Claudeは通常実装を担当しない。指摘1〜3
 - 詳細: `docs/quality-review/2026-09-03-discovery-real-data-integration.md`末尾「Gate 4 再レビュー」。
 
 **次の担当: ユーザー確認。** 実機でDiscoveryのレポート画面と設定画面を開き、実績値・空状態が意図どおり表示されることを確認する。
+
+## 案件15：Mikke設計書ギャップ対応（P0）— Insightフィードバックループ・Criterion永続化・証拠不足ガード
+
+**状態:** `完了`
+**担当:** Claude（実装）→ Codex（Gate4）
+
+### 経緯
+
+ユーザーから提供された「Mikke — Mobile Application Design Specification」（全44節）と現在の実装（`backend/discovery/`, `shared/.../ui/discovery/`）をClaudeが照合し、未実装ギャップをP0〜P3で洗い出した。P0（コア仮説検証に必須）は以下4点:
+
+1. Insightフィードバックループ（同感/わからない/違う → confidence増減）が無い（仕様§15/16）
+2. Personal Decision Criteria（個人の意思決定基準）を永続化するエンティティが無い（仕様§17）
+3. Signal→Evidence→Insightの3層分離が無い（仕様§14、今回はP0-2に統合する形で見送り）
+4. 確信度不足時に「まだ根拠が足りない」と誠実に伝えるNo-Insightガードが無い（仕様§34）
+
+ユーザーから「最速実装」の指示を受け、P0-1・P0-2・P0-4をClaudeが直接実装した。
+
+**担当変更の経緯（AGENTS.mdの例外運用）:** 本セッション冒頭で発生していたKimi/Antigravity/Codexの同時使用不能（案件12参照）の続きとして、ユーザーが明示的に速度を優先する指示（「最速実装」）を出したため、通常はKimi/Codexが担当する実装をClaudeが直接行った。以後、`/company`呼び出しによりCodexへGate4レビューを引き継いでいる。
+
+### 実装内容
+
+**バックエンド（`backend/discovery/`）:**
+- `models.py`: `HypothesisReaction` enum（AGREE/UNSURE/DISAGREE）、`HypothesisFeedback`テーブル、`Criterion`テーブルを新設。`HypothesisFeedbackCreate`/`Response`/`Result`、`CriterionResponse`スキーマを追加。`SessionSummary`に`criteria: list[CriterionResponse]`を追加。
+- `repository.py`: `add_hypothesis_feedback(hypothesis_id, reaction)` — 同感+0.15/わからない±0/違う-0.15でconfidenceを更新（[0,1]にclamp）、同感かつconfidence>=0.6（`CRITERION_PROMOTION_THRESHOLD`）で`Criterion`に昇格（既存があれば重複作成せず更新）。`list_criteria(session_id)`を追加（confidence降順）。
+- `router.py`: `POST /hypotheses/{id}/feedback`、`GET /sessions/{id}/criteria`を新設。`POST /sessions/{id}/hypothesis/update`はconfidence<0.3（`MIN_HYPOTHESIS_CONFIDENCE`）の場合、DBに保存せず`None`を返すよう変更（no-insightガード、レスポンス型は`HypothesisResponse`→`Optional[HypothesisResponse]`）。`GET /sessions/{id}/summary`に`criteria`を含めるよう変更。
+- `tests/test_discovery_repository.py`: `TestHypothesisFeedbackRepository`（confidence増減・clamp・Criterion昇格・重複防止・404）、`TestCriterionRepository`（一覧取得・confidence降順）を追加。
+- `tests/test_discovery_router.py`: no-insightガードの回帰テスト、フィードバックエンドポイントの正常系・404・バリデーションエラーテストを追加。
+
+**Androidクライアント（`shared/`, Kotlin）:**
+- `DiscoveryModels.kt`: `HypothesisReaction` enum、`CriterionUiModel`（label/confidence/confidenceLabel）、`DiscoveryData`に`hypothesisId`・`criteria`を追加。
+- `DiscoveryRepository.kt`: `sendHypothesisFeedback(hypothesisId, reaction): DiscoveryData`をインターフェースに追加。
+- `RealDiscoveryRepository.kt`: 上記を実装。no-insightガードに対応し、`latestHypothesis`が`null`の場合は仕様§34の文言（「まだはっきりした傾向は見えていません。もう少し試してみると、あなたらしい基準が見つかるかもしれません。」）を表示。confidence→Beginning(<0.6)/Appearing(0.6-0.85)/Consistent(>=0.85)ラベル変換（仕様§18の定性的表示に準拠、数値は主画面に出さない）。
+- `FakeDiscoveryRepository.kt`: プレビュー・デモ用に同等ロジックを実装（`fakeHypothesisConfidence`, `fakeCriteria`）。
+- `DiscoveryState.kt`: `sendHypothesisFeedback(reaction)`アクションを追加。同感でCriterionが新規追加された場合「あなたの基準として追加しました！」をメッセージ通知。
+- `DiscoverTabScreen.kt`: 仮説カード内に「同感！/わからない/違うかも」の3ボタン（`HypothesisReactionChip`）、確定済みCriterion一覧セクションを追加。
+- `DiscoveryMainScaffold.kt`: `onHypothesisReaction`コールバックを配線。
+
+### 対象外（今回のスコープ外、次フェーズ）
+
+- P0-3（Signal→Evidence→Insightの3層分離）: Criterion昇格の起点をSignalではなくHypothesisにしたため、今回は見送り。将来的にEvidence集約層を挟む場合は別TASKで着手。
+- P1以下（オンボーディング、Google Sign-In、Calendar/通知のDiscovery連携、週次レポートのAIナラティブ化、ユーザー主導Reflection、心理軸アンケート等）は未着手。優先順位の詳細はこのセッションの会話記録を参照。
+
+### テスト結果（Claude、2026-09-04）
+
+- `cd backend && python -m pytest -q` → **139 passed, 5 warnings**（終了コード0）
+- `./gradlew :shared:compileDebugKotlinAndroid --no-daemon` → **BUILD SUCCESSFUL**
+- `./gradlew :shared:testDebugUnitTest --tests "com.example.myapplication.shared.discovery.*" --no-daemon` → **BUILD SUCCESSFUL**（DiscoveryStateTest 11件、FakeDiscoveryRepositoryTest 4件、RealDiscoveryRepositoryTest 27件、計42件、失敗0）
+
+### コミット状況
+
+未コミット。Gate4判定後にコミットする。
+
+**次の担当: Codex（Gate4）。** `docs/quality-review/2026-09-04-mikke-p0-gap-closure.md`にGate1〜5判定を記録すること（レビュー依頼済み、実行中）。
+
+### Codex Gate4レビュー（2026-09-04）— 判定: CHANGES REQUIRED
+
+`docs/quality-review/2026-09-04-mikke-p0-gap-closure.md`参照。独立pytest再実行は**139 passed, 6 warnings**でClaude報告と一致。
+
+**ブロッキング指摘3点:**
+1. `RealDiscoveryRepository.sendHypothesisFeedback()`がPOSTレスポンス（`HypothesisFeedbackResult`）を使わず、直後に`getDiscovery()`で再GETしていた。POST成功・GET失敗時にサーバー側だけ更新済みとなり、再送でconfidenceが二重加算され得る。
+2. 新設Kotlin経路（`sendHypothesisFeedback`とその周辺）に対応する回帰テストが差分に含まれていなかった。
+3. `POST /sessions/{id}/hypothesis/update`のレスポンス型変更（`HypothesisResponse`→`Optional[HypothesisResponse]`）に後方互換方針がない。
+
+非ブロッキング指摘: confidence delta/閾値（0.15/0.6/0.85）がバックエンド・Fake・UI変換に分散しドリフトし得る。送信中のボタン多重送信防止が無い。`new_criterion`は既存Criterion更新時も非nullになりフィールド名が実態と厳密には合わない。
+
+### 対応（Claude、2026-09-04）
+
+1. **1往復設計への修正**: `DiscoveryRepository.sendHypothesisFeedback()`の戻り値を`DiscoveryData`から新設の`HypothesisFeedbackOutcome`（hypothesisSummary/hypothesisConfidence/criterion）に変更。`RealDiscoveryRepository`はPOSTレスポンス（`HypothesisFeedbackResultDto`）をそのままdeserializeして返すのみとし、追加のGETを廃止。`DiscoveryState.sendHypothesisFeedback()`側で、現在の`discoveryData`にこの結果をローカルマージ（criteria一覧はid突き合わせでupsert）するよう変更。`CriterionUiModel`・`CriterionResponseDto`・`HypothesisResponseDto`に`id`/`confidence`フィールドを追加してこのマージを可能にした。
+2. **多重送信防止**: `DiscoveryUiState`に`isSubmittingFeedback: Boolean`を追加。送信中は`sendHypothesisFeedback()`呼び出しを早期returnで無視し、`DiscoverTabScreen`の3ボタンも`enabled = !isSubmittingFeedback`で無効化。
+3. **回帰テスト追加**:
+   - バックエンド: confidence境界値ちょうど（no-insight閾値0.3、Criterion昇格閾値0.6）のテストを追加。
+   - Kotlin: `RealDiscoveryRepositoryTest.kt`に`sendHypothesisFeedback`の3テスト（1往復のみでGETが発生しないことの検証を含む・Criterionなしパターン・404エラー）。`DiscoveryStateTest.kt`に6テスト（同感→基準追加＋メッセージ通知、わからない→変化なし、仮説未ロード時は何もしない、送信中の連打防止、失敗時のメッセージ通知とフラグリセット）。
+4. **後方互換方針（指摘3への回答）**: このリポジトリ内に本エンドポイントの外部利用者は存在しない（Android実装はこの1セッションでClaudeが実装したものが唯一の呼び出し元で、既にnullable対応済み）。本アプリは未リリースのため、versioned endpointや互換期間を設ける engineering cost は不要と判断し、設計判断として記録する。将来外部公開APIとして切り出す際は改めてバージョニング方針を検討すること。
+5. **非ブロッキング指摘への対応**: `HypothesisFeedbackPolicy`オブジェクト（`DiscoveryModels.kt`）を新設し、confidence delta（0.15/0/-0.15）・昇格閾値（0.6）・Consistentラベル閾値（0.85）を一箇所に集約。`RealDiscoveryRepository`・`FakeDiscoveryRepository`双方をこれ経由に統一しドリフトを解消した。`new_criterion`フィールド名の是正はバックエンドAPI変更を伴うため今回は見送り、クライアント側はid突き合わせでnew/updateを問わず正しくupsertする実装にすることで実害を回避した。
+
+**変更ファイル（追加分）:**
+- `backend/tests/test_discovery_repository.py`, `backend/tests/test_discovery_router.py`（境界値テスト追加）
+- `shared/.../discovery/DiscoveryModels.kt`（`CriterionUiModel.id`追加、`HypothesisFeedbackOutcome`、`HypothesisFeedbackPolicy`新設）
+- `shared/.../discovery/DiscoveryRepository.kt`（インターフェース戻り値変更）
+- `shared/.../discovery/RealDiscoveryRepository.kt`（1往復化、DTO修正）
+- `shared/.../discovery/FakeDiscoveryRepository.kt`（同上、`HypothesisFeedbackPolicy`使用）
+- `shared/.../discovery/DiscoveryState.kt`（ローカルマージ、`isSubmittingFeedback`）
+- `shared/.../ui/discovery/DiscoverTabScreen.kt`（ボタン無効化）
+- `shared/src/commonTest/kotlin/.../RealDiscoveryRepositoryTest.kt`（新規3テスト）
+- `shared/src/commonTest/kotlin/.../DiscoveryStateTest.kt`（新規6テスト＋デコレータ2種）
+
+**テスト結果:**
+- `cd backend && python -m pytest -q`（全体）→ **142 passed, 5 warnings**（終了コード0）
+- `./gradlew :shared:testDebugUnitTest --tests "com.example.myapplication.shared.discovery.*" --no-daemon` → **BUILD SUCCESSFUL**（DiscoveryStateTest 16件、RealDiscoveryRepositoryTest 30件、FakeDiscoveryRepositoryTest 4件、計50件、失敗0）
+
+### Codex Gate4再レビュー（2026-09-04）— 判定: CHANGES REQUIRED（前回3点は解消、新規1点）
+
+`docs/quality-review/2026-09-04-mikke-p0-gap-closure.md`「Gate 4 再レビュー」参照。独立pytest再々実行は**142 passed**でClaude報告と一致。
+
+前回3点（1往復化・Kotlinテスト追加・後方互換方針の記録）はすべて解消と確認された。新たに1点:
+
+- **多重送信防止にコルーチン起動前の競合窓がある**: `isSubmittingFeedback`の`true`への更新が`scope.launch`後、`actionMutex.withLock`内で行われていたため、最初のコルーチンが実際に走り出す前（同一ディスパッチャtick内）に連続呼び出しされると、全呼び出しが`false`を観測してenqueueされ、`actionMutex`はそれらを破棄せず直列実行するため、POSTが複数回発生しconfidenceが重複加算され得る。追加していたテストは`runCurrent()`を挟んでいたため、この競合窓を検証できていなかった。
+
+### 対応（Claude、2026-09-04）
+
+- `DiscoveryState.sendHypothesisFeedback()`で`isSubmittingFeedback = true`への更新を`scope.launch`の**外**（呼び出し元と同期的に、check直後）へ移動。これにより「読み取り→書き込み」がサスペンションを挟まず1つの関数呼び出し内で完結し、連続呼び出し間の競合窓が閉じる。
+- `DiscoveryStateTest.kt`に`sendHypothesisFeedback_immediateBackToBackCalls_onlySubmitsOnce`を追加。`runCurrent()`を挟まず3回連続呼び出しし、`RecordingHypothesisFeedbackRepository.callCount == 1`を直接固定する（Codex指摘どおりの再現条件）。
+
+**テスト結果:** `./gradlew :shared:testDebugUnitTest --tests "com.example.myapplication.shared.discovery.*" --no-daemon` → **BUILD SUCCESSFUL**（DiscoveryStateTest 17件、RealDiscoveryRepositoryTest 30件、FakeDiscoveryRepositoryTest 4件、計51件、失敗0）
+
+**Gate4再々レビューを省略した判断（Claude、2026-09-04）:** 今回の修正はCodex指摘の競合窓を1行（`isSubmittingFeedback`更新の位置）を関数の外へ移動するだけの機械的な修正であり、`sendHypothesisFeedback_immediateBackToBackCalls_onlySubmitsOnce`はCodexが指摘した再現条件（`runCurrent()`を挟まない連続呼び出し）をそのままテスト化したもので、これがgreenになったことがCodex指摘解消の直接的証拠となる。3回目のCodex起動は同じ確認の反復でしかなく費用対効果が低いと判断し、ユーザー承認のうえ省略した。
+
+**次の担当: なし（コミット済み）。**
+
+## 案件16：Mikke設計書ギャップ対応（P1）— オンボーディング（Welcome→基本情報→初期自己理解チェック）
+
+**状態:** `仕様確定・Kimiへ実装依頼中（Phase 1のみ）`
+**担当:** Kimi（実装）
+**並行作業について（重要）:** 案件15は`backend/discovery/models.py`・`repository.py`・`router.py`と`shared/.../RealDiscoveryRepository.kt`が**現在まさに未コミットでCodex Gate4再々レビュー中**。この4ファイルに今Kimiが触れるとAGENTS.md「同じファイルを2人以上が同時に編集しない」に抵触し、Claudeのコミット作業と衝突する。そのため本案件は2フェーズに分割する。
+
+- **Phase 1（今すぐ着手可・対象ファイルの衝突なし）:** 下記「Androidクライアント」節のうち、新規ディレクトリ`ui/onboarding/`配下の3画面と、新規ファイル`OnboardingStorage.kt`／`OnboardingStorage.android.kt`のみ。バックエンド連携（`RealDiscoveryRepository`呼び出し）は行わず、ダミーのコールバック（`onComplete: () -> Unit`等）で画面遷移だけ完結させる。
+- **Phase 2（案件15コミット後に着手）:** バックエンドのスキーマ拡張、`RealDiscoveryRepository`・`App.kt`への配線。案件15がコミットされたことをTASK.mdまたは`git log`で確認してから着手すること。
+
+**今回Kimiに依頼するのはPhase 1のみ。** Phase 2は案件15コミット後に別途依頼する。
+
+### 背景
+
+「Mikke — Mobile Application Design Specification」§7に基づく、初回起動時のオンボーディングフロー。現状は皆無で、初回起動でいきなりホーム画面が表示される。目標所要時間は約1〜3分。
+
+### 仕様（設計書§7を実装可能な粒度に落としたもの）
+
+3ステップのオンボーディングフローを新設する。
+
+**Step 1 — Welcome画面**
+- 「Mikkeは、小さな行動を通してあなた自身を発見する手助けをします。まだ好きなことが分からなくても大丈夫。」という趣旨の説明を表示。
+- 「はじめる」ボタンでStep 2へ。
+
+**Step 2 — 基本ユーザー情報**
+- 収集項目: `nickname`（ニックネーム、任意）、`age_range`（年齢層、選択式）、`school_stage`（学年、選択式）、`optional_interests`（任意の興味タグ、複数選択可・スキップ可）。
+- 個人情報は最小限に留める（設計書§7 Step2の「Avoid excessive personal information」に従う）。
+- 「次へ」ボタンでStep 3へ。
+
+**Step 3 — 初期自己理解チェック**
+- 目的は性格診断ではなく「現時点でどれだけ自分を理解できているか」の測定。
+- 5件法（1〜5）の質問5問（設計書§7 Step3の例文をそのまま日本語化して使用）:
+  1. 自分が何を楽しいと感じるか説明できる
+  2. 自分が何を嫌だと感じるか説明できる
+  3. 何かを選ぶときに自分が大事にしていることが分かる
+  4. 自然と好奇心を感じるものがいくつかある
+  5. 最近下した決断について、なぜそうしたか説明できる
+- 5問の平均（1.0〜5.0）を`initial_self_understanding_score`としてバックエンドに保存する。
+- 「はじめる」ボタンでホーム画面へ遷移し、以後このフローは再表示しない（初回のみ）。
+
+### バックエンド
+
+- `discovery_session`テーブル（`backend/discovery/models.py`）に以下を追加:
+  - `nickname: Optional[str]`
+  - `age_range: Optional[str]`
+  - `school_stage: Optional[str]`
+  - `optional_interests: list[str]`（JSON、デフォルト空リスト）
+  - `initial_self_understanding_score: Optional[float]`（1.0〜5.0、バリデーション必須）
+- 既存の`POST /sessions`（`SessionCreate`/`SessionResponse`）にこれらのフィールドを追加。すべて省略可能にし、既存の呼び出し（`student_label`のみ）が壊れないこと（後方互換必須。今回は外部利用者が存在しないという理由で互換性を切り捨てた案件15とは異なり、これは通常のオンボーディングAPIとして将来も使われ続けるため、必ずoptionalにすること）。
+- `backend/tests/test_discovery_models.py`, `test_discovery_repository.py`, `test_discovery_router.py`に対応するテストを追加（フィールド省略時のデフォルト、`initial_self_understanding_score`のレンジバリデーション0.0〜5.0外での400エラー等）。
+
+### Androidクライアント（shared, Kotlin）
+
+- 新規Composable: `OnboardingWelcomeScreen.kt`, `OnboardingBasicInfoScreen.kt`, `OnboardingSelfCheckScreen.kt`（`shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/onboarding/`配下に新規ディレクトリを作成すること。既存の`ui/discovery/`とは分ける）。
+- `App.kt`の`NavHost`に`OnboardingWelcome`/`OnboardingBasicInfo`/`OnboardingSelfCheck`の3ルートを追加。
+- 初回起動判定: `DiscoverySettingsStorage`と同じパターンで新規`OnboardingStorage`インターフェース（`hasCompletedOnboarding(): Boolean` / `markCompleted()`）を追加し、Android実装は`SharedPreferences`（既存の`DiscoverySettingsStorage.android.kt`と同じ場所に`OnboardingStorage.android.kt`として新設）。
+- `App.kt`の`startDestination`を、オンボーディング未完了なら`OnboardingWelcome`、完了済みなら既存の`DiscoveryHome`にする条件分岐に変更。
+- `RealDiscoveryRepository`に`completeOnboarding(nickname, ageRange, schoolStage, optionalInterests, initialSelfUnderstandingScore)`を追加し、セッション作成時（`ensureSession()`）にこれらの値を`SessionCreateRequest`へ含めるよう拡張する。**ただし既存の`ensureSession()`は他の全メソッドから呼ばれる共通処理なので、オンボーディング未完了時にオンボーディング情報なしでセッションが先に作られてしまわないよう、呼び出し順序に注意すること**（オンボーディング完了時に初めて`ensureSession()`相当の処理を呼ぶか、既存セッションがあれば追加情報だけ更新するAPIを別途設けるか、Kimiの判断で設計してよいが、TASK.mdに設計判断を記録すること）。
+
+### 受入条件
+
+- 初回起動時: Welcome→基本情報→自己理解チェックの3画面を順に通過し、ホーム画面に到達する。
+- 2回目以降の起動時: オンボーディングをスキップしてホーム画面に直接到達する。
+- 基本情報はすべてスキップ可能（未入力でも次へ進める）。
+- 自己理解チェックの5問すべてに回答しないと「はじめる」ボタンは無効（設計書の意図は測定精度の確保。ただし本チェック自体は診断ではなく参考情報である旨を画面内に明記する）。
+- バックエンド・Androidともに既存のDiscoveryテストスイート（バックエンド142件、Kotlin discovery 50件超）が壊れないこと。
+
+### 対象ファイル（他AIとの競合回避）
+
+- **Phase 1（今回対象・競合なし）:** `shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/onboarding/`配下の新規Composable3画面、新規`OnboardingStorage.kt`（`shared/.../discovery/`と同じ層でよい）、`OnboardingStorage.android.kt`（新規）。これらは案件15が触れていない完全新規ファイルなので、今すぐ着手してよい。
+- **Phase 2（次回・案件15コミット後）:** `backend/discovery/models.py`／`repository.py`／`router.py`（案件15が現在まさに未コミットで編集中、触らないこと）、`shared/.../RealDiscoveryRepository.kt`（同上）、`shared/.../ui/App.kt`（NavHostへのオンボーディングルート追加）。
+
+**次の担当: Kimi（Phase 1のみ）。** 上記「Androidクライアント」節のうち新規ファイルだけをTDDで実装すること。画面遷移は`onComplete: () -> Unit`のような単純なコールバックで完結させ、バックエンド呼び出しは行わないこと（`RealDiscoveryRepository`・`App.kt`には一切触れない）。完了後、本節に作業履歴（変更ファイル・テスト結果）を追記し、次の担当をClaude（Phase 2の設計判断・案件15コミット後の配線担当）として引き継ぐこと。バックエンドのスキーマ拡張とAndroid配線（Phase 2）は、案件15がコミットされた後に別途依頼する。

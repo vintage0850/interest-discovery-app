@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.myapplication.shared.discovery.DiscoveryUiState
 import com.example.myapplication.shared.discovery.Experiment
+import com.example.myapplication.shared.discovery.HypothesisReaction
 
 /**
  * 発見（Discover）タブ画面。
@@ -40,6 +41,7 @@ fun DiscoverTabScreen(
     onToggleEvidence: () -> Unit,
     onTryNext: (Experiment) -> Unit,
     onRetry: () -> Unit,
+    onHypothesisReaction: (HypothesisReaction) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Box(
@@ -116,6 +118,81 @@ fun DiscoverTabScreen(
                             fontSize = 13.sp,
                             lineHeight = 20.sp
                         )
+
+                        if (data.hypothesisId != null) {
+                            Spacer(modifier = Modifier.height(DiscoverySpacing.md))
+
+                            Text(
+                                text = "これって、あなたらしい？",
+                                color = DiscoveryColors.TextSecondary,
+                                fontSize = 12.sp
+                            )
+
+                            Spacer(modifier = Modifier.height(DiscoverySpacing.xs))
+
+                            Row(horizontalArrangement = Arrangement.spacedBy(DiscoverySpacing.sm)) {
+                                HypothesisReactionChip(
+                                    text = "同感！",
+                                    enabled = !discoveryState.isSubmittingFeedback,
+                                    onClick = { onHypothesisReaction(HypothesisReaction.AGREE) }
+                                )
+                                HypothesisReactionChip(
+                                    text = "わからない",
+                                    enabled = !discoveryState.isSubmittingFeedback,
+                                    onClick = { onHypothesisReaction(HypothesisReaction.UNSURE) }
+                                )
+                                HypothesisReactionChip(
+                                    text = "違うかも",
+                                    enabled = !discoveryState.isSubmittingFeedback,
+                                    onClick = { onHypothesisReaction(HypothesisReaction.DISAGREE) }
+                                )
+                            }
+                        }
+                    }
+
+                    if (data.criteria.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(DiscoverySpacing.base))
+
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(DiscoveryRadius.card))
+                                .background(DiscoveryColors.Surface)
+                                .border(1.dp, DiscoveryColors.BorderSubtle, RoundedCornerShape(DiscoveryRadius.card))
+                                .padding(DiscoverySpacing.cardPadding)
+                        ) {
+                            Text(
+                                text = "🧭 あなたが大事にしていそうなこと",
+                                color = DiscoveryColors.TextPrimary,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+
+                            Spacer(modifier = Modifier.height(DiscoverySpacing.sm))
+
+                            data.criteria.forEach { criterion ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = criterion.label,
+                                        color = DiscoveryColors.TextPrimary,
+                                        fontSize = 13.sp,
+                                        lineHeight = 19.sp,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Text(
+                                        text = criterion.confidenceLabel,
+                                        color = DiscoveryColors.Accent,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(DiscoverySpacing.xs))
+                            }
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(DiscoverySpacing.base))
@@ -294,5 +371,27 @@ fun DiscoverTabScreen(
                 }
             }
         }
+    }
+}
+
+/**
+ * 仮説への反応（同感/わからない/違う）を選ぶ小さなチップボタン。
+ */
+@Composable
+private fun HypothesisReactionChip(text: String, enabled: Boolean = true, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(DiscoveryRadius.badge))
+            .background(if (enabled) DiscoveryColors.SurfaceSecondary else DiscoveryColors.Background)
+            .border(1.dp, DiscoveryColors.BorderSubtle, RoundedCornerShape(DiscoveryRadius.badge))
+            .clickable(role = Role.Button, enabled = enabled, onClick = onClick)
+            .padding(horizontal = DiscoverySpacing.md, vertical = DiscoverySpacing.sm)
+    ) {
+        Text(
+            text = text,
+            color = if (enabled) DiscoveryColors.TextPrimary else DiscoveryColors.TextTertiary,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold
+        )
     }
 }

@@ -12,6 +12,7 @@ from discovery.models import (
     Experiment,
     ExperimentResult,
     ExperimentStatus,
+    HypothesisReaction,
     InterestSignal,
     InterestSignalSource,
 )
@@ -358,6 +359,188 @@ class TestHypothesisRepository:
     def test_get_latest_hypothesis_none(self, repository: DiscoveryRepository) -> None:
         session = repository.create_session("student-a")
         assert repository.get_latest_hypothesis(session.id) is None
+
+
+class TestHypothesisFeedbackRepository:
+    def test_agree_increases_confidence(self, repository: DiscoveryRepository) -> None:
+        session = repository.create_session("student-a")
+        hypothesis = repository.create_hypothesis(
+            session.id,
+            summary="Likes comparing options",
+            confidence=0.4,
+            supporting_evidence=[],
+            suggested_next_domains=[],
+        )
+        _, updated, criterion = repository.add_hypothesis_feedback(
+            hypothesis.id, HypothesisReaction.AGREE
+        )
+        assert updated.confidence == pytest.approx(0.55)
+        assert criterion is None  # まだ昇格閾値(0.6)未満
+
+    def test_disagree_decreases_confidence(self, repository: DiscoveryRepository) -> None:
+        session = repository.create_session("student-a")
+        hypothesis = repository.create_hypothesis(
+            session.id,
+            summary="Likes comparing options",
+            confidence=0.4,
+            supporting_evidence=[],
+            suggested_next_domains=[],
+        )
+        _, updated, criterion = repository.add_hypothesis_feedback(
+            hypothesis.id, HypothesisReaction.DISAGREE
+        )
+        assert updated.confidence == pytest.approx(0.25)
+        assert criterion is None
+
+    def test_unsure_keeps_confidence_unchanged(self, repository: DiscoveryRepository) -> None:
+        session = repository.create_session("student-a")
+        hypothesis = repository.create_hypothesis(
+            session.id,
+            summary="Likes comparing options",
+            confidence=0.4,
+            supporting_evidence=[],
+            suggested_next_domains=[],
+        )
+        _, updated, criterion = repository.add_hypothesis_feedback(
+            hypothesis.id, HypothesisReaction.UNSURE
+        )
+        assert updated.confidence == pytest.approx(0.4)
+        assert criterion is None
+
+    def test_confidence_is_clamped_to_one(self, repository: DiscoveryRepository) -> None:
+        session = repository.create_session("student-a")
+        hypothesis = repository.create_hypothesis(
+            session.id,
+            summary="Likes comparing options",
+            confidence=0.95,
+            supporting_evidence=[],
+            suggested_next_domains=[],
+        )
+        _, updated, _ = repository.add_hypothesis_feedback(
+            hypothesis.id, HypothesisReaction.AGREE
+        )
+        assert updated.confidence == pytest.approx(1.0)
+
+    def test_confidence_is_clamped_to_zero(self, repository: DiscoveryRepository) -> None:
+        session = repository.create_session("student-a")
+        hypothesis = repository.create_hypothesis(
+            session.id,
+            summary="Likes comparing options",
+            confidence=0.05,
+            supporting_evidence=[],
+            suggested_next_domains=[],
+        )
+        _, updated, _ = repository.add_hypothesis_feedback(
+            hypothesis.id, HypothesisReaction.DISAGREE
+        )
+        assert updated.confidence == pytest.approx(0.0)
+
+    def test_agree_past_threshold_promotes_criterion(
+        self, repository: DiscoveryRepository
+    ) -> None:
+        session = repository.create_session("student-a")
+        hypothesis = repository.create_hypothesis(
+            session.id,
+            summary="Likes comparing options",
+            confidence=0.5,
+            supporting_evidence=[],
+            suggested_next_domains=[],
+        )
+        _, updated, criterion = repository.add_hypothesis_feedback(
+            hypothesis.id, HypothesisReaction.AGREE
+        )
+        assert updated.confidence == pytest.approx(0.65)
+        assert criterion is not None
+        assert criterion.session_id == session.id
+        assert criterion.source_hypothesis_id == hypothesis.id
+        assert criterion.user_confirmed is True
+        assert criterion.confidence == pytest.approx(0.65)
+
+    def test_agree_at_exact_threshold_promotes_criterion(
+        self, repository: DiscoveryRepository
+    ) -> None:
+        session = repository.create_session("student-a")
+        hypothesis = repository.create_hypothesis(
+            session.id,
+            summary="Likes comparing options",
+            confidence=0.45,
+            supporting_evidence=[],
+            suggested_next_domains=[],
+        )
+        _, updated, criterion = repository.add_hypothesis_feedback(
+            hypothesis.id, HypothesisReaction.AGREE
+        )
+        assert updated.confidence == pytest.approx(0.6)
+        assert criterion is not None
+        assert criterion.confidence == pytest.approx(0.6)
+
+    def test_agree_just_below_threshold_does_not_promote_criterion(
+        self, repository: DiscoveryRepository
+    ) -> None:
+        session = repository.create_session("student-a")
+        hypothesis = repository.create_hypothesis(
+            session.id,
+            summary="Likes comparing options",
+            confidence=0.44,
+            supporting_evidence=[],
+            suggested_next_domains=[],
+        )
+        _, updated, criterion = repository.add_hypothesis_feedback(
+            hypothesis.id, HypothesisReaction.AGREE
+        )
+        assert updated.confidence == pytest.approx(0.59)
+        assert criterion is None
+
+    def test_repeated_agree_updates_existing_criterion_not_duplicate(
+        self, repository: DiscoveryRepository
+    ) -> None:
+        session = repository.create_session("student-a")
+        hypothesis = repository.create_hypothesis(
+            session.id,
+            summary="Likes comparing options",
+            confidence=0.55,
+            supporting_evidence=[],
+            suggested_next_domains=[],
+        )
+        repository.add_hypothesis_feedback(hypothesis.id, HypothesisReaction.AGREE)
+        _, _, second_criterion = repository.add_hypothesis_feedback(
+            hypothesis.id, HypothesisReaction.AGREE
+        )
+        criteria = repository.list_criteria(session.id)
+        assert len(criteria) == 1
+        assert second_criterion is not None
+        assert second_criterion.id == criteria[0].id
+
+    def test_feedback_for_nonexistent_hypothesis_raises(
+        self, repository: DiscoveryRepository
+    ) -> None:
+        with pytest.raises(ValueError):
+            repository.add_hypothesis_feedback(999, HypothesisReaction.AGREE)
+
+
+class TestCriterionRepository:
+    def test_list_criteria_empty(self, repository: DiscoveryRepository) -> None:
+        session = repository.create_session("student-a")
+        assert repository.list_criteria(session.id) == []
+
+    def test_list_criteria_ordered_by_confidence_desc(
+        self, repository: DiscoveryRepository
+    ) -> None:
+        session = repository.create_session("student-a")
+        low = repository.create_hypothesis(
+            session.id, summary="Low", confidence=0.5,
+            supporting_evidence=[], suggested_next_domains=[],
+        )
+        high = repository.create_hypothesis(
+            session.id, summary="High", confidence=0.7,
+            supporting_evidence=[], suggested_next_domains=[],
+        )
+        repository.add_hypothesis_feedback(low.id, HypothesisReaction.AGREE)
+        repository.add_hypothesis_feedback(high.id, HypothesisReaction.AGREE)
+        criteria = repository.list_criteria(session.id)
+        assert len(criteria) == 2
+        assert criteria[0].label == "High"
+        assert criteria[1].label == "Low"
 
 
 class TestSummaryRepository:

@@ -18,6 +18,7 @@ interface DiscoveryRepository {
     )
     suspend fun skipExperiment(experimentId: String)
     suspend fun getDiscovery(): DiscoveryData
+    suspend fun sendHypothesisFeedback(hypothesisId: Int, reaction: HypothesisReaction): HypothesisFeedbackOutcome
     suspend fun getNextExperiment(): Experiment
     suspend fun getDomainFields(): List<DomainField>
     suspend fun getReportData(): ReportData

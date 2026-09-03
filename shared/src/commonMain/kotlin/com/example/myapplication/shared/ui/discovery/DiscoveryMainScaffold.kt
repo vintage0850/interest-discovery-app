@@ -110,7 +110,8 @@ fun DiscoveryMainScaffold(
                     discoveryState = discoveryUiState,
                     onToggleEvidence = { discoveryState.toggleEvidenceExpanded() },
                     onTryNext = onStartExperiment,
-                    onRetry = { discoveryState.loadDiscovery() }
+                    onRetry = { discoveryState.loadDiscovery() },
+                    onHypothesisReaction = { discoveryState.sendHypothesisFeedback(it) }
                 )
                 AppTab.EXPLORE -> ExploreTabScreen(
                     exploreState = exploreUiState,

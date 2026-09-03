@@ -59,7 +59,8 @@ data class DiscoveryUiState(
     val isLoading: Boolean = false,
     val discoveryData: DiscoveryData? = null,
     val errorMessage: String? = null,
-    val isEvidenceExpanded: Boolean = false
+    val isEvidenceExpanded: Boolean = false,
+    val isSubmittingFeedback: Boolean = false
 )
 
 /**
@@ -330,6 +331,56 @@ class DiscoveryState(
 
     fun toggleEvidenceExpanded() {
         _discoveryState.update { it.copy(isEvidenceExpanded = !it.isEvidenceExpanded) }
+    }
+
+    /**
+     * 仮説への反応（同感/わからない/違う）を送信する。§15/§16 のフィードバックループ。
+     *
+     * POSTレスポンス（[HypothesisFeedbackOutcome]）だけでローカル状態を更新し、追加のGETは行わない
+     * （GET失敗時にサーバー側だけ更新済みになり、再送でconfidenceが二重加算される事故を避けるため）。
+     * 送信中は多重送信を防ぐため [isSubmittingFeedback] でボタンを無効化する。
+     */
+    fun sendHypothesisFeedback(reaction: HypothesisReaction) {
+        // isSubmittingFeedback はここで同期的に立てる（scope.launch/actionMutexの中で立てると、
+        // 最初のコルーチンが実際に走り出すまでの間に連続呼び出しされた場合、
+        // 全呼び出しがfalseを観測してenqueueされ、confidenceが二重加算され得る。Gate4再指摘）。
+        if (_discoveryState.value.isSubmittingFeedback) return
+        val current = _discoveryState.value.discoveryData ?: return
+        val hypothesisId = current.hypothesisId ?: return
+        _discoveryState.update { it.copy(isSubmittingFeedback = true) }
+        scope.launch {
+            actionMutex.withLock {
+                try {
+                    val outcome = repository.sendHypothesisFeedback(hypothesisId, reaction)
+                    val newCriterion = outcome.criterion
+                    val isNewCriterion = newCriterion != null &&
+                        current.criteria.none { it.id == newCriterion.id }
+                    val updatedCriteria = if (newCriterion != null) {
+                        (current.criteria.filterNot { it.id == newCriterion.id } + newCriterion)
+                            .sortedByDescending { it.confidence }
+                    } else {
+                        current.criteria
+                    }
+                    _discoveryState.update {
+                        it.copy(
+                            isSubmittingFeedback = false,
+                            discoveryData = current.copy(
+                                hypothesis = outcome.hypothesisSummary,
+                                criteria = updatedCriteria
+                            )
+                        )
+                    }
+                    if (isNewCriterion) {
+                        _messages.tryEmit("あなたの基準として追加しました！")
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    _discoveryState.update { it.copy(isSubmittingFeedback = false) }
+                    _messages.tryEmit(e.message ?: "反応の送信に失敗しました。もう一度お試しください。")
+                }
+            }
+        }
     }
 
     fun loadExploreData() {

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import datetime
 import os
-from typing import Annotated, Any
+from typing import Annotated, Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import SQLModel, create_engine
@@ -10,6 +10,7 @@ from sqlmodel import SQLModel, create_engine
 from discovery.aggregation import build_behavior_summary
 from discovery.gemini_prompts import DiscoveryGeminiClient
 from discovery.models import (
+    CriterionResponse,
     DiscoverySession,
     DomainType,
     Experiment,
@@ -19,6 +20,8 @@ from discovery.models import (
     ExperimentResultResponse,
     ExperimentSelectRequest,
     ExperimentSkipRequest,
+    HypothesisFeedbackCreate,
+    HypothesisFeedbackResult,
     HypothesisResponse,
     HypothesisUpdateRequest,
     InterestHypothesis,
@@ -30,6 +33,10 @@ from discovery.models import (
     SessionSummary,
 )
 from discovery.repository import DiscoveryRepository, StateTransitionError
+
+# この確信度未満の仮説はまだ「気づき」として提示しない。
+# でっち上げの洞察よりも「まだ十分な根拠がない」と伝える方が誠実（§34）。
+MIN_HYPOTHESIS_CONFIDENCE = 0.3
 
 _ENGINE = create_engine(
     "sqlite:///discovery.db",
@@ -240,7 +247,7 @@ def complete_experiment(
 
 @router.post(
     "/sessions/{session_id}/hypothesis/update",
-    response_model=HypothesisResponse,
+    response_model=Optional[HypothesisResponse],
     status_code=status.HTTP_201_CREATED,
 )
 def update_hypothesis(
@@ -248,8 +255,12 @@ def update_hypothesis(
     request: HypothesisUpdateRequest,
     repo: Annotated[DiscoveryRepository, Depends(get_repository)],
     client: Annotated[DiscoveryGeminiClient, Depends(get_gemini_client)],
-) -> InterestHypothesis:
-    """シグナルと実験結果から Gemini で興味仮説を生成し保存する。"""
+) -> InterestHypothesis | None:
+    """シグナルと実験結果から Gemini で興味仮説を生成し保存する。
+
+    確信度が MIN_HYPOTHESIS_CONFIDENCE 未満の場合は保存も提示もしない
+    （でっち上げの気づきより「まだ根拠が足りない」の方が誠実、§34）。
+    """
     _require_session(repo, session_id)
     data = repo.get_summary_data(session_id)
     try:
@@ -261,6 +272,9 @@ def update_hypothesis(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Hypothesis update is currently unavailable",
         ) from exc
+
+    if hypothesis_data["confidence"] < MIN_HYPOTHESIS_CONFIDENCE:
+        return None
 
     try:
         return repo.create_hypothesis(
@@ -277,6 +291,43 @@ def update_hypothesis(
         ) from exc
 
 
+@router.post(
+    "/hypotheses/{hypothesis_id}/feedback",
+    response_model=HypothesisFeedbackResult,
+    status_code=status.HTTP_201_CREATED,
+)
+def add_hypothesis_feedback(
+    hypothesis_id: int,
+    request: HypothesisFeedbackCreate,
+    repo: Annotated[DiscoveryRepository, Depends(get_repository)],
+) -> dict[str, Any]:
+    """仮説への生徒の反応（同感/わからない/違う）を記録し、確信度を更新する。
+
+    閾値を超えて同感された仮説は個人の意思決定基準（Criterion）に昇格する（§17）。
+    """
+    try:
+        feedback, hypothesis, criterion = repo.add_hypothesis_feedback(
+            hypothesis_id, request.reaction
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return {
+        "feedback": feedback,
+        "updated_hypothesis": hypothesis,
+        "new_criterion": criterion,
+    }
+
+
+@router.get("/sessions/{session_id}/criteria", response_model=list[CriterionResponse])
+def list_criteria(
+    session_id: int,
+    repo: Annotated[DiscoveryRepository, Depends(get_repository)],
+) -> Any:
+    """生徒に同感された、確信度の高い個人の意思決定基準の一覧を取得する。"""
+    _require_session(repo, session_id)
+    return repo.list_criteria(session_id)
+
+
 @router.get("/sessions/{session_id}/summary", response_model=SessionSummary)
 def get_summary(
     session_id: int,
@@ -289,8 +340,10 @@ def get_summary(
         data["signals"], data["experiments"], data["results"]
     )
     latest_hypothesis = repo.get_latest_hypothesis(session_id)
+    criteria = repo.list_criteria(session_id)
     return {
         "session": session,
         "behavior_summary": behavior_summary,
         "latest_hypothesis": latest_hypothesis,
+        "criteria": criteria,
     }

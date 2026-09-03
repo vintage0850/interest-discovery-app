@@ -616,6 +616,121 @@ class TestExperimentEndpoints:
         assert data["behavior_summary"]["total_signals"] == 5
         assert data["behavior_summary"]["total_experiments"] == 1
         assert data["behavior_summary"]["completed_experiments"] == 1
+        assert data["criteria"] == []
+
+    def test_update_hypothesis_below_confidence_threshold_is_not_persisted(
+        self, test_client: TestClient
+    ) -> None:
+        session_id = self._create_full_session(test_client)
+
+        mock_client = MagicMock(spec=DiscoveryGeminiClient)
+        mock_client.update_hypothesis.return_value = {
+            "summary": "まだ判断できない",
+            "confidence": 0.1,
+            "supporting_evidence": [],
+            "suggested_next_domains": [],
+        }
+        app.dependency_overrides[get_gemini_client] = lambda: mock_client
+
+        response = test_client.post(
+            f"/sessions/{session_id}/hypothesis/update",
+            json={},
+        )
+        assert response.status_code == 201
+        assert response.json() is None
+
+        summary = test_client.get(f"/sessions/{session_id}/summary")
+        assert summary.json()["latest_hypothesis"] is None
+
+    def test_update_hypothesis_at_exact_threshold_is_persisted(
+        self, test_client: TestClient
+    ) -> None:
+        session_id = self._create_full_session(test_client)
+
+        mock_client = MagicMock(spec=DiscoveryGeminiClient)
+        mock_client.update_hypothesis.return_value = {
+            "summary": "ちょうど閾値",
+            "confidence": 0.3,
+            "supporting_evidence": [],
+            "suggested_next_domains": [],
+        }
+        app.dependency_overrides[get_gemini_client] = lambda: mock_client
+
+        response = test_client.post(
+            f"/sessions/{session_id}/hypothesis/update",
+            json={},
+        )
+        assert response.status_code == 201
+        assert response.json() is not None
+        assert response.json()["confidence"] == 0.3
+
+
+class TestHypothesisFeedbackEndpoints:
+    def test_agree_feedback_returns_updated_hypothesis(
+        self, test_client: TestClient
+    ) -> None:
+        session_resp = test_client.post("/sessions", json={"student_label": "student-a"})
+        session_id = session_resp.json()["id"]
+
+        mock_client = MagicMock(spec=DiscoveryGeminiClient)
+        mock_client.update_hypothesis.return_value = {
+            "summary": "比較してから決める傾向がある",
+            "confidence": 0.5,
+            "supporting_evidence": [],
+            "suggested_next_domains": [],
+        }
+        app.dependency_overrides[get_gemini_client] = lambda: mock_client
+        hypothesis_resp = test_client.post(
+            f"/sessions/{session_id}/hypothesis/update", json={}
+        )
+        hypothesis_id = hypothesis_resp.json()["id"]
+
+        response = test_client.post(
+            f"/hypotheses/{hypothesis_id}/feedback",
+            json={"reaction": "agree"},
+        )
+        assert response.status_code == 201
+        data = response.json()
+        assert data["feedback"]["reaction"] == "agree"
+        assert data["updated_hypothesis"]["confidence"] == pytest.approx(0.65)
+        assert data["new_criterion"] is not None
+        assert data["new_criterion"]["confidence"] == pytest.approx(0.65)
+
+        criteria = test_client.get(f"/sessions/{session_id}/criteria")
+        assert len(criteria.json()) == 1
+
+        summary = test_client.get(f"/sessions/{session_id}/summary")
+        assert len(summary.json()["criteria"]) == 1
+
+    def test_feedback_for_nonexistent_hypothesis_returns_404(
+        self, test_client: TestClient
+    ) -> None:
+        response = test_client.post(
+            "/hypotheses/999/feedback",
+            json={"reaction": "agree"},
+        )
+        assert response.status_code == 404
+
+    def test_feedback_rejects_invalid_reaction(self, test_client: TestClient) -> None:
+        session_resp = test_client.post("/sessions", json={"student_label": "student-a"})
+        session_id = session_resp.json()["id"]
+        mock_client = MagicMock(spec=DiscoveryGeminiClient)
+        mock_client.update_hypothesis.return_value = {
+            "summary": "s",
+            "confidence": 0.5,
+            "supporting_evidence": [],
+            "suggested_next_domains": [],
+        }
+        app.dependency_overrides[get_gemini_client] = lambda: mock_client
+        hypothesis_id = test_client.post(
+            f"/sessions/{session_id}/hypothesis/update", json={}
+        ).json()["id"]
+
+        response = test_client.post(
+            f"/hypotheses/{hypothesis_id}/feedback",
+            json={"reaction": "not_a_real_reaction"},
+        )
+        assert response.status_code == 422
 
 
 class TestExistingEndpoints:

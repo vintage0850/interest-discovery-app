@@ -298,6 +298,147 @@ class DiscoveryStateTest {
             state.close()
         }
     }
+
+    @Test
+    fun sendHypothesisFeedback_agreePastThreshold_updatesHypothesisAndAddsCriterion() = runTest {
+        val repo = FakeDiscoveryRepository(FakeScenario.NORMAL, enableArtificialDelay = false)
+        val state = createState(repo)
+        try {
+            state.loadDiscovery()
+            advanceUntilIdle()
+            val before = state.discoveryState.value.discoveryData
+            assertNotNull(before?.hypothesisId)
+            assertEquals(0, before?.criteria?.size)
+
+            var message: String? = null
+            val collectJob = launch { state.messages.collect { message = it } }
+
+            // FakeDiscoveryRepositoryのfakeHypothesisConfidenceは0.5始まり。
+            // 同感+0.15で0.65 >= 0.6（昇格閾値）となりCriterionが追加される。
+            state.sendHypothesisFeedback(HypothesisReaction.AGREE)
+            advanceUntilIdle()
+
+            val after = state.discoveryState.value.discoveryData
+            assertEquals(1, after?.criteria?.size)
+            assertEquals("あなたの基準として追加しました！", message)
+            assertFalse(state.discoveryState.value.isSubmittingFeedback)
+            collectJob.cancel()
+        } finally {
+            state.close()
+        }
+    }
+
+    @Test
+    fun sendHypothesisFeedback_unsure_doesNotAddCriterionOrEmitMessage() = runTest {
+        val repo = FakeDiscoveryRepository(FakeScenario.NORMAL, enableArtificialDelay = false)
+        val state = createState(repo)
+        try {
+            state.loadDiscovery()
+            advanceUntilIdle()
+
+            var message: String? = null
+            val collectJob = launch { state.messages.collect { message = it } }
+
+            state.sendHypothesisFeedback(HypothesisReaction.UNSURE)
+            advanceUntilIdle()
+
+            assertEquals(0, state.discoveryState.value.discoveryData?.criteria?.size)
+            assertNull(message)
+            collectJob.cancel()
+        } finally {
+            state.close()
+        }
+    }
+
+    @Test
+    fun sendHypothesisFeedback_doesNothingWhenNoHypothesisLoaded() = runTest {
+        val repo = FakeDiscoveryRepository(FakeScenario.NORMAL, enableArtificialDelay = false)
+        val recording = RecordingHypothesisFeedbackRepository(repo)
+        val state = createState(recording)
+        try {
+            // loadDiscovery() を呼んでいないため discoveryData は null のまま。
+            state.sendHypothesisFeedback(HypothesisReaction.AGREE)
+            advanceUntilIdle()
+
+            assertEquals(0, recording.callCount)
+            assertFalse(state.discoveryState.value.isSubmittingFeedback)
+        } finally {
+            state.close()
+        }
+    }
+
+    @Test
+    fun sendHypothesisFeedback_whileSubmitting_ignoresDuplicateTaps() = runTest {
+        val repo = FakeDiscoveryRepository(FakeScenario.NORMAL, enableArtificialDelay = false)
+        val recording = RecordingHypothesisFeedbackRepository(repo, delayMillis = 1_000)
+        val state = createState(recording)
+        try {
+            state.loadDiscovery()
+            advanceUntilIdle()
+
+            state.sendHypothesisFeedback(HypothesisReaction.AGREE)
+            runCurrent() // 1回目が送信中（delay内）になる
+
+            assertTrue(state.discoveryState.value.isSubmittingFeedback)
+
+            // 送信中に連打しても2回目は無視される。
+            state.sendHypothesisFeedback(HypothesisReaction.AGREE)
+            state.sendHypothesisFeedback(HypothesisReaction.AGREE)
+            advanceUntilIdle()
+
+            assertEquals(1, recording.callCount)
+            assertFalse(state.discoveryState.value.isSubmittingFeedback)
+        } finally {
+            state.close()
+        }
+    }
+
+    @Test
+    fun sendHypothesisFeedback_immediateBackToBackCalls_onlySubmitsOnce() = runTest {
+        // runCurrent()を挟まず即座に連続呼び出しした場合の競合窓を検証する
+        // （Gate4再指摘：最初のコルーチンが走り出す前はisSubmittingFeedbackがまだtrueに
+        //   なっていない可能性があったため、その窓を突くケースを直接固定する）。
+        val repo = FakeDiscoveryRepository(FakeScenario.NORMAL, enableArtificialDelay = false)
+        val recording = RecordingHypothesisFeedbackRepository(repo, delayMillis = 1_000)
+        val state = createState(recording)
+        try {
+            state.loadDiscovery()
+            advanceUntilIdle()
+
+            // 3回とも同一ディスパッチャtickの中で、間にrunCurrent()を挟まず連続呼び出しする。
+            state.sendHypothesisFeedback(HypothesisReaction.AGREE)
+            state.sendHypothesisFeedback(HypothesisReaction.AGREE)
+            state.sendHypothesisFeedback(HypothesisReaction.AGREE)
+            advanceUntilIdle()
+
+            assertEquals(1, recording.callCount)
+            assertFalse(state.discoveryState.value.isSubmittingFeedback)
+        } finally {
+            state.close()
+        }
+    }
+
+    @Test
+    fun sendHypothesisFeedback_onFailure_emitsMessageAndResetsSubmittingFlag() = runTest {
+        val repo = FakeDiscoveryRepository(FakeScenario.NORMAL, enableArtificialDelay = false)
+        val state = createState(FailingOnHypothesisFeedbackRepository(repo))
+        try {
+            state.loadDiscovery()
+            advanceUntilIdle()
+
+            var message: String? = null
+            val collectJob = launch { state.messages.collect { message = it } }
+
+            state.sendHypothesisFeedback(HypothesisReaction.AGREE)
+            advanceUntilIdle()
+
+            assertEquals("feedback failed", message)
+            assertFalse(state.discoveryState.value.isSubmittingFeedback)
+            collectJob.cancel()
+        } finally {
+            state.close()
+        }
+    }
 }
 
 private class FailingOnSelectRepository(delegate: DiscoveryRepository) : DiscoveryRepository by delegate {
@@ -309,6 +450,37 @@ private class FailingOnSelectRepository(delegate: DiscoveryRepository) : Discove
 private class FailingOnStartRepository(delegate: DiscoveryRepository) : DiscoveryRepository by delegate {
     override suspend fun startExperiment(experimentId: String) {
         throw DiscoveryApiException("start failed")
+    }
+}
+
+private class FailingOnHypothesisFeedbackRepository(
+    delegate: DiscoveryRepository
+) : DiscoveryRepository by delegate {
+    override suspend fun sendHypothesisFeedback(
+        hypothesisId: Int,
+        reaction: HypothesisReaction
+    ): HypothesisFeedbackOutcome {
+        throw DiscoveryApiException("feedback failed")
+    }
+}
+
+/** 送信中(isSubmittingFeedback)の多重送信防止を検証するための、呼び出し回数記録＋遅延注入デコレータ。 */
+private class RecordingHypothesisFeedbackRepository(
+    private val delegate: DiscoveryRepository,
+    private val delayMillis: Long = 0L
+) : DiscoveryRepository by delegate {
+    var callCount = 0
+        private set
+
+    override suspend fun sendHypothesisFeedback(
+        hypothesisId: Int,
+        reaction: HypothesisReaction
+    ): HypothesisFeedbackOutcome {
+        callCount++
+        if (delayMillis > 0) {
+            delay(delayMillis)
+        }
+        return delegate.sendHypothesisFeedback(hypothesisId, reaction)
     }
 }
 
