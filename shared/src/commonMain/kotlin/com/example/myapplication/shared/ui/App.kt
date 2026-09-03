@@ -14,7 +14,9 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.example.myapplication.shared.db.DatabaseDriverFactory
+import com.example.myapplication.shared.discovery.DiscoverySettingsStorage
 import com.example.myapplication.shared.discovery.DiscoveryState
+import com.example.myapplication.shared.discovery.InMemoryDiscoverySettingsStorage
 import com.example.myapplication.shared.discovery.RealDiscoveryRepository
 import com.example.myapplication.shared.ui.discovery.DiscoveryMainScaffold
 import com.example.myapplication.shared.ui.discovery.DiscoveryResultScreen
@@ -33,13 +35,19 @@ import kotlinx.serialization.Serializable
 @Composable
 fun App(
     driverFactory: DatabaseDriverFactory? = null,
+    discoverySettingsStorage: DiscoverySettingsStorage = InMemoryDiscoverySettingsStorage(),
+    enableDiscoveryHttpLogging: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     MaterialTheme {
         val scope = rememberCoroutineScope()
         val discoveryState = remember {
             DiscoveryState(
-                RealDiscoveryRepository(baseUrl = "http://localhost:8000"),
+                RealDiscoveryRepository(
+                    baseUrl = "http://localhost:8000",
+                    settingsStorage = discoverySettingsStorage,
+                    enableHttpLogging = enableDiscoveryHttpLogging
+                ),
                 scope
             )
         }
@@ -64,8 +72,9 @@ fun App(
                 DiscoveryMainScaffold(
                     discoveryState = discoveryState,
                     onStartExperiment = { experiment ->
-                        discoveryState.selectExperiment(experiment.id)
-                        navController.navigate(DiscoveryDetail) { launchSingleTop = true }
+                        discoveryState.selectExperiment(experiment) {
+                            navController.navigate(DiscoveryDetail) { launchSingleTop = true }
+                        }
                     },
                     onViewDiscoveryDetail = {
                         discoveryState.loadDiscovery()
@@ -76,15 +85,14 @@ fun App(
 
             // 2. 実験詳細画面
             composable<DiscoveryDetail> {
-                val homeState by discoveryState.homeState.collectAsState()
-                val experiment = homeState.homeData?.featuredExperiment
-                    ?: homeState.homeData?.todayExperiments?.firstOrNull()
-                if (experiment != null) {
+                val selectedExperiment by discoveryState.selectedExperiment.collectAsState()
+                if (selectedExperiment != null) {
                     ExperimentDetailScreen(
-                        experiment = experiment,
+                        experiment = selectedExperiment!!,
                         onStartExperiment = {
-                            discoveryState.startExperiment(experiment)
-                            navController.navigate(DiscoveryRunning) { launchSingleTop = true }
+                            discoveryState.startExperiment {
+                                navController.navigate(DiscoveryRunning) { launchSingleTop = true }
+                            }
                         },
                         onBack = { navController.popBackStack() }
                     )
@@ -129,8 +137,9 @@ fun App(
                 DiscoveryResultScreen(
                     discoveryState = discoveryUiState,
                     onTryNext = { nextExp ->
-                        discoveryState.selectExperiment(nextExp.id)
-                        navController.navigate(DiscoveryDetail) { launchSingleTop = true }
+                        discoveryState.selectExperiment(nextExp) {
+                            navController.navigate(DiscoveryDetail) { launchSingleTop = true }
+                        }
                     },
                     onBackHome = {
                         navController.popBackStack(DiscoveryHome, inclusive = false)

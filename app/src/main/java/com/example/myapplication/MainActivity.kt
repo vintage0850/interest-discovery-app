@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import com.example.myapplication.shared.db.AndroidDatabaseDriverFactory
+import com.example.myapplication.shared.discovery.AndroidDiscoverySettingsStorage
 import com.example.myapplication.shared.ui.App
 
 class MainActivity : ComponentActivity() {
@@ -13,8 +14,13 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val driverFactory = AndroidDatabaseDriverFactory(application)
+        val discoverySettingsStorage = AndroidDiscoverySettingsStorage.get(application)
         setContent {
-            App(driverFactory)
+            App(
+                driverFactory,
+                discoverySettingsStorage,
+                enableDiscoveryHttpLogging = BuildConfig.DEBUG
+            )
         }
     }
 }

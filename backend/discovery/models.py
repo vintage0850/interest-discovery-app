@@ -341,6 +341,9 @@ class BehaviorSummary(SQLModel):
     duration_ratio_high: list[int]
     duration_ratio_very_high: list[int]
     discrepancies: list[dict[str, Any]]
+    total_minutes_spent: int
+    domain_experiment_counts: dict[str, int]
+    domain_completed_counts: dict[str, int]
 
 
 class SessionSummary(SQLModel):

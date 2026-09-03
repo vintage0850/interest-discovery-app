@@ -31,19 +31,26 @@ def build_behavior_summary(
     skipped_experiments = 0
     duration_ratio_high: list[int] = []
     duration_ratio_very_high: list[int] = []
+    total_minutes_spent = 0
+    domain_experiment_counts: dict[str, int] = defaultdict(int)
+    domain_completed_counts: dict[str, int] = defaultdict(int)
 
     completed_results: list[ExperimentResult] = []
     result_by_experiment_id: dict[int, ExperimentResult] = {r.experiment_id: r for r in results}
 
     for experiment in experiments:
+        domain_experiment_counts[experiment.domain] += 1
+
         if experiment.status == ExperimentStatus.COMPLETED.value:
             completed_experiments += 1
+            domain_completed_counts[experiment.domain] += 1
             if experiment.id in result_by_experiment_id:
                 completed_results.append(result_by_experiment_id[experiment.id])
         elif experiment.status == ExperimentStatus.SKIPPED.value:
             skipped_experiments += 1
 
         if experiment.status == ExperimentStatus.COMPLETED.value and experiment.actual_minutes is not None:
+            total_minutes_spent += experiment.actual_minutes
             ratio = experiment.actual_minutes / experiment.planned_minutes
             if ratio >= _DURATION_RATIO_VERY_HIGH:
                 duration_ratio_very_high.append(experiment.id)
@@ -76,6 +83,9 @@ def build_behavior_summary(
         duration_ratio_high=duration_ratio_high,
         duration_ratio_very_high=duration_ratio_very_high,
         discrepancies=discrepancies,
+        total_minutes_spent=total_minutes_spent,
+        domain_experiment_counts=dict(domain_experiment_counts),
+        domain_completed_counts=dict(domain_completed_counts),
     )
 
 

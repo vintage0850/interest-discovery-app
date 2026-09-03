@@ -151,6 +151,76 @@ class TestBehaviorSummary:
         summary = build_behavior_summary([], experiments, [])
         assert summary.duration_ratio_high == []
 
+    def test_total_minutes_spent_sums_completed_experiments(self) -> None:
+        experiments = [
+            Experiment(
+                id=1,
+                session_id=1,
+                title="Try coding",
+                description="desc",
+                domain=DomainType.TECH.value,
+                planned_minutes=10,
+                status=ExperimentStatus.COMPLETED.value,
+                actual_minutes=12,
+            ),
+            Experiment(
+                id=2,
+                session_id=1,
+                title="Try painting",
+                description="desc",
+                domain=DomainType.ART.value,
+                planned_minutes=5,
+                status=ExperimentStatus.COMPLETED.value,
+                actual_minutes=8,
+            ),
+            Experiment(
+                id=3,
+                session_id=1,
+                title="Skipped one",
+                description="desc",
+                domain=DomainType.ART.value,
+                planned_minutes=5,
+                status=ExperimentStatus.SKIPPED.value,
+            ),
+        ]
+        summary = build_behavior_summary([], experiments, [])
+        assert summary.total_minutes_spent == 20
+
+    def test_domain_experiment_and_completed_counts(self) -> None:
+        experiments = [
+            Experiment(
+                id=1,
+                session_id=1,
+                title="Try coding",
+                description="desc",
+                domain=DomainType.TECH.value,
+                planned_minutes=10,
+                status=ExperimentStatus.COMPLETED.value,
+                actual_minutes=10,
+            ),
+            Experiment(
+                id=2,
+                session_id=1,
+                title="Try more coding",
+                description="desc",
+                domain=DomainType.TECH.value,
+                planned_minutes=10,
+                status=ExperimentStatus.GENERATED.value,
+            ),
+            Experiment(
+                id=3,
+                session_id=1,
+                title="Try painting",
+                description="desc",
+                domain=DomainType.ART.value,
+                planned_minutes=5,
+                status=ExperimentStatus.SKIPPED.value,
+            ),
+        ]
+        summary = build_behavior_summary([], experiments, [])
+        assert summary.domain_experiment_counts == {"tech": 2, "art": 1}
+        assert summary.domain_completed_counts == {"tech": 1}
+
     def test_discrepancy_between_signals_and_results(self) -> None:
         signals = [
             InterestSignal(
