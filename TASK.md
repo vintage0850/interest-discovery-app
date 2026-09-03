@@ -3280,8 +3280,8 @@ AGENTS.mdのルール上、Claudeは通常実装を担当しない。指摘1〜3
 
 ## 案件16：Mikke設計書ギャップ対応（P1）— オンボーディング（Welcome→基本情報→初期自己理解チェック）
 
-**状態:** `仕様確定・Kimiへ実装依頼中（Phase 1のみ）`
-**担当:** Kimi（実装）
+**状態:** `Phase 1完了・Claudeへ引き継ぎ待ち（案件15コミット後にPhase 2）`
+**担当:** Claude（Phase 2：バックエンド連携・App.kt配線・RealDiscoveryRepository拡張）
 **並行作業について（重要）:** 案件15は`backend/discovery/models.py`・`repository.py`・`router.py`と`shared/.../RealDiscoveryRepository.kt`が**現在まさに未コミットでCodex Gate4再々レビュー中**。この4ファイルに今Kimiが触れるとAGENTS.md「同じファイルを2人以上が同時に編集しない」に抵触し、Claudeのコミット作業と衝突する。そのため本案件は2フェーズに分割する。
 
 - **Phase 1（今すぐ着手可・対象ファイルの衝突なし）:** 下記「Androidクライアント」節のうち、新規ディレクトリ`ui/onboarding/`配下の3画面と、新規ファイル`OnboardingStorage.kt`／`OnboardingStorage.android.kt`のみ。バックエンド連携（`RealDiscoveryRepository`呼び出し）は行わず、ダミーのコールバック（`onComplete: () -> Unit`等）で画面遷移だけ完結させる。
@@ -3349,4 +3349,85 @@ AGENTS.mdのルール上、Claudeは通常実装を担当しない。指摘1〜3
 - **Phase 1（今回対象・競合なし）:** `shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/onboarding/`配下の新規Composable3画面、新規`OnboardingStorage.kt`（`shared/.../discovery/`と同じ層でよい）、`OnboardingStorage.android.kt`（新規）。これらは案件15が触れていない完全新規ファイルなので、今すぐ着手してよい。
 - **Phase 2（次回・案件15コミット後）:** `backend/discovery/models.py`／`repository.py`／`router.py`（案件15が現在まさに未コミットで編集中、触らないこと）、`shared/.../RealDiscoveryRepository.kt`（同上）、`shared/.../ui/App.kt`（NavHostへのオンボーディングルート追加）。
 
-**次の担当: Kimi（Phase 1のみ）。** 上記「Androidクライアント」節のうち新規ファイルだけをTDDで実装すること。画面遷移は`onComplete: () -> Unit`のような単純なコールバックで完結させ、バックエンド呼び出しは行わないこと（`RealDiscoveryRepository`・`App.kt`には一切触れない）。完了後、本節に作業履歴（変更ファイル・テスト結果）を追記し、次の担当をClaude（Phase 2の設計判断・案件15コミット後の配線担当）として引き継ぐこと。バックエンドのスキーマ拡張とAndroid配線（Phase 2）は、案件15がコミットされた後に別途依頼する。
+### 作業履歴（Phase 1）
+
+**実装担当:** Kimi  
+**完了日:** 2026-09-04  
+**コミット:** 未コミット（変更は作業ツリーにあり）
+
+#### 変更ファイル一覧
+
+**新規（commonMain）:**
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/onboarding/OnboardingWelcomeScreen.kt`
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/onboarding/OnboardingBasicInfoScreen.kt`
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/onboarding/OnboardingSelfCheckScreen.kt`
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/onboarding/OnboardingBasicInfoState.kt`
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/onboarding/OnboardingSelfCheckState.kt`
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/OnboardingStorage.kt`
+
+**新規（androidMain）:**
+- `shared/src/androidMain/kotlin/com/example/myapplication/shared/discovery/OnboardingStorage.android.kt`
+
+**新規（テスト）:**
+- `shared/src/commonTest/kotlin/com/example/myapplication/shared/discovery/OnboardingStorageTest.kt`
+- `shared/src/commonTest/kotlin/com/example/myapplication/shared/ui/onboarding/OnboardingBasicInfoStateTest.kt`
+- `shared/src/commonTest/kotlin/com/example/myapplication/shared/ui/onboarding/OnboardingSelfCheckStateTest.kt`
+
+**未変更（Phase 2でClaudeが対応）:**
+- `backend/discovery/models.py`
+- `backend/discovery/repository.py`
+- `backend/discovery/router.py`
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/RealDiscoveryRepository.kt`
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/App.kt`
+
+#### TDD実施状況
+
+- **RED→GREENを実施済み。**
+  - `OnboardingStorageTest`：未存在クラス参照でコンパイルエラー（RED）→ インターフェース＋InMemory/Android実装でpass（GREEN）。
+  - `OnboardingBasicInfoStateTest`：未存在クラス参照でコンパイルエラー（RED）→ `OnboardingBasicInfoState`実装でpass（GREEN）。
+  - `OnboardingSelfCheckStateTest`：未存在クラス参照でコンパイルエラー（RED）→ `OnboardingSelfCheckState`実装でpass（GREEN）。
+- **注意:** プロジェクトにCompose UIテストの依存が存在しなかったため、`build.gradle.kts`は変更せず、画面の状態ロジックを`OnboardingBasicInfoState`/`OnboardingSelfCheckState`に切り出してユニットテストでTDDした。Welcome画面はテキスト＋ボタンのみのため、状態クラスは持たない。
+
+#### テスト結果
+
+```
+./gradlew :shared:testDebugUnitTest
+BUILD SUCCESSFUL
+```
+
+- `OnboardingStorageTest`：2件 pass
+- `OnboardingBasicInfoStateTest`：6件 pass
+- `OnboardingSelfCheckStateTest`：6件 pass
+- 既存のDiscoveryテストスイート（Kotlin側）もすべて pass、リグレッションなし。
+
+#### 実装詳細
+
+- `OnboardingStorage`：`hasCompletedOnboarding(): Boolean` / `markCompleted()` のみ。`DiscoverySettingsStorage`と同じパターン。
+- `OnboardingWelcomeScreen`：設計書§7の説明文＋「はじめる」ボタン。`onNext: () -> Unit`。
+- `OnboardingBasicInfoScreen`：ニックネーム（自由入力）、年齢層・学年・興味タグ（チップ選択）。すべてスキップ可能。「次へ」で `onNext(OnboardingBasicInfo)` を呼び出す。
+- `OnboardingSelfCheckScreen`：5件法5問。5問未回答時は「はじめる」ボタン無効。全回答後に平均点を `onComplete(Float)` で返す。
+
+#### Phase 2 引き継ぎ事項（Claude対応）
+
+1. 案件15のコミットを `git log` または本ファイルで確認してから着手すること。
+2. `backend/discovery/models.py` に `nickname`, `age_range`, `school_stage`, `optional_interests`, `initial_self_understanding_score` を追加（後方互換optional）。
+3. `RealDiscoveryRepository.kt` に `completeOnboarding(...)` を追加し、`ensureSession()` 呼び出し順序に注意（未完了時に空のセッションが先に作られないよう設計要）。
+4. `App.kt` に `OnboardingWelcome`/`OnboardingBasicInfo`/`OnboardingSelfCheck` の3ルートを追加し、`OnboardingStorage`を注入。`startDestination`をオンボーディング完了状態で分岐。
+5. 画面からのコールバックを `OnboardingStorage.markCompleted()` と `RealDiscoveryRepository.completeOnboarding(...)` に繋ぐ。
+
+#### 設計判断メモ
+
+- **セッション作成順序:** 現在の`ensureSession()`は他の全メソッドから呼ばれるため、オンボーディング未完了時に空セッションが作成されるリスクがある。Phase 2では「オンボーディング完了後に初めてセッションを作成/更新する」か、「既存セッションに追加情報を更新する専用APIを設ける」かをClaudeが判断すること。
+- **Compose UIテスト:** 本Phaseでは`build.gradle.kts`に依存を追加せず、状態クラスのユニットテストでTDDを回した。Phase 2でUIテストを追加する場合は別途`compose.uiTest`の導入を検討。
+
+**次の担当: Claude（Phase 2）。** 案件15コミット後、上記「Phase 2 引き継ぎ事項」を実施すること。
+
+### インシデント記録: KimiのPhase1並行実行中にApp.ktの未コミット修正が消失（Claude、2026-09-04）
+
+案件15コミット直後、案件16のオンボーディング機能とは無関係な独立バグ修正として、`App.kt`の`snackbarHostState`未配線バグ（`_messages`のエラー通知が`SnackbarHost`未配置のため画面に一切表示されない）をClaudeが発見・修正した。この修正をコンパイル確認中に、上記Kimiへ案件16 Phase 1を並行ディスパッチした。
+
+Kimiの完了後、`App.kt`が**コミット済みHEADの状態に巻き戻っており**（`git diff`で差分なし、`git status`にも出ない）、Claudeの未コミット修正が消えていたことが判明した。Kimiの作業履歴（上記）には`App.kt`を「未変更」と明記されており、Kimi自身が意図的に編集した形跡はない。`kimi-task.ps1`は非対話実行のため`--dangerously-skip-permissions`で動作しており、セッション冒頭で何らかのワークスペース初期化操作（`git checkout --` 等）が確認プロンプトなしに実行され、Claudeの未コミット差分を巻き込んだ可能性が高いが、保存される結果JSONには圧縮された最終サマリーのみが含まれ個々のツール呼び出しの記録がないため、正確な原因コマンドは特定できなかった。
+
+`App.kt`以外の追跡ファイル（バックエンド・discoveryモジュール等）への影響は`git diff --stat`で確認した限り無かった。修正を再適用し、即座にコミット（`d0c031f`）することで再発を防いだ。
+
+**教訓:** 未コミットの変更を抱えたままKimiを並行ディスパッチする場合、プロンプトで「このファイルは触らないで」と指示するだけでは、Kimi自身が意図的に編集しなくても`--dangerously-skip-permissions`下の初期化操作等で巻き込まれて消失するリスクがある。今後は、Kimiを並行ディスパッチする前にClaude側の未コミット変更を先にコミットしておくこと。
