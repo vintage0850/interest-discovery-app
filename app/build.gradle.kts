@@ -120,7 +120,14 @@ dependencies {
     ksp(libs.androidx.room.compiler)
     
     // WorkManager
-    implementation(libs.androidx.work.runtime.ktx)
+    // work-runtime-ktx transitively pins androidx.concurrent:concurrent-futures(-ktx) to
+    // {strictly 1.1.0}, which conflicts with Espresso 3.7.0 / androidx.test:junit 1.2.1's
+    // {strictly 1.2.0}. Exclude work's pin and declare our own version below.
+    implementation(libs.androidx.work.runtime.ktx) {
+        exclude(group = "androidx.concurrent", module = "concurrent-futures")
+        exclude(group = "androidx.concurrent", module = "concurrent-futures-ktx")
+    }
+    implementation(libs.androidx.concurrent.futures.ktx)
 
     // Google 認可（AuthorizationClient で Calendar スコープの認可コードを取得する）
     implementation(libs.play.services.auth)
@@ -146,7 +153,11 @@ dependencies {
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     // WorkManager のテスト用（TestListenableWorkerBuilder）。Robolectric を導入していないため androidTest 側に置く
-    androidTestImplementation(libs.androidx.work.testing)
+    androidTestImplementation(libs.androidx.work.testing) {
+        exclude(group = "androidx.concurrent", module = "concurrent-futures")
+        exclude(group = "androidx.concurrent", module = "concurrent-futures-ktx")
+    }
+    androidTestImplementation(libs.androidx.concurrent.futures.ktx)
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 }
