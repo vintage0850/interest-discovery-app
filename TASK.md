@@ -3036,6 +3036,6 @@ AGENTS.mdのルール上、Claudeは通常実装を担当しない。指摘1〜3
 - **実行コマンドと結果:**
   - `cd backend && python -m pytest -q` → **125 passed, 5 warnings**
   - `./gradlew :shared:testDebugUnitTest --tests "com.example.myapplication.shared.discovery.*"` → **BUILD SUCCESSFUL**（34 tests passed：元24件＋新規5件＋修正1件を含む）
-- **コミット:** `19c28eb`
+- **コミット:** `79d66e9`
 
 **次の担当: Codex（Gate4再レビュー）。**
