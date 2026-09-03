@@ -2932,3 +2932,16 @@ devtunnel host -p 8000 --allow-anonymous
 **結論:** Webhook受信（follow）・署名検証・リマインダー作成・スケジューラによる自動送信・Push配信まで、エンドツーエンド全て実機（実LINEアカウント）で動作確認済み。
 
 **次の担当: Codex（Gate4）。** `docs/superpowers/plans/2026-09-03-line-reminder-integration.md`のTask 1〜6の実装（コミット`efdeb73`〜`5674be7`）と、本節の実地検証結果を確認し、品質判定（PASS / CHANGES REQUIRED / ESCALATE）を行うこと。
+
+### Gate 4品質判定（Codex / 2026-09-03）
+
+**判定: CHANGES REQUIRED**
+
+- 独立実行した `cd backend && python -m pytest -v` は **123 passed, 5 warnings**（終了コード0）。
+- Webhook受信、follow保存、Push配信後のSENT確認という実地検証記録は、コードの正常系フローと矛盾しない。
+- ただし、異なる`line_user_id`のfollowで複数行を作成でき、MVP要件の「LINEアカウントは常に1件」を保証していない。
+- `scheduled_at`はtimezoneなしや非UTCオフセットも受理し、設計の「UTC、Zサフィックス必須」を満たしていない。
+- `mark_sent` / `mark_failed`がPROCESSING以外からも状態を上書きでき、計画の状態遷移制約がリポジトリ境界で保証されていない。
+- SENT取消409、SENT再処理禁止、異なるIDの単一行維持など、設計で要求された回帰テストにも不足がある。
+- 詳細: `docs/quality-review/2026-09-03-line-reminder-integration.md`
+- `backend/.env`は参照せず、認証情報を出力・文書化していない。
