@@ -2910,3 +2910,25 @@ $ cd backend && python -m pytest -v
 - `5674be7` feat(line): wire line module into main.py and start the reminder scheduler
 
 次の担当: Claude。ngrok経由でのWebhook実地検証を実施すること。
+
+### Claudeによる実地検証（2026-09-03）
+
+**トンネル方式の変更（ngrok→devtunnel）:** ngrokの実行ファイル（winget版・公式サイト直接ダウンロード版とも）がこの開発機のWindows Defenderに検疫されたため、代わりにMicrosoft公式の`devtunnel`（`winget install Microsoft.devtunnel`）を使用した。ユーザーは既にGitHubアカウントでログイン済みだったため追加認証不要だった。
+
+```
+devtunnel host -p 8000 --allow-anonymous
+```
+
+公開URL: `https://434b6f6r-8000.jpe1.devtunnels.ms`（一時的なもの。セッション終了で失効する）
+
+**Webhook登録・検証:**
+- LINE Developers Consoleの「Messaging API設定」で上記URL+`/api/webhooks/line`を登録、「検証」ボタンで200 OKを確認（バックエンドログにも記録）
+- 「Webhookの利用」トグルON、LINE Official Account Manager側の「応答設定」（`Webhook: ON`, `チャット: OFF`, `応答メッセージ: OFF`）も確認、問題なし
+
+**followイベントのつまずき（記録）:** 最初の友だち追加操作では`line_account`テーブルに何も保存されなかった。原因は「このLINE公式アカウントに既に友だち登録済みだったため、再度QRコードを読んでも新規`follow`イベントが発火しなかった」こと。LINEアプリで一度ブロック→ブロック解除（実質的な削除→再追加）した後、`follow`イベントが正しく届き、`line_user_id`が保存された。**今後、同様の実地検証を行う際はこの点に注意すること。**
+
+**Push配信の実地確認:** `POST /reminders`で30秒後に配信されるテストリマインダーを作成 → 60秒間隔のスケジューラが処理 → `GET /reminders`で`status: SENT`、`sent_at`が記録されたことを確認 → ユーザーが実際にLINEアプリでメッセージを受信したことを報告。
+
+**結論:** Webhook受信（follow）・署名検証・リマインダー作成・スケジューラによる自動送信・Push配信まで、エンドツーエンド全て実機（実LINEアカウント）で動作確認済み。
+
+**次の担当: Codex（Gate4）。** `docs/superpowers/plans/2026-09-03-line-reminder-integration.md`のTask 1〜6の実装（コミット`efdeb73`〜`5674be7`）と、本節の実地検証結果を確認し、品質判定（PASS / CHANGES REQUIRED / ESCALATE）を行うこと。
