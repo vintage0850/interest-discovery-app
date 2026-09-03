@@ -3431,3 +3431,17 @@ Kimiの完了後、`App.kt`が**コミット済みHEADの状態に巻き戻っ�
 `App.kt`以外の追跡ファイル（バックエンド・discoveryモジュール等）への影響は`git diff --stat`で確認した限り無かった。修正を再適用し、即座にコミット（`d0c031f`）することで再発を防いだ。
 
 **教訓:** 未コミットの変更を抱えたままKimiを並行ディスパッチする場合、プロンプトで「このファイルは触らないで」と指示するだけでは、Kimi自身が意図的に編集しなくても`--dangerously-skip-permissions`下の初期化操作等で巻き込まれて消失するリスクがある。今後は、Kimiを並行ディスパッチする前にClaude側の未コミット変更を先にコミットしておくこと。
+
+### 案件16 Phase 2：設計判断＋並行ディスパッチ（Claude、2026-09-04）
+
+**設計判断（セッション作成順序）:** 「既存セッションに追加情報を更新する専用APIを設ける」方式を採用する。`ensureSession()`の呼び出し順序・memoization自体は変更しない（既存の全メソッドが依存しており、リオーダーはリスクが高い）。代わりに新規エンドポイント`PATCH /sessions/{id}/onboarding`を追加し、`completeOnboarding(...)`は`ensureSession()`で（未作成なら`student_label`のみの）セッションを確保した上でこのエンドポイントへPATCHする。既存セッションが既にあってもなくても安全に動作する。
+
+**API契約（バックエンド⇔Kotlin間で固定。担当を分けるため厳守）:**
+- `PATCH /sessions/{id}/onboarding` → body: `OnboardingUpdateRequest`（全フィールドoptional）: `nickname: str|null`, `age_range: str|null`, `school_stage: str|null`, `optional_interests: list[str]|null`, `initial_self_understanding_score: float|null`。response: 既存`SessionResponse`に同フィールドを追加したもの。
+- `DiscoverySession`テーブルに同5フィールドをoptional列として追加（`optional_interests`はJSON文字列として保存）。
+- Kotlin側`OnboardingUpdateRequest`は camelCase（`ageRange`等）。`RealDiscoveryRepository`の`Json{}`は`JsonNamingStrategy.SnakeCase`設定済みなので自動変換される。
+
+**並行ディスパッチ（今回、ユーザー承認済み）:**
+- **Kimi → 案件a（バックエンド）:** `backend/discovery/models.py`（列追加）／`repository.py`（`update_onboarding_info`）／`router.py`（`PATCH /sessions/{id}/onboarding`）。TDD必須。Kotlin側ファイルには触れない。
+- **Antigravity → 案件b/c（Kotlin側）:** `DiscoveryRepository`インターフェースに`completeOnboarding(...)`追加、`RealDiscoveryRepository`に実装、`FakeDiscoveryRepository`にフェイク実装、`DiscoveryState`に`completeOnboarding(...)`ラッパー追加（他メソッドと同じ`scope.launch`+`_messages`パターン）、`App.kt`にオンボーディング3ルート追加・`OnboardingStorage`注入・`startDestination`分岐。バックエンドファイルには触れない。
+- **前回の教訓を反映:** ディスパッチ前に未コミット差分をゼロにした（コミット`85eb076`）。両エージェント完了後、`git status`/`git diff --stat`をリポジトリ全体で確認してから次の作業に進むこと。
