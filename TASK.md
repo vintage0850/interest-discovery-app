@@ -2665,7 +2665,7 @@ TypeScriptエラーなし（未使用importチェック含む）、Vite本番ビ
 
 ## 案件12：興味発見（Discovery）機能の実データ化 — 中核ループ（`discovery-backend`ブランチ）
 
-**状態:** `設計・計画確定・実装中`
+**状態:** `設計・計画確定・実装中` → `Gate4差し戻し3回` → **`完了（Gate 4 PASS）`**（2026-09-04）
 **担当:** Claude（設計裁定・作業分割）→ Kimi（Task 1〜3）→ Codex（Task 4〜6、実装として投入）→ Claude（独立検証）→ Codex（Gate4）
 
 ### 依頼内容
@@ -2782,6 +2782,106 @@ adb reverse tcp:8000 tcp:8000
 **次の担当: ユーザー確認継続。** ホーム画面から実験を選択→開始→タイマー→振り返り→完了までの一連の操作を試し、問題が無ければ案件12をGate4（Codex）へ進める。
 
 **案件12は一旦保留。** ユーザー指示により、案件13（LINEリマインダー連携）を優先する。
+
+### ユーザーによる実機確認完了（2026-09-03、Claudeが代理で記録）
+
+ユーザーから「12は実機確認済み」との報告があった（ホーム画面から実験を選択→開始→タイマー→振り返り→完了までの一連の操作）。詳細な確認手順・所見はユーザーからは特に追加報告なし。
+
+**次の担当: Codex（Gate4）。** Task 1〜6の実装（コミット`94aa4a3`〜`2f2ceaf`、および実機確認中に見つかった不具合修正コミット`081090b`・`f16e23c`・`2f2ceaf`）に対し、品質判定（PASS / CHANGES REQUIRED / ESCALATE）を行うこと。
+
+### Gate 4品質判定（Codex / 2026-09-03）
+
+**判定: CHANGES REQUIRED**
+
+- ユーザーによる実機の正常系（実験選択→開始→タイマー→振り返り→完了）確認済み記録を採用した。
+- Codex独立検証: `cd backend && python -m pytest -q` → **125 passed, 6 warnings in 32.75s**（終了コード0）。
+- 先頭以外の候補を選ぶと、APIへ送る選択IDと詳細画面・開始対象が一致しない。
+- `select`と`start`が別coroutineで順序保証されず、失敗も握り潰すため、API失敗後もUIだけタイマー・振り返りへ進み得る。
+- 既定Ktor clientの`LogLevel.ALL`がリリースでも有効で、セッション・実験・評価値等の本文をログ出力し得る。
+- 4xx/5xx、先頭以外の候補、select/start順序・失敗、実機不具合修正`081090b`の回帰テストが不足している。
+- 詳細: `docs/quality-review/2026-09-03-discovery-core-loop-integration.md`
+
+**次の担当: Discovery UI/state/repository実装担当（原則Kimi。設計判断が必要な場合はClaude）。** 選択対象を詳細・開始まで一貫して保持し、select/start成功後のみ画面を進め、失敗をUIへ通知すること。HTTP本文ログをdebug限定または無効化し、必要な回帰テストをTDDで追加後、CodexへGate 4再レビューを依頼する。
+
+### Gate 4 CHANGES REQUIRED対応（Kimi依頼、2026-09-03）
+
+Gate 4指摘の4点をKimiに修正依頼した:
+
+1. 選択した`Experiment`と詳細・開始対象のID不一致（`DiscoveryState.kt`で選択対象を一貫保持する）
+2. `select`→`start`の順序保証がなく失敗もUIへ反映されない
+3. `RealDiscoveryRepository`のKtor既定`LogLevel.ALL`がリリースでもHTTP本文を出力しうる
+4. 先頭以外の候補・select/start順序失敗・4xx/5xx・実機不具合`081090b`回帰の各テスト不足
+
+対象ファイル（想定）: `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/DiscoveryState.kt`, `RealDiscoveryRepository.kt`, `shared/src/commonTest/kotlin/com/example/myapplication/shared/discovery/DiscoveryStateTest.kt`, `RealDiscoveryRepositoryTest.kt`。
+
+**次の担当: Kimi。** 修正後、Discovery関連Gradleテスト・`./gradlew :app:assembleDebug`/`assembleRelease`・`cd backend && python -m pytest -q`・`git diff --check`を実行し、本節に作業履歴を追記のうえCodexへGate 4再レビューを依頼する。
+
+#### 作業履歴（Kimi実装、Claude検証・仕上げ、2026-09-03）
+
+Kimiが4点を実装（ファイル編集完了は15:52）したが、その後の検証コマンド実行時にKimiのセッションが非対話モードでハングし応答が返らなくなった（約7時間無応答、`kimi-task.ps1`の30分タイムアウトも効かず）。TaskStopで強制終了し、Claudeが残された差分を独立検証した。
+
+**変更ファイル:**
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/DiscoveryState.kt`: `selectedExperiment`をStateFlowで保持。`selectExperiment(experiment, onSuccess)`・`startExperiment(onSuccess)`を`actionMutex`で直列化し、選択対象を一貫保持。失敗時は`onSuccess`を呼ばず`_messages`へエラー通知。
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/RealDiscoveryRepository.kt`: `enableHttpLogging: Boolean = false`パラメータを追加し、`defaultDiscoveryHttpClient`のKtor `Logging`プラグインをフラグがtrueの時のみ`install`（既定は無効）。`App.kt`側は既に`enableDiscoveryHttpLogging = BuildConfig.DEBUG`で配線済み。
+- `shared/src/commonTest/.../DiscoveryStateTest.kt`: `selectExperiment_keepsSelectedExperimentForNonFirstCandidate`等5件追加。
+- `shared/src/commonTest/.../RealDiscoveryRepositoryTest.kt`: 4xx/5xx応答、ログ有効/無効の6件追加。
+
+**Claudeによる独立検証（2026-09-03）:**
+
+| コマンド | 結果 |
+| --- | --- |
+| `./gradlew :shared:testDebugUnitTest --tests "com.example.myapplication.shared.discovery.*" --no-daemon` | BUILD SUCCESSFUL |
+| `./gradlew :shared:testDebugUnitTest --no-daemon`（全体回帰） | BUILD SUCCESSFUL |
+| `./gradlew :app:assembleDebug :app:assembleRelease --no-daemon` | BUILD SUCCESSFUL |
+| `cd backend && python -m pytest -q` | 125 passed, 5 warnings |
+| `git diff --check`（対象4ファイル） | 成功（警告なし） |
+
+**次の担当: Codex（Gate4再レビュー）。** 上記変更・検証結果を確認し、品質判定（PASS / CHANGES REQUIRED / ESCALATE）を行うこと。
+
+#### Gate 4再レビュー結果（Codex、2026-09-03）
+
+**判定: CHANGES REQUIRED**
+
+- 選択した `Experiment` を選択成功後に保持し、詳細表示・開始対象へ同一IDを引き継ぐ実装と、先頭以外の候補の回帰テストを確認した。
+- select成功後のみ詳細へ、start成功後のみタイマー・実行画面へ進み、失敗時は画面遷移を止めて `messages` へ通知する実装・失敗テストを確認した。
+- Ktor `Logging` は既定無効で、Androidは `BuildConfig.DEBUG`、iOSは `false` の配線となり、リリースでHTTP本文を出力しない構成とplugin有無のテストを確認した。
+- 4xx/5xx、`getHomeState()` 実データ取得、先頭以外の候補、select/start失敗、logging設定の回帰テストは追加済み。
+- ただし、遅延したselectの完了前にstartが先行しないこと、またはrepository呼び出し履歴が同一IDで厳密に `select` → `start` となることを直接検証するテストがない。前回指摘4「select/start順序の回帰テスト不足」が完全には解消していないためPASSにはできない。
+- Codex独立検証: `.\gradlew :shared:testDebugUnitTest --tests "com.example.myapplication.shared.discovery.*"` → **BUILD SUCCESSFUL**。`cd backend && python -m pytest -q` → **125 passed, 6 warnings in 22.87s**。対象4ファイルの `git diff --check` → 成功。
+- 詳細: `docs/quality-review/2026-09-03-discovery-core-loop-integration.md` の「Gate 4再レビュー（Codex / 2026-09-03）」。
+
+**次の担当: Kimi（テスト補完）→ Codex（Gate 4再々レビュー）。** `DiscoveryStateTest.kt` に遅延制御・呼び出し履歴を持つrepositoryを使ったselect完了前非遷移と `select:<id>` → `start:<same-id>` 順序の回帰テストを追加し、Discovery Gradleテスト成功後に再レビューを依頼する。production codeの追加修正は現時点では不要。
+
+#### テスト補完（Claude、2026-09-04）
+
+Kimiは残高不足（0.556 < 下限1）、Antigravityはヘッドレスモードで`command`権限・`read_file`権限がいずれも自動拒否され2回とも実行不可だったため、AGENTS.mdの「2回失敗したら止める」規則に従いClaudeが代行して追加した。
+
+**変更ファイル:**
+- `shared/src/commonTest/kotlin/com/example/myapplication/shared/discovery/DiscoveryStateTest.kt`: `RecordingRepository`（呼び出し履歴を記録し、`selectExperiment`に任意の遅延を注入できるフェイクrepository）を追加。
+  - `selectThenStart_callsRepositoryInOrderForSameExperiment`: 正常フローでrepository呼び出し順が`select:exp-2`→`start:exp-2`であることを検証。
+  - `startExperiment_doesNotRunAheadOfAnInFlightSelect`: selectを1000ms遅延させ、select完了前（`runCurrent()`でselectのコルーチンが遅延内で一時停止している状態）に`startExperiment`を呼んでも`start`のrepository呼び出しが発生しないこと・`runningState`が更新されないことを確認。その後selectが完了してから改めて`startExperiment`を呼ぶと正しく`select`→`start`の順で実行されることを確認。
+
+**実行コマンドと結果:**
+
+| コマンド | 結果 |
+| --- | --- |
+| `./gradlew :shared:testDebugUnitTest --tests "com.example.myapplication.shared.discovery.DiscoveryStateTest" --no-daemon` | BUILD SUCCESSFUL（13 tests） |
+| `./gradlew :shared:testDebugUnitTest --no-daemon`（全体回帰） | BUILD SUCCESSFUL |
+| `git diff --check`（対象ファイル） | 成功（警告なし） |
+
+**次の担当: Codex（Gate 4再々レビュー）。** 上記2件の追加テストが「select完了前にstartが先行しない」「同一IDでselect→startの順序」を検証していることを確認し、品質判定（PASS / CHANGES REQUIRED / ESCALATE）を行うこと。
+
+#### Gate 4再々レビュー結果（Codex、2026-09-04）
+
+**判定: PASS**
+
+- `selectThenStart_callsRepositoryInOrderForSameExperiment` は `exp-2` のrepository呼び出し履歴を `select:exp-2` → `start:exp-2` と完全一致で検証しており、順序と同一IDの両要件を直接固定している。
+- `startExperiment_doesNotRunAheadOfAnInFlightSelect` はselectを1,000msの仮想遅延中に保ってstart操作を呼び、その時点でstart呼び出しがなく `runningState.isRunning == false` であることを検証している。select完了後は同一IDの `select` → `start` とrunning状態への遷移も確認している。
+- 以上により、前回Gate 4再レビューで残った「select完了前にstartが先行しないこと」「同一IDでselect→startとなること」の回帰テスト不足は解消した。追加のブロッキング指摘はない。
+- Codex独立検証: `./gradlew :shared:testDebugUnitTest --tests "com.example.myapplication.shared.discovery.*"` → **BUILD SUCCESSFUL in 46s**（25 actionable tasks: 2 executed, 23 up-to-date、終了コード0）。初回は `C:\.gradle` のロック作成権限で失敗したため、既存のユーザーGradleキャッシュを指定して同一テストを再実行した。
+- 詳細: `docs/quality-review/2026-09-03-discovery-core-loop-integration.md` の「Gate 4再々レビュー（Codex / 2026-09-04）」。
+
+**次の担当: なし（Gate 4 PASSにより案件12完了）。**
 
 ## 案件13：LINEリマインダー連携（MVPスコープ、`backend/`）（`discovery-backend`ブランチ）
 
@@ -2946,6 +3046,19 @@ devtunnel host -p 8000 --allow-anonymous
 - 詳細: `docs/quality-review/2026-09-03-line-reminder-integration.md`
 - `backend/.env`は参照せず、認証情報を出力・文書化していない。
 
+### Gate 4 CHANGES REQUIRED対応（Antigravity依頼、2026-09-03）
+
+Kimiが案件12のGate4修正作業中のため、並列レーンとしてAntigravityに以下4点の修正をTDDで依頼した:
+
+1. 異なる`line_user_id`のfollowで複数行が作成されうる。MVP要件「LINEアカウントは常に1件」を`LineRepository`側で保証する（新規followで既存行を更新する、または一意制約＋upsertにする）。
+2. `scheduled_at`がtimezoneなし・非UTCオフセットも受理してしまう。設計どおり「UTC、Zサフィックス必須」をバリデーションで強制する。
+3. `mark_sent`/`mark_failed`がPROCESSING以外の状態からも上書きできてしまう。計画の状態遷移制約（`StateTransitionError`）をリポジトリ境界で保証する。
+4. SENT取消409・SENT再処理禁止・異なるIDでの単一行維持、の回帰テストを追加する。
+
+対象ファイル: `backend/line/repository.py`, `backend/line/models.py`, `backend/tests/test_line_repository.py`。詳細は`docs/quality-review/2026-09-03-line-reminder-integration.md`参照。
+
+**次の担当: Antigravity。** 修正後、`cd backend && python -m pytest -v`を実行し成功を確認した上で、本節に作業履歴を追記し、次の担当をCodex（Gate4再レビュー）として引き継ぐこと。
+
 ## 案件14：Discoveryアプリ実機動作確認 → ホーム画面キャッシュ未破棄バグ修正
 
 **状態:** `完了`
@@ -3039,3 +3152,18 @@ AGENTS.mdのルール上、Claudeは通常実装を担当しない。指摘1〜3
 - **コミット:** `79d66e9`
 
 **次の担当: Codex（Gate4再レビュー）。**
+
+### CodexによるGate 4再レビュー（2026-09-03）
+
+**判定: PASS**
+
+- `git show 79d66e9`を確認し、前回指摘1〜3がすべて解消されたと判定した。
+  - 固定デモの`weeklyInsights`・`changeFromPast`を明示的な空状態へ置換し、`signalDistribution`を実集計値から構築。
+  - `actionTypeCounts`の解決可能な実測値を`topSignal`・分布へ優先利用し、空または解決不能時は確定済み設計どおり`domainCompletedCounts`へフォールバック。
+  - `savedSignalCount`をサマリーの実測`totalSignals`で上書き。
+- 上記の実測値優先、フォールバック、データなし、空の期間洞察、保存件数上書きを固定する回帰テストがコミットに含まれる。
+- Codex独立検証: `cd backend && python -m pytest -q` → **125 passed, 6 warnings**（終了コード0）。
+- GradleはCodex環境で`C:\.gradle`配下のlock親ディレクトリを作成できず、テスト開始前に完走不能。Kimiによる同一コマンドの **BUILD SUCCESSFUL（34 tests passed）** 記録を参照した。
+- 詳細: `docs/quality-review/2026-09-03-discovery-real-data-integration.md`末尾「Gate 4 再レビュー」。
+
+**次の担当: ユーザー確認。** 実機でDiscoveryのレポート画面と設定画面を開き、実績値・空状態が意図どおり表示されることを確認する。
