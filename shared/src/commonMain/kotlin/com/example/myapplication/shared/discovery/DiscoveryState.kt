@@ -227,6 +227,34 @@ class DiscoveryState(
         }
     }
 
+    fun completeOnboarding(
+        nickname: String?,
+        ageRange: String?,
+        schoolStage: String?,
+        optionalInterests: List<String>,
+        initialSelfUnderstandingScore: Float,
+        onSuccess: () -> Unit
+    ) {
+        scope.launch {
+            actionMutex.withLock {
+                try {
+                    repository.completeOnboarding(
+                        nickname = nickname,
+                        ageRange = ageRange,
+                        schoolStage = schoolStage,
+                        optionalInterests = optionalInterests,
+                        initialSelfUnderstandingScore = initialSelfUnderstandingScore
+                    )
+                    onSuccess()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    _messages.tryEmit(e.message ?: "オンボーディングの完了に失敗しました。もう一度お試しください。")
+                }
+            }
+        }
+    }
+
     fun startExperiment(onSuccess: () -> Unit) {
         val experiment = _selectedExperiment.value ?: return
         timerJob?.cancel()

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import json
 import datetime
-from typing import Any
+from typing import Any, Optional
 
 from sqlalchemy import desc, update
 from sqlalchemy.engine import Engine
@@ -56,6 +57,40 @@ class DiscoveryRepository:
     def get_session(self, session_id: int) -> DiscoverySession | None:
         with Session(self._engine) as db:
             return db.get(DiscoverySession, session_id)
+
+    def update_onboarding_info(
+        self,
+        session_id: int,
+        nickname: Optional[str] = None,
+        age_range: Optional[str] = None,
+        school_stage: Optional[str] = None,
+        optional_interests: Optional[list[str]] = None,
+        initial_self_understanding_score: Optional[float] = None,
+    ) -> DiscoverySession:
+        """オンボーディング情報を部分更新する。None のフィールドは上書きしない。"""
+        with Session(self._engine) as db:
+            session = db.get(DiscoverySession, session_id)
+            if session is None:
+                raise ValueError(f"Session {session_id} not found")
+
+            if nickname is not None:
+                session.nickname = nickname
+            if age_range is not None:
+                session.age_range = age_range
+            if school_stage is not None:
+                session.school_stage = school_stage
+            if optional_interests is not None:
+                session.optional_interests = json.dumps(
+                    optional_interests, ensure_ascii=False
+                )
+            if initial_self_understanding_score is not None:
+                session.initial_self_understanding_score = initial_self_understanding_score
+
+            session.updated_at = datetime.datetime.now(datetime.timezone.utc)
+            db.add(session)
+            db.commit()
+            db.refresh(session)
+            return session
 
     def add_signal(
         self,

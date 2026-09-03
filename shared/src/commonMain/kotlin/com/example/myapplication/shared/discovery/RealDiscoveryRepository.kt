@@ -9,6 +9,7 @@ import io.ktor.client.plugins.logging.LogLevel
 import io.ktor.client.plugins.logging.Logger
 import io.ktor.client.plugins.logging.Logging
 import io.ktor.client.request.get
+import io.ktor.client.request.patch
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
@@ -285,6 +286,31 @@ class RealDiscoveryRepository(
         cycleIndex = 0
     }
 
+    override suspend fun completeOnboarding(
+        nickname: String?,
+        ageRange: String?,
+        schoolStage: String?,
+        optionalInterests: List<String>,
+        initialSelfUnderstandingScore: Float
+    ) {
+        val id = ensureSession()
+        val response = client.patch("/sessions/$id/onboarding") {
+            contentType(ContentType.Application.Json)
+            setBody(
+                OnboardingUpdateRequest(
+                    nickname = nickname,
+                    ageRange = ageRange,
+                    schoolStage = schoolStage,
+                    optionalInterests = optionalInterests,
+                    initialSelfUnderstandingScore = initialSelfUnderstandingScore
+                )
+            )
+        }
+        if (!response.status.isSuccess()) {
+            throw DiscoveryApiException("オンボーディング情報の更新に失敗しました (HTTP ${response.status.value})")
+        }
+    }
+
     companion object {
         /** エミュレータから開発機 localhost を参照するための標準 URL。実機では呼び出し元でLAN IPを渡す。 */
         const val DEFAULT_BASE_URL = "http://10.0.2.2:8000"
@@ -293,6 +319,15 @@ class RealDiscoveryRepository(
 
 /** backend/discovery API 呼び出し時のエラー。 */
 class DiscoveryApiException(message: String) : Exception(message)
+
+@Serializable
+private data class OnboardingUpdateRequest(
+    val nickname: String?,
+    val ageRange: String?,
+    val schoolStage: String?,
+    val optionalInterests: List<String>?,
+    val initialSelfUnderstandingScore: Float?
+)
 
 @Serializable
 private data class SessionCreateRequest(val studentLabel: String)

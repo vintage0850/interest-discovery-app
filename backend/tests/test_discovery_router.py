@@ -900,3 +900,73 @@ class TestValidationEndpoints:
         }
         response = test_client.post(f"/sessions/{session['id']}/signals", json=payload)
         assert response.status_code == 422
+
+
+class TestOnboardingEndpoints:
+    def _repo(self) -> DiscoveryRepository:
+        return app.dependency_overrides[get_repository]()
+
+    def test_patch_onboarding_updates_session(self, test_client: TestClient) -> None:
+        session = test_client.post("/sessions", json={"student_label": "student-a"}).json()
+        session_id = session["id"]
+        payload = {
+            "nickname": "Taro",
+            "age_range": "teen",
+            "school_stage": "middle_school",
+            "optional_interests": ["tech", "art"],
+            "initial_self_understanding_score": 3.5,
+        }
+        response = test_client.patch(f"/sessions/{session_id}/onboarding", json=payload)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["id"] == session_id
+        assert data["nickname"] == "Taro"
+        assert data["age_range"] == "teen"
+        assert data["school_stage"] == "middle_school"
+        assert data["optional_interests"] == ["tech", "art"]
+        assert data["initial_self_understanding_score"] == pytest.approx(3.5)
+
+    def test_patch_onboarding_partial_update(self, test_client: TestClient) -> None:
+        session = test_client.post("/sessions", json={"student_label": "student-a"}).json()
+        session_id = session["id"]
+        response = test_client.patch(
+            f"/sessions/{session_id}/onboarding",
+            json={"nickname": "Taro"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["nickname"] == "Taro"
+        assert data["age_range"] is None
+        assert data["optional_interests"] is None
+
+    def test_patch_onboarding_not_found(self, test_client: TestClient) -> None:
+        response = test_client.patch(
+            "/sessions/999/onboarding",
+            json={"nickname": "Taro"},
+        )
+        assert response.status_code == 404
+
+    def test_patch_onboarding_rejects_score_below_range(self, test_client: TestClient) -> None:
+        session = test_client.post("/sessions", json={"student_label": "student-a"}).json()
+        response = test_client.patch(
+            f"/sessions/{session['id']}/onboarding",
+            json={"initial_self_understanding_score": -0.1},
+        )
+        assert response.status_code == 422
+
+    def test_patch_onboarding_rejects_score_above_range(self, test_client: TestClient) -> None:
+        session = test_client.post("/sessions", json={"student_label": "student-a"}).json()
+        response = test_client.patch(
+            f"/sessions/{session['id']}/onboarding",
+            json={"initial_self_understanding_score": 5.1},
+        )
+        assert response.status_code == 422
+
+    def test_patch_onboarding_accepts_score_boundaries(self, test_client: TestClient) -> None:
+        session = test_client.post("/sessions", json={"student_label": "student-a"}).json()
+        response = test_client.patch(
+            f"/sessions/{session['id']}/onboarding",
+            json={"initial_self_understanding_score": 0.0},
+        )
+        assert response.status_code == 200
+        assert response.json()["initial_self_understanding_score"] == pytest.approx(0.0)

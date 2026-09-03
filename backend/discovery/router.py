@@ -28,6 +28,7 @@ from discovery.models import (
     InterestSignal,
     InterestSignalCreate,
     InterestSignalResponse,
+    OnboardingUpdateRequest,
     SessionCreate,
     SessionResponse,
     SessionSummary,
@@ -80,6 +81,22 @@ def create_session(
 ) -> DiscoverySession:
     """新しい興味探索セッションを作成する。"""
     return repo.create_session(request.student_label)
+
+
+@router.patch(
+    "/sessions/{session_id}/onboarding",
+    response_model=SessionResponse,
+)
+def update_onboarding_info(
+    session_id: int,
+    request: OnboardingUpdateRequest,
+    repo: Annotated[DiscoveryRepository, Depends(get_repository)],
+) -> DiscoverySession:
+    """セッションにオンボーディング情報を部分更新する。"""
+    _require_session(repo, session_id)
+    return repo.update_onboarding_info(
+        session_id, **request.model_dump(exclude_unset=True)
+    )
 
 
 @router.post(

@@ -575,3 +575,72 @@ class TestSummaryRepository:
         assert len(data["signals"]) == 5
         assert len(data["experiments"]) == 1
         assert len(data["results"]) == 1
+
+
+class TestOnboardingRepository:
+    def test_update_onboarding_info_sets_all_fields(self, repository: DiscoveryRepository) -> None:
+        session = repository.create_session("student-a")
+        updated = repository.update_onboarding_info(
+            session.id,
+            nickname="Taro",
+            age_range="teen",
+            school_stage="middle_school",
+            optional_interests=["tech", "art"],
+            initial_self_understanding_score=3.5,
+        )
+        assert updated.nickname == "Taro"
+        assert updated.age_range == "teen"
+        assert updated.school_stage == "middle_school"
+        assert updated.optional_interests == '["tech", "art"]'
+        assert updated.initial_self_understanding_score == pytest.approx(3.5)
+
+    def test_optional_interests_serialized_to_json(self, repository: DiscoveryRepository) -> None:
+        session = repository.create_session("student-a")
+        repository.update_onboarding_info(
+            session.id,
+            optional_interests=["music", "sports"],
+        )
+        fetched = repository.get_session(session.id)
+        assert fetched is not None
+        assert fetched.optional_interests == '["music", "sports"]'
+
+    def test_partial_update_preserves_existing_values(self, repository: DiscoveryRepository) -> None:
+        session = repository.create_session("student-a")
+        repository.update_onboarding_info(
+            session.id,
+            nickname="Taro",
+            optional_interests=["tech"],
+        )
+        repository.update_onboarding_info(
+            session.id,
+            age_range="teen",
+        )
+        fetched = repository.get_session(session.id)
+        assert fetched is not None
+        assert fetched.nickname == "Taro"
+        assert fetched.age_range == "teen"
+        assert fetched.optional_interests == '["tech"]'
+
+    def test_none_fields_are_not_updated(self, repository: DiscoveryRepository) -> None:
+        session = repository.create_session("student-a")
+        repository.update_onboarding_info(
+            session.id,
+            nickname="Taro",
+            initial_self_understanding_score=4.0,
+        )
+        repository.update_onboarding_info(
+            session.id,
+            age_range="teen",
+        )
+        fetched = repository.get_session(session.id)
+        assert fetched is not None
+        assert fetched.nickname == "Taro"
+        assert fetched.age_range == "teen"
+        assert fetched.initial_self_understanding_score == pytest.approx(4.0)
+
+    def test_update_onboarding_info_not_found(self, repository: DiscoveryRepository) -> None:
+        with pytest.raises(ValueError):
+            repository.update_onboarding_info(
+                999,
+                nickname="Taro",
+            )

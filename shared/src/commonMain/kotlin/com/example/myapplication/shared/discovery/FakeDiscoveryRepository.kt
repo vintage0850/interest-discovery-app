@@ -402,5 +402,41 @@ class FakeDiscoveryRepository(
         currentExperimentIndex = 0
         currentHypothesis = "まだ実験データがありません。"
         currentObservation = "最初の実験をやってみましょう。"
+        lastCompletedOnboardingNickname = null
+        lastCompletedOnboardingAgeRange = null
+        lastCompletedOnboardingSchoolStage = null
+        lastCompletedOnboardingOptionalInterests = null
+        lastCompletedOnboardingScore = null
+        onboardingCompletedCount = 0
+    }
+
+    var lastCompletedOnboardingNickname: String? = null
+        private set
+    var lastCompletedOnboardingAgeRange: String? = null
+        private set
+    var lastCompletedOnboardingSchoolStage: String? = null
+        private set
+    var lastCompletedOnboardingOptionalInterests: List<String>? = null
+        private set
+    var lastCompletedOnboardingScore: Float? = null
+        private set
+    var onboardingCompletedCount: Int = 0
+        private set
+
+    override suspend fun completeOnboarding(
+        nickname: String?,
+        ageRange: String?,
+        schoolStage: String?,
+        optionalInterests: List<String>,
+        initialSelfUnderstandingScore: Float
+    ) {
+        simulateLatency()
+        checkErrorState()
+        lastCompletedOnboardingNickname = nickname
+        lastCompletedOnboardingAgeRange = ageRange
+        lastCompletedOnboardingSchoolStage = schoolStage
+        lastCompletedOnboardingOptionalInterests = optionalInterests
+        lastCompletedOnboardingScore = initialSelfUnderstandingScore
+        onboardingCompletedCount++
     }
 }

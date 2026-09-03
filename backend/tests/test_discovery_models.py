@@ -12,6 +12,7 @@ from discovery.models import (
     ExperimentSelectRequest,
     InterestSignalCreate,
     InterestSignalSource,
+    OnboardingUpdateRequest,
 )
 
 
@@ -202,3 +203,41 @@ class TestExperimentSelectRequest:
     def test_select_request_with_valid_note_passes(self) -> None:
         req = ExperimentSelectRequest(selection_note="I want to try this")
         assert req.selection_note == "I want to try this"
+
+
+class TestOnboardingUpdateRequest:
+    def test_all_fields_optional(self) -> None:
+        req = OnboardingUpdateRequest()
+        assert req.nickname is None
+        assert req.age_range is None
+        assert req.school_stage is None
+        assert req.optional_interests is None
+        assert req.initial_self_understanding_score is None
+
+    def test_valid_full_request_passes(self) -> None:
+        req = OnboardingUpdateRequest(
+            nickname="Taro",
+            age_range="teen",
+            school_stage="middle_school",
+            optional_interests=["tech", "art"],
+            initial_self_understanding_score=3.5,
+        )
+        assert req.nickname == "Taro"
+        assert req.optional_interests == ["tech", "art"]
+        assert req.initial_self_understanding_score == pytest.approx(3.5)
+
+    def test_score_below_range_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            OnboardingUpdateRequest(initial_self_understanding_score=-0.1)
+
+    def test_score_above_range_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            OnboardingUpdateRequest(initial_self_understanding_score=5.1)
+
+    def test_score_at_lower_boundary_passes(self) -> None:
+        req = OnboardingUpdateRequest(initial_self_understanding_score=0.0)
+        assert req.initial_self_understanding_score == pytest.approx(0.0)
+
+    def test_score_at_upper_boundary_passes(self) -> None:
+        req = OnboardingUpdateRequest(initial_self_understanding_score=5.0)
+        assert req.initial_self_understanding_score == pytest.approx(5.0)

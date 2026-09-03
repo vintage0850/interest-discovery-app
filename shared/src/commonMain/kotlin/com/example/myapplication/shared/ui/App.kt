@@ -9,8 +9,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.navigation.compose.NavHost
@@ -20,13 +22,24 @@ import com.example.myapplication.shared.db.DatabaseDriverFactory
 import com.example.myapplication.shared.discovery.DiscoverySettingsStorage
 import com.example.myapplication.shared.discovery.DiscoveryState
 import com.example.myapplication.shared.discovery.InMemoryDiscoverySettingsStorage
+import com.example.myapplication.shared.discovery.InMemoryOnboardingStorage
+import com.example.myapplication.shared.discovery.OnboardingStorage
 import com.example.myapplication.shared.discovery.RealDiscoveryRepository
 import com.example.myapplication.shared.ui.discovery.DiscoveryMainScaffold
 import com.example.myapplication.shared.ui.discovery.DiscoveryResultScreen
 import com.example.myapplication.shared.ui.discovery.ExperimentDetailScreen
 import com.example.myapplication.shared.ui.discovery.ExperimentRunningScreen
 import com.example.myapplication.shared.ui.discovery.ReflectionScreen
+import com.example.myapplication.shared.ui.onboarding.OnboardingBasicInfo as OnboardingBasicInfoData
+import com.example.myapplication.shared.ui.onboarding.OnboardingBasicInfoScreen
+import com.example.myapplication.shared.ui.onboarding.OnboardingSelfCheckScreen
+import com.example.myapplication.shared.ui.onboarding.OnboardingWelcomeScreen
 import kotlinx.serialization.Serializable
+
+// オンボーディング（Onboarding Flow）のルート
+@Serializable object OnboardingWelcome
+@Serializable object OnboardingBasicInfo
+@Serializable object OnboardingSelfCheck
 
 // 興味発見（Discovery Flow）のルート
 @Serializable object DiscoveryHome
@@ -39,6 +52,7 @@ import kotlinx.serialization.Serializable
 fun App(
     driverFactory: DatabaseDriverFactory? = null,
     discoverySettingsStorage: DiscoverySettingsStorage = InMemoryDiscoverySettingsStorage(),
+    onboardingStorage: OnboardingStorage = InMemoryOnboardingStorage(),
     enableDiscoveryHttpLogging: Boolean = false,
     discoveryBaseUrl: String = "http://localhost:8000",
     modifier: Modifier = Modifier
@@ -58,6 +72,7 @@ fun App(
 
         val navController = rememberNavController()
         val snackbarHostState = remember { SnackbarHostState() }
+        var savedBasicInfo by remember { mutableStateOf<OnboardingBasicInfoData?>(null) }
 
         LaunchedEffect(Unit) {
             discoveryState.messages.collect { message ->
@@ -66,12 +81,54 @@ fun App(
             }
         }
 
+        val startDestination = if (onboardingStorage.hasCompletedOnboarding()) {
+            DiscoveryHome
+        } else {
+            OnboardingWelcome
+        }
+
         Box(modifier = modifier.fillMaxSize()) {
             NavHost(
                 navController = navController,
-                startDestination = DiscoveryHome,
+                startDestination = startDestination,
                 modifier = Modifier.fillMaxSize()
             ) {
+            // 0. オンボーディング画面群
+            composable<OnboardingWelcome> {
+                OnboardingWelcomeScreen(
+                    onNext = { navController.navigate(OnboardingBasicInfo) }
+                )
+            }
+
+            composable<OnboardingBasicInfo> {
+                OnboardingBasicInfoScreen(
+                    onNext = { info ->
+                        savedBasicInfo = info
+                        navController.navigate(OnboardingSelfCheck)
+                    }
+                )
+            }
+
+            composable<OnboardingSelfCheck> {
+                OnboardingSelfCheckScreen(
+                    onComplete = { score ->
+                        val info = savedBasicInfo
+                        discoveryState.completeOnboarding(
+                            nickname = info?.nickname?.takeIf { it.isNotBlank() },
+                            ageRange = info?.ageRange?.takeIf { it.isNotBlank() },
+                            schoolStage = info?.schoolStage?.takeIf { it.isNotBlank() },
+                            optionalInterests = info?.optionalInterests ?: emptyList(),
+                            initialSelfUnderstandingScore = score
+                        ) {
+                            onboardingStorage.markCompleted()
+                            navController.navigate(DiscoveryHome) {
+                                popUpTo(OnboardingWelcome) { inclusive = true }
+                            }
+                        }
+                    }
+                )
+            }
+
             // 1. メイン画面（ボトムナビゲーション付き: Home, Discover, Explore, Report, Settings）
             composable<DiscoveryHome> {
                 DiscoveryMainScaffold(

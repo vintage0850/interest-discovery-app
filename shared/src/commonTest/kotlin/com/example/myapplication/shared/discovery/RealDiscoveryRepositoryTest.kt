@@ -670,6 +670,104 @@ class RealDiscoveryRepositoryTest {
     }
 
     @Test
+    fun completeOnboarding_patchesToOnboardingEndpoint() = runTest {
+        var capturedMethod: io.ktor.http.HttpMethod? = null
+        var capturedBody: String? = null
+        val engine = MockEngine { request ->
+            if (request.url.encodedPath == "/sessions") {
+                respond(
+                    content = SESSION_BODY,
+                    status = HttpStatusCode.Created,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json")
+                )
+            } else if (request.url.encodedPath == "/sessions/1/onboarding") {
+                capturedMethod = request.method
+                capturedBody = (request.body as io.ktor.http.content.TextContent).text
+                respond(
+                    content = """
+                        {"id": 1, "student_label": "test_user", "nickname": "Taro", "status": "active",
+                         "age_range": "16〜18歳", "school_stage": "高校", "optional_interests": ["tech"],
+                         "initial_self_understanding_score": 4.2,
+                         "created_at": "2026-09-02T00:00:00+00:00", "updated_at": "2026-09-02T00:00:00+00:00"}
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json")
+                )
+            } else {
+                error("unexpected path: ${request.url.encodedPath}")
+            }
+        }
+        val customClient = HttpClient(engine) {
+            install(ContentNegotiation) {
+                json(Json {
+                    ignoreUnknownKeys = true
+                    namingStrategy = JsonNamingStrategy.SnakeCase
+                })
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = customClient)
+
+        repo.completeOnboarding(
+            nickname = "Taro",
+            ageRange = "16〜18歳",
+            schoolStage = "高校",
+            optionalInterests = listOf("tech"),
+            initialSelfUnderstandingScore = 4.2f
+        )
+
+        assertEquals(io.ktor.http.HttpMethod.Patch, capturedMethod)
+        assertNotNull(capturedBody)
+        assertTrue(capturedBody.contains("\"nickname\":\"Taro\""))
+        assertTrue(capturedBody.contains("\"age_range\":\"16〜18歳\""))
+        assertTrue(capturedBody.contains("\"school_stage\":\"高校\""))
+        assertTrue(capturedBody.contains("\"optional_interests\":[\"tech\"]"))
+        assertTrue(capturedBody.contains("\"initial_self_understanding_score\":4.2"))
+    }
+
+    @Test
+    fun completeOnboarding_throwsWhenServerReturnsError() = runTest {
+        val engine = MockEngine { request ->
+            if (request.url.encodedPath == "/sessions") {
+                respond(
+                    content = SESSION_BODY,
+                    status = HttpStatusCode.Created,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json")
+                )
+            } else if (request.url.encodedPath == "/sessions/1/onboarding") {
+                respond(
+                    content = """{"detail":"invalid"}""",
+                    status = HttpStatusCode.BadRequest,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json")
+                )
+            } else {
+                error("unexpected path: ${request.url.encodedPath}")
+            }
+        }
+        val customClient = HttpClient(engine) {
+            install(ContentNegotiation) {
+                json(Json {
+                    ignoreUnknownKeys = true
+                    namingStrategy = JsonNamingStrategy.SnakeCase
+                })
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = customClient)
+
+        val exception = runCatching {
+            repo.completeOnboarding(
+                nickname = null,
+                ageRange = null,
+                schoolStage = null,
+                optionalInterests = emptyList(),
+                initialSelfUnderstandingScore = 3.0f
+            )
+        }.exceptionOrNull()
+
+        assertTrue(exception is DiscoveryApiException)
+        assertTrue(exception.message?.contains("400") == true)
+    }
+
+    @Test
     fun defaultHttpClient_doesNotInstallLoggingWhenDisabled() = runTest {
         val client = defaultDiscoveryHttpClient("", enableHttpLogging = false)
 

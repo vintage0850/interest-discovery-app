@@ -439,6 +439,73 @@ class DiscoveryStateTest {
             state.close()
         }
     }
+
+    @Test
+    fun completeOnboarding_callsRepositoryAndInvokesOnSuccess() = runTest {
+        val repo = FakeDiscoveryRepository(FakeScenario.NORMAL, enableArtificialDelay = false)
+        val state = createState(repo)
+        try {
+            var successCalled = false
+            state.completeOnboarding(
+                nickname = "Taro",
+                ageRange = "16〜18歳",
+                schoolStage = "高校",
+                optionalInterests = listOf("tech"),
+                initialSelfUnderstandingScore = 4.5f
+            ) {
+                successCalled = true
+            }
+            advanceUntilIdle()
+
+            assertTrue(successCalled)
+            assertEquals("Taro", repo.lastCompletedOnboardingNickname)
+            assertEquals(1, repo.onboardingCompletedCount)
+        } finally {
+            state.close()
+        }
+    }
+
+    @Test
+    fun completeOnboarding_onFailure_emitsMessageAndDoesNotInvokeSuccess() = runTest {
+        val repo = FakeDiscoveryRepository(FakeScenario.NORMAL, enableArtificialDelay = false)
+        val state = createState(FailingOnCompleteOnboardingRepository(repo))
+        try {
+            var successCalled = false
+            var message: String? = null
+            val collectJob = launch { state.messages.collect { message = it } }
+
+            state.completeOnboarding(
+                nickname = "Taro",
+                ageRange = null,
+                schoolStage = null,
+                optionalInterests = emptyList(),
+                initialSelfUnderstandingScore = 3.0f
+            ) {
+                successCalled = true
+            }
+            advanceUntilIdle()
+
+            assertFalse(successCalled)
+            assertEquals("onboarding update failed", message)
+            collectJob.cancel()
+        } finally {
+            state.close()
+        }
+    }
+}
+
+private class FailingOnCompleteOnboardingRepository(
+    delegate: DiscoveryRepository
+) : DiscoveryRepository by delegate {
+    override suspend fun completeOnboarding(
+        nickname: String?,
+        ageRange: String?,
+        schoolStage: String?,
+        optionalInterests: List<String>,
+        initialSelfUnderstandingScore: Float
+    ) {
+        throw DiscoveryApiException("onboarding update failed")
+    }
 }
 
 private class FailingOnSelectRepository(delegate: DiscoveryRepository) : DiscoveryRepository by delegate {

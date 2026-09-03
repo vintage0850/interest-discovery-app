@@ -1,5 +1,6 @@
 import datetime
 import enum
+import json
 from typing import Any, Optional
 
 from pydantic import Field, field_validator
@@ -75,6 +76,11 @@ class DiscoverySession(SQLModel, table=True):
     updated_at: datetime.datetime = SQLField(
         default_factory=lambda: datetime.datetime.now(datetime.timezone.utc)
     )
+    nickname: Optional[str] = SQLField(default=None, sa_type=String(100))
+    age_range: Optional[str] = SQLField(default=None, sa_type=String(32))
+    school_stage: Optional[str] = SQLField(default=None, sa_type=String(32))
+    optional_interests: Optional[str] = SQLField(default=None, sa_type=String(1000))
+    initial_self_understanding_score: Optional[float] = SQLField(default=None)
 
     signals: list["InterestSignal"] = Relationship(back_populates="session")
     experiments: list["Experiment"] = Relationship(back_populates="session")
@@ -279,6 +285,28 @@ class SessionResponse(SQLModel):
     status: str
     created_at: datetime.datetime
     updated_at: datetime.datetime
+    nickname: Optional[str] = None
+    age_range: Optional[str] = None
+    school_stage: Optional[str] = None
+    optional_interests: Optional[list[str]] = None
+    initial_self_understanding_score: Optional[float] = None
+
+    @field_validator("optional_interests", mode="before")
+    @classmethod
+    def _parse_optional_interests(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            return json.loads(value)
+        return value
+
+
+class OnboardingUpdateRequest(SQLModel):
+    nickname: Optional[str] = None
+    age_range: Optional[str] = None
+    school_stage: Optional[str] = None
+    optional_interests: Optional[list[str]] = None
+    initial_self_understanding_score: Optional[float] = Field(
+        default=None, ge=0.0, le=5.0
+    )
 
 
 class InterestSignalCreate(SQLModel):

@@ -3445,3 +3445,50 @@ Kimiの完了後、`App.kt`が**コミット済みHEADの状態に巻き戻っ�
 - **Kimi → 案件a（バックエンド）:** `backend/discovery/models.py`（列追加）／`repository.py`（`update_onboarding_info`）／`router.py`（`PATCH /sessions/{id}/onboarding`）。TDD必須。Kotlin側ファイルには触れない。
 - **Antigravity → 案件b/c（Kotlin側）:** `DiscoveryRepository`インターフェースに`completeOnboarding(...)`追加、`RealDiscoveryRepository`に実装、`FakeDiscoveryRepository`にフェイク実装、`DiscoveryState`に`completeOnboarding(...)`ラッパー追加（他メソッドと同じ`scope.launch`+`_messages`パターン）、`App.kt`にオンボーディング3ルート追加・`OnboardingStorage`注入・`startDestination`分岐。バックエンドファイルには触れない。
 - **前回の教訓を反映:** ディスパッチ前に未コミット差分をゼロにした（コミット`85eb076`）。両エージェント完了後、`git status`/`git diff --stat`をリポジトリ全体で確認してから次の作業に進むこと。
+
+### 案件16 Phase 2：バックエンド実装（Kimi：backend）
+
+**実装担当:** Kimi  
+**完了日:** 2026-09-04  
+**コミット:** 未コミット（作業ツリーにあり）
+
+#### 変更ファイル一覧
+
+- `backend/discovery/models.py`
+  - `DiscoverySession` に `nickname`, `age_range`, `school_stage`, `optional_interests`, `initial_self_understanding_score` の optional 列を追加。
+  - `SessionResponse` に同フィールドを追加（`optional_interests` はレスポンスで JSON 配列として返す）。
+  - 新規 `OnboardingUpdateRequest` を追加。`initial_self_understanding_score` は 0.0〜5.0 の範囲チェックあり。
+- `backend/discovery/repository.py`
+  - `update_onboarding_info(session_id, ...)` を追加。None のフィールドは更新しない部分更新。`optional_interests` は `json.dumps` で文字列化して保存。
+- `backend/tests/test_discovery_models.py`
+  - `OnboardingUpdateRequest` のバリデーション・範囲チェック・省略時デフォルトのテストを追加。
+- `backend/tests/test_discovery_repository.py`
+  - 部分更新、JSON 文字列保存、存在しないセッションへの更新のテストを追加。
+- `backend/tests/test_discovery_router.py`
+  - `PATCH /sessions/{id}/onboarding` の正常系・部分更新・404・範囲外スコア 422 のテストを追加。
+
+#### TDD 実施状況
+
+- **RED→GREEN を実施済み。**
+  - テストを先に追加し、`OnboardingUpdateRequest` / `update_onboarding_info` / `PATCH` エンドポイントが未実装のため ImportError や 404 で RED → 実装後 GREEN。
+
+#### テスト結果
+
+```bash
+pytest backend/tests -q
+159 passed, 5 warnings
+```
+
+- 既存のバックエンドテストスイート（142件）もすべて pass、リグレッションなし。
+- 新規テスト 17件追加。
+
+#### 実装詳細
+
+- `PATCH /sessions/{session_id}/onboarding` → body: `OnboardingUpdateRequest`（全フィールド optional）→ response: `SessionResponse`。
+- セッションが存在しない場合は 404 を返す。
+- `optional_interests` は DB 内で JSON 文字列保存、API レスポンスでは `list[str]` として返す（Kotlin 側が `JsonNamingStrategy.SnakeCase` で配列を期待するため）。
+- `initial_self_understanding_score` は 0.0〜5.0 の範囲外で Pydantic バリデーションエラー（422）を返す。
+
+#### 備考
+
+- DB マイグレーションは本プロジェクトに既存の仕組みがないため、新規列は `SQLModel.metadata.create_all` で新規 SQLite には反映される。既存 `discovery.db` を運用で継続する場合は別途マイグレーションが必要。

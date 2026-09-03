@@ -25,4 +25,11 @@ interface DiscoveryRepository {
     suspend fun getSettings(): MyDataSettings
     suspend fun updateSettings(settings: MyDataSettings)
     suspend fun resetAllData()
+    suspend fun completeOnboarding(
+        nickname: String?,
+        ageRange: String?,
+        schoolStage: String?,
+        optionalInterests: List<String>,
+        initialSelfUnderstandingScore: Float
+    )
 }

@@ -36,3 +36,7 @@ backend/__pycache__/
 # Web PWA ビルド・依存関係
 web/node_modules/
 web/dist/
+
+# Codex Gate4レビューの生ログ、ローカルテスト実行で生成されるSQLiteファイル
+.codex-gate4-*.log
+*.db

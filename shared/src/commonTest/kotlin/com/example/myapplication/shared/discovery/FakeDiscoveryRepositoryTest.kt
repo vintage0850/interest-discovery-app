@@ -45,6 +45,25 @@ class FakeDiscoveryRepositoryTest {
     }
 
     @Test
+    fun completeOnboarding_recordsArgumentsAndIncrementsCount() = runTest {
+        val repo = FakeDiscoveryRepository(FakeScenario.NORMAL, enableArtificialDelay = false)
+        repo.completeOnboarding(
+            nickname = "Hanako",
+            ageRange = "13〜15歳",
+            schoolStage = "中学",
+            optionalInterests = listOf("art", "music"),
+            initialSelfUnderstandingScore = 4.0f
+        )
+
+        assertEquals("Hanako", repo.lastCompletedOnboardingNickname)
+        assertEquals("13〜15歳", repo.lastCompletedOnboardingAgeRange)
+        assertEquals("中学", repo.lastCompletedOnboardingSchoolStage)
+        assertEquals(listOf("art", "music"), repo.lastCompletedOnboardingOptionalInterests)
+        assertEquals(4.0f, repo.lastCompletedOnboardingScore)
+        assertEquals(1, repo.onboardingCompletedCount)
+    }
+
+    @Test
     fun resetAllData_clearsCountAndSignals() = runTest {
         val repo = FakeDiscoveryRepository(FakeScenario.NORMAL, enableArtificialDelay = false)
         repo.resetAllData()
