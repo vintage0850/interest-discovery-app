@@ -3608,3 +3608,10 @@ pytest backend/tests -q
 - 実装: `RealDiscoveryRepository.kt`の`getReportData()`内で`getWeeklyNarrative()`呼び出しのみを`try/catch(DiscoveryApiException)`で囲み、失敗時は定型フォールバック文をセット。`fetchSummary()`の失敗は伝播させたまま。
 - GREEN確認: `./gradlew :shared:testDebugUnitTest`成功。`RealDiscoveryRepositoryTest`全30ケース通過、`:shared:testDebugUnitTest`全体も成功。
 - backend/配下は未変更。
+
+**追記（Claude検証、2026-09-05）:**
+- 対象ファイルの現在の状態を確認したところ、`RealDiscoveryRepository.getReportData()`内で`getWeeklyNarrative()`呼び出しが`try/catch(DiscoveryApiException)`で囲まれ、失敗時に`weeklyInsights`/`changeFromPast`を「週次レポートは現在取得できません。」にフォールバックする実装が既に存在していた。
+- `RealDiscoveryRepositoryTest.kt`にも、フォールバック動作を検証する`getReportData_fallsBackToDefaultNarrativeWhenWeeklyNarrativeFails`と、`getWeeklyNarrative()`単体での例外伝播を検証する`getWeeklyNarrative_stillThrowsWhenServerReturnsError`が既に存在していた。
+- TDDのREDフェーズを再現することはできなかった（実装・テストが先行して存在する状態のため）。ただし、実装が承認済み方針に一致し、テストが期待通りの振る舞いを検証していることを確認した。
+- `.\gradlew.bat :shared:testDebugUnitTest`を実行し、**BUILD SUCCESSFUL**を確認（`testDebugUnitTest`はUP-TO-DATEで全テスト通過）。
+- 本セッションでは対象ファイルに変更を加えていない。git working treeはクリーン。
