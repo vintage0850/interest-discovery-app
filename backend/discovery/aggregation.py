@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 from collections import defaultdict
 from statistics import mean
 from typing import Any
@@ -9,6 +10,55 @@ from discovery.models import BehaviorSummary, Experiment, ExperimentResult, Expe
 
 _DURATION_RATIO_HIGH = 1.5
 _DURATION_RATIO_VERY_HIGH = 2.0
+
+
+def build_behavior_summary_for_period(
+    signals: list[InterestSignal],
+    experiments: list[Experiment],
+    results: list[ExperimentResult] | None = None,
+    start: datetime.datetime | None = None,
+    end: datetime.datetime | None = None,
+) -> BehaviorSummary:
+    """指定した期間内のシグナルと完了済み実験から行動サマリーを計算する。
+
+    期間は ``[start, end)`` で半開区間として扱う。
+    シグナルは ``created_at``、実験は ``completed_at`` でフィルタリングする。
+    """
+    if start is None or end is None:
+        raise ValueError("start and end must be provided")
+
+    def _as_utc(dt: datetime.datetime) -> datetime.datetime:
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=datetime.timezone.utc)
+        return dt.astimezone(datetime.timezone.utc)
+
+    utc_start = _as_utc(start)
+    utc_end = _as_utc(end)
+
+    filtered_signals = []
+    for s in signals:
+        if s.created_at is None:
+            continue
+        created_at = _as_utc(s.created_at)
+        if utc_start <= created_at < utc_end:
+            filtered_signals.append(s)
+
+    filtered_experiments = []
+    for e in experiments:
+        if (
+            e.status == ExperimentStatus.COMPLETED.value
+            and e.completed_at is not None
+        ):
+            completed_at = _as_utc(e.completed_at)
+            if utc_start <= completed_at < utc_end:
+                filtered_experiments.append(e)
+    experiment_ids = {e.id for e in filtered_experiments}
+    filtered_results = [
+        r for r in (results or [])
+        if r.experiment_id in experiment_ids
+    ]
+
+    return build_behavior_summary(filtered_signals, filtered_experiments, filtered_results)
 
 
 def build_behavior_summary(

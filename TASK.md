@@ -3492,3 +3492,119 @@ pytest backend/tests -q
 #### 備考
 
 - DB マイグレーションは本プロジェクトに既存の仕組みがないため、新規列は `SQLModel.metadata.create_all` で新規 SQLite には反映される。既存 `discovery.db` を運用で継続する場合は別途マイグレーションが必要。
+
+## 案件17：週次レポートのAIナラティブ化（設計判断＋並行ディスパッチ、Claude、2026-09-04）
+
+**背景:** コンテスト評価軸は「アイデア・UX重視」。`ReportTabScreen.kt` は `weeklyInsights`/`changeFromPast` を表示する構造が既にあるが、`RealDiscoveryRepository.getReportData()` では空文字プレースホルダーのまま（AI生成なし）。コアループの"payoff"を見せる画面として優先実装する。
+
+**ユーザー承認済みの設計判断:**
+- No-Insightガード：**今回は設けない（データ量に関わらず常にGemini呼び出し）。** 閾値判断は後日必要になれば追加。
+- エンドポイント：**`/summary`とは分離。** 新規 `GET /sessions/{id}/report/weekly-narrative` を追加し、Geminiコストを`/summary`から切り離す。
+
+**API契約（バックエンド⇔Kotlin間で固定。担当を分けるため厳守）:**
+- `GET /sessions/{session_id}/report/weekly-narrative` → response: `WeeklyNarrativeResponse` = `{ "weekly_insights": str, "change_from_past": str }`（各200字以内）。
+- 集計範囲：直近7日 vs その前7日（`created_at`/`completed_at`基準）。`backend/discovery/aggregation.py`に期間フィルタ付き集計関数を追加し、既存の全期間集計とは別関数にする（既存呼び出し元への影響を避ける）。
+- `backend/discovery/gemini_prompts.py`に`generate_weekly_narrative(recent_summary, previous_summary, top_domain)`を追加。`update_hypothesis`と同じ`response_schema`構造化出力パターン・`_sanitize_gemini_error_message`によるエラー整形を踏襲する。
+- Kotlin側`WeeklyNarrativeResponse`はcamelCase（`weeklyInsights`/`changeFromPast`）。`RealDiscoveryRepository`の`Json{}`は`JsonNamingStrategy.SnakeCase`設定済みなので自動変換される。
+
+**対象ファイル（他AIとの競合回避）:**
+- **Kimi（backend）:** `backend/discovery/aggregation.py`（期間フィルタ集計追加）、`backend/discovery/gemini_prompts.py`（`generate_weekly_narrative`追加）、`backend/discovery/router.py`（新規エンドポイント追加）、対応する`backend/tests/`配下のテスト。TDD必須。Kotlin側ファイルには触れない。
+- **Antigravity（Kotlin側）:** `DiscoveryRepository`インターフェースに`getWeeklyNarrative(): WeeklyNarrative`相当のメソッド追加、`RealDiscoveryRepository.getReportData()`から呼び出してweeklyInsights/changeFromPastを埋める、`FakeDiscoveryRepository`にも同等ロジック追加、対応するKotlinテスト追加。バックエンドファイルには触れない。
+- **レビュー:** Codex。両者完了後、品質ゲート判定（`templates/QUALITY-REVIEW.template.md`）。
+
+**前回の教訓を反映:** ディスパッチ前に未コミット差分がないことを確認済み（`git status`クリーン、コミット`a039faa`）。両エージェント完了後、`git status`/`git diff --stat`をリポジトリ全体で確認してから次の作業に進むこと。案件16 Phase 2ではKimiがAntigravityより先に両側を実装してしまい衝突回避のためAntigravityを停止した実績があるため、今回はKimi側の完了を待たずAntigravity側の進捗も個別に確認すること。
+
+**次の担当:** Kimi（backend）とAntigravity（Kotlin側）を並行ディスパッチ。完了後Codexがレビュー。
+
+**担当変更（Claude、2026-09-04）:** Antigravityが2回連続失敗（1回目：ヘッドレスモード権限エラー、2回目：ネットワークエラー）したため停止。ユーザーの明示指示によりKotlin側の実装をCodexが直接担当する（AGENTS.md記載の例外規定を適用）。Codex実装後の品質ゲート判定は別途Codexまたは人間が行う。Kimi（backend）はそのまま続行、対象ファイルはbackend/配下のみで変更なし。Codex（Kotlin側）の対象ファイルは`shared/.../discovery/DiscoveryRepository.kt`／`RealDiscoveryRepository.kt`／`FakeDiscoveryRepository.kt`および対応するKotlinテストのみ、backend/配下には触れない。
+
+**案件17 backend実装完了（Kimi、2026-09-04）:**
+- 実装対象ファイル:
+  - `backend/discovery/aggregation.py`: `build_behavior_summary_for_period(signals, experiments, results, start, end)` を追加。期間は半開区間 `[start, end)` で、シグナルは `created_at`、実験は `completed_at` でフィルタリング。SQLiteから返るnaive datetimeをUTCとして扱う `_as_utc` 正規化を実装。既存の `build_behavior_summary` 呼び出し元は変更なし。
+  - `backend/discovery/gemini_prompts.py`: `WeeklyNarrativeCandidate` モデル（`weekly_insights`/`change_from_past` 各200字以内）と `generate_weekly_narrative(recent_summary, previous_summary, top_domain)` を追加。`update_hypothesis` と同じ `response_schema` 構造化出力・`_sanitize_gemini_error_message` エラー整形パターンを踏襲。`_WEEKLY_NARRATIVE_SYSTEM_INSTRUCTION` も追加。
+  - `backend/discovery/models.py`: `WeeklyNarrativeResponse` レスポンスモデル（`weekly_insights`/`change_from_past` 各200字以内）を追加。
+  - `backend/discovery/router.py`: `GET /sessions/{session_id}/report/weekly-narrative` を追加。直近7日とその前7日のサマリーを `build_behavior_summary_for_period` で計算し、直近ドメインカウント最多を `top_domain` として Gemini に渡す。Geminiエラー時は503を返す。
+- TDD実施内容:
+  - `backend/tests/test_discovery_aggregation.py`: `TestBehaviorSummaryForPeriod` クラスを追加し、空期間・シグナルフィルタ・実験フィルタ・境界条件・結果紐付けの7テストを Red→Green で実装。
+  - `backend/tests/test_discovery_gemini_prompts.py`: `TestGenerateWeeklyNarrative` クラスを追加し、正常系・200字超過拒否・JSON破損・SDKエラーラップ・プロンプト内容確認の6テストを Red→Green で実装。
+  - `backend/tests/test_discovery_router.py`: `TestWeeklyNarrativeEndpoints` クラスを追加し、正常系・404・Geminiエラー503・APIキー未設定503・サマリー引数確認の5テストを Red→Green で実装。
+- テスト結果: `python -m pytest tests/` で **177 passed, 5 warnings**（全テスト通過）。
+- 備考: Kotlin側ファイル（`shared/`配下）には一切触れていない。`TASK.md` への追記のみ実施。
+
+**案件17 Kotlin実装・統合レビュー完了（Codex、2026-09-04）:**
+
+- 状態: **完了（Gate 4 PASS）**
+- 担当変更: Antigravityの2回失敗後、ユーザーの明示指示によりCodexがClaude代打としてKotlin実装・統合検証・品質判定を担当。
+- Kotlin実装:
+  - `DiscoveryRepository.kt`: `getWeeklyNarrative()` と `WeeklyNarrative` domain modelを追加。
+  - `RealDiscoveryRepository.kt`: `GET /sessions/{id}/report/weekly-narrative` を呼び、snake_caseレスポンスをcamelCase DTOへ復号。`getReportData()` の `weeklyInsights` / `changeFromPast` に反映。
+  - `FakeDiscoveryRepository.kt`: 同APIを実装し、`getReportData()` と同じ週次文を返すよう共通化。
+  - `RealDiscoveryRepositoryTest.kt` / `FakeDiscoveryRepositoryTest.kt`: APIパス、snake_case復号、ReportData反映、Fake互換性のテストを追加。
+- TDD履歴:
+  - RED: `getWeeklyNarrative` 未定義によりKotlinテストコンパイルが失敗することを確認。
+  - GREEN: Repository・DTO・Fake実装後、対象Repositoryテスト39件が成功。
+- API契約照合:
+  - backend `WeeklyNarrativeResponse.weekly_insights/change_from_past` とKotlin DTOのcamelCaseマッピングが一致。
+  - 新規パス `/sessions/{session_id}/report/weekly-narrative` が両側で一致。
+  - backendは各フィールド1〜200文字を検証し、Kotlinの`JsonNamingStrategy.SnakeCase`で復号する。
+  - `/summary`への統合およびNo-Insightガードの追加は行っていない。
+
+### 案件17 テスト結果（Codex独立検証）
+
+- コマンド: `cd backend; python -m pytest tests`
+  - 結果: **177 passed, 5 warnings**。案件17追加分と既存backend回帰を含め全件成功。
+- コマンド: `.\gradlew.bat :shared:testDebugUnitTest`
+  - 結果: **BUILD SUCCESSFUL**。commonTestを含むshared Android unit tests成功。
+- コマンド: `.\gradlew.bat :app:assembleDebug`
+  - 結果: **BUILD SUCCESSFUL**。Android debug APKのコンパイル・パッケージ成功。
+- コマンド: `git diff --check`
+  - 結果: 空白エラーなし。改行コードの既存設定に関するLF→CRLF警告のみ。
+- 未確認事項: 実機でのコアループ通しデモ、実Gemini APIを使った画面表示、ネットワーク断・Gemini 503時の画面UXは未確認。コンテスト提出前の実機確認で扱う。
+
+### 案件17 品質判定
+
+- 判定: **PASS**
+- Gate 1: 確定仕様、対象外、API契約、受入条件が明確。
+- Gate 2: Claude承認済みの専用エンドポイント設計と担当境界を維持。
+- Gate 3: Kotlin側はRED→GREENで実装。backend/Kotlinとも宣言範囲内の変更。
+- Gate 4: backend 177テスト、sharedテスト、Android debug buildが成功。API契約も照合済み。
+- Gate 5: `TASK.md` の作業履歴・テスト結果・引き継ぎを更新。外部公開、課金実行、データ削除は行っていないため事前承認項目は未適用。
+
+### 案件17 引き継ぎメモ
+
+- 完了事項: backend期間集計・Gemini生成・専用API、およびKotlin Repository連携を実装し、自動テストとdebug buildを完了。
+- 次の担当者: 実機QA担当。
+- 次の行動: 実機で「実験完了 → レポート表示 → Gemini週次文表示」のコアループを確認し、Gemini失敗時の画面挙動を記録する。
+
+### 実機QA補足：オンボーディング更新失敗の環境復旧（Codex、2026-09-04）
+
+- 症状: 実機のオンボーディング完了時に更新失敗。
+- 根本原因:
+  - ポート8000で古いbackendプロセスが残り、`PATCH /sessions/{id}/onboarding` が404だった。
+  - 最新backendを起動すると、既存 `backend/discovery.db` の `discovery_session` に案件16追加列がなく、セッション作成が500（`no column named nickname`）になった。
+- 対応:
+  - 既存DBを `backend/discovery.db.backup-20260904-0201` にバックアップ。
+  - データを削除せず、承認済みモデルの不足5列（`nickname`、`age_range`、`school_stage`、`optional_interests`、`initial_self_understanding_score`）のみ追加。
+  - 最新backendをポート8017で起動し、実機 `tcp:8000` → PC `tcp:8017` に `adb reverse` を設定。
+- 確認結果:
+  - OpenAPIにオンボーディング／週次ナラティブ両エンドポイントが存在。
+  - `POST /sessions` 成功。
+  - `PATCH /sessions/{id}/onboarding` 成功。
+- 次の行動: 実機の自己理解チェック5問を入力し直し、「はじめる」から画面遷移を再確認する。
+
+### 案件17 追加修正：Gemini失敗時にレポート画面全体が死ぬ問題（Claude発見、2026-09-05）
+
+**発見内容:** `RealDiscoveryRepository.getReportData()`（`RealDiscoveryRepository.kt:262-275`）が`getWeeklyNarrative()`を無条件で呼び出しており、失敗（Gemini APIキー未設定・503・ネットワーク断）すると例外が`getReportData()`全体に伝播する。呼び出し元`DiscoveryState.loadReportData()`（`DiscoveryState.kt:436-451`）はこれをキャッチして`errorMessage`をセットし、`ReportTabScreen.kt:70-74`によりレポート画面全体が「レポートの読み込みに失敗しました」表示に置き換わる。完了数・累計分数・シグナル分布など既に取得できている実績データも含めて非表示になる。No-Insightガードなし（常にGemini呼び出し）の設計のため、コンテストデモ中にGemini側の問題が起きるとレポートタブ全体が使えなくなるリスクがある。
+
+**ユーザー承認済みの対応方針:** 修正する。`getReportData()`内で`getWeeklyNarrative()`呼び出しだけをtry/catchし、失敗時は`weeklyInsights`/`changeFromPast`を定型フォールバック文（例:「週次レポートは現在取得できません。」）にして、他の実績データ（`totalCompletedCount`/`totalMinutesSpent`/`topSignal`/`signalDistribution`）は`fetchSummary()`が成功していれば通常通り表示を継続する。`fetchSummary()`自体の失敗は従来通り画面全体エラーのままでよい。
+
+**次の担当:** Kimi。対象ファイルは`RealDiscoveryRepository.kt`のみ（`getReportData()`のtry/catch追加）、対応するKotlinテスト（`RealDiscoveryRepositoryTest.kt`にGemini失敗時のフォールバックケースを追加）。TDD必須。既存の`getWeeklyNarrative()`単体の挙動（呼び出し元が直接使う場合は例外を投げたままでよい）は変更しないこと。
+
+**作業履歴・テスト結果（Kimi、2026-09-05）:**
+- TDDで実施。まず`RealDiscoveryRepositoryTest.kt`に2ケース追加。
+  - `getReportData_fallsBackToDefaultNarrativeWhenWeeklyNarrativeFails`: `/sessions/1/report/weekly-narrative`が503を返しても、`fetchSummary()`成功分の`totalCompletedCount`/`totalMinutesSpent`/`topSignal`/`signalDistribution`は通常通り返し、`weeklyInsights`/`changeFromPast`を「週次レポートは現在取得できません。」にフォールバックすることを検証。
+  - `getWeeklyNarrative_stillThrowsWhenServerReturnsError`: `getWeeklyNarrative()`を直接呼んだ場合は従来通り`DiscoveryApiException`を投げることを検証。
+- RED確認: フォールバックケースが`DiscoveryApiException`で失敗。
+- 実装: `RealDiscoveryRepository.kt`の`getReportData()`内で`getWeeklyNarrative()`呼び出しのみを`try/catch(DiscoveryApiException)`で囲み、失敗時は定型フォールバック文をセット。`fetchSummary()`の失敗は伝播させたまま。
+- GREEN確認: `./gradlew :shared:testDebugUnitTest`成功。`RealDiscoveryRepositoryTest`全30ケース通過、`:shared:testDebugUnitTest`全体も成功。
+- backend/配下は未変更。

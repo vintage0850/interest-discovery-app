@@ -200,3 +200,98 @@ class TestClientErrorHandling:
             client.update_hypothesis([], [], [])
         assert "network error" not in str(exc_info.value)
         assert "Gemini API" in str(exc_info.value)
+
+
+class TestGenerateWeeklyNarrative:
+    def test_returns_weekly_narrative(self, client: DiscoveryGeminiClient) -> None:
+        response = MagicMock()
+        response.text = """{
+            "weekly_insights": "技術分野への興味が高まっています",
+            "change_from_past": "前週より実験完了数が増えました"
+        }"""
+        client._client.models.generate_content.return_value = response
+
+        result = client.generate_weekly_narrative(
+            recent_summary={"total_signals": 5, "completed_experiments": 2},
+            previous_summary={"total_signals": 2, "completed_experiments": 0},
+            top_domain="tech",
+        )
+        assert result["weekly_insights"] == "技術分野への興味が高まっています"
+        assert result["change_from_past"] == "前週より実験完了数が増えました"
+
+    def test_rejects_insights_over_200_chars(self, client: DiscoveryGeminiClient) -> None:
+        response = MagicMock()
+        response.text = f"""{{
+            "weekly_insights": "{'あ' * 201}",
+            "change_from_past": "前週より増えました"
+        }}"""
+        client._client.models.generate_content.return_value = response
+
+        with pytest.raises(ValueError):
+            client.generate_weekly_narrative(
+                recent_summary={"total_signals": 5, "completed_experiments": 2},
+                previous_summary={"total_signals": 2, "completed_experiments": 0},
+                top_domain="tech",
+            )
+
+    def test_rejects_change_from_past_over_200_chars(self, client: DiscoveryGeminiClient) -> None:
+        response = MagicMock()
+        response.text = f"""{{
+            "weekly_insights": "技術分野への興味が高まっています",
+            "change_from_past": "{'あ' * 201}"
+        }}"""
+        client._client.models.generate_content.return_value = response
+
+        with pytest.raises(ValueError):
+            client.generate_weekly_narrative(
+                recent_summary={"total_signals": 5, "completed_experiments": 2},
+                previous_summary={"total_signals": 2, "completed_experiments": 0},
+                top_domain="tech",
+            )
+
+    def test_rejects_malformed_json(self, client: DiscoveryGeminiClient) -> None:
+        response = MagicMock()
+        response.text = "not valid json"
+        client._client.models.generate_content.return_value = response
+
+        with pytest.raises(ValueError):
+            client.generate_weekly_narrative(
+                recent_summary={},
+                previous_summary={},
+                top_domain="tech",
+            )
+
+    def test_sdk_exception_is_wrapped(self, client: DiscoveryGeminiClient) -> None:
+        from google.genai.errors import APIError
+
+        client._client.models.generate_content.side_effect = APIError(
+            code=500, response_json={"error": "network error"}
+        )
+        with pytest.raises(RuntimeError) as exc_info:
+            client.generate_weekly_narrative(
+                recent_summary={},
+                previous_summary={},
+                top_domain="tech",
+            )
+        assert "network error" not in str(exc_info.value)
+        assert "Gemini API" in str(exc_info.value)
+
+    def test_request_includes_top_domain_and_summaries(self, client: DiscoveryGeminiClient) -> None:
+        response = MagicMock()
+        response.text = """{
+            "weekly_insights": "技術分野への興味が高まっています",
+            "change_from_past": "前週より実験完了数が増えました"
+        }"""
+        client._client.models.generate_content.return_value = response
+
+        client.generate_weekly_narrative(
+            recent_summary={"total_signals": 5, "completed_experiments": 2},
+            previous_summary={"total_signals": 2, "completed_experiments": 0},
+            top_domain="tech",
+        )
+
+        call_args = client._client.models.generate_content.call_args
+        prompt = call_args.kwargs["contents"]
+        assert "tech" in prompt
+        assert "recent" in prompt.lower() or "直近" in prompt
+        assert "previous" in prompt.lower() or "前週" in prompt

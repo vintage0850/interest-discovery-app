@@ -453,3 +453,8 @@ class SessionSummary(SQLModel):
     behavior_summary: BehaviorSummary
     latest_hypothesis: Optional[HypothesisResponse]
     criteria: list[CriterionResponse] = Field(default_factory=list)
+
+
+class WeeklyNarrativeResponse(SQLModel):
+    weekly_insights: str = Field(..., min_length=1, max_length=200)
+    change_from_past: str = Field(..., min_length=1, max_length=200)

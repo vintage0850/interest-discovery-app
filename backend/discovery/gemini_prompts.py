@@ -54,6 +54,13 @@ class HypothesisCandidate(BaseModel):
         return [d for d in value if d in valid_domains]
 
 
+class WeeklyNarrativeCandidate(BaseModel):
+    """Gemini が生成する週次ナラティブ。"""
+
+    weekly_insights: str = Field(..., min_length=1, max_length=200)
+    change_from_past: str = Field(..., min_length=1, max_length=200)
+
+
 class DiscoveryGeminiClient:
     """Gemini API を使って実験候補と興味仮説を生成するクライアント。"""
 
@@ -130,6 +137,34 @@ class DiscoveryGeminiClient:
         except APIError as exc:
             raise RuntimeError(_sanitize_gemini_error_message(exc)) from exc
         candidate = self._parse_hypothesis_response(response.text or "")
+        return candidate.model_dump()
+
+    def generate_weekly_narrative(
+        self,
+        recent_summary: dict[str, Any],
+        previous_summary: dict[str, Any],
+        top_domain: str,
+    ) -> dict[str, Any]:
+        """直近7日とその前7日のサマリーを比較し、週次ナラティブを生成する。"""
+        from google.genai.errors import APIError
+
+        client = self._ensure_client()
+        prompt = self._build_weekly_narrative_prompt(
+            recent_summary, previous_summary, top_domain
+        )
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=_WEEKLY_NARRATIVE_SYSTEM_INSTRUCTION,
+                    response_mime_type="application/json",
+                    response_schema=WeeklyNarrativeCandidate,
+                ),
+            )
+        except APIError as exc:
+            raise RuntimeError(_sanitize_gemini_error_message(exc)) from exc
+        candidate = self._parse_weekly_narrative_response(response.text or "")
         return candidate.model_dump()
 
     def _build_experiment_prompt(
@@ -231,6 +266,36 @@ class DiscoveryGeminiClient:
             raise ValueError("Gemini 応答がオブジェクトではありません")
         return HypothesisCandidate.model_validate(data)
 
+    def _build_weekly_narrative_prompt(
+        self,
+        recent_summary: dict[str, Any],
+        previous_summary: dict[str, Any],
+        top_domain: str,
+    ) -> str:
+        recent_text = json.dumps(recent_summary, ensure_ascii=False, indent=2)
+        previous_text = json.dumps(previous_summary, ensure_ascii=False, indent=2)
+        return (
+            "以下は高校生の興味発見アクティビティの直近7日間と、その前の7日間のサマリーです。\n\n"
+            "【直近7日】\n"
+            f"{recent_text}\n\n"
+            "【前の7日】\n"
+            f"{previous_text}\n\n"
+            f"最も活動が多かったドメイン: {top_domain}\n\n"
+            "これらを比較して、直近1週間の気づきと、前週からの変化を簡潔に日本語で出力してください。"
+        )
+
+    def _parse_weekly_narrative_response(self, raw: str) -> WeeklyNarrativeCandidate:
+        if not raw:
+            raise ValueError("Gemini から空の応答が返りました")
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Gemini 応答の JSON パースに失敗しました: {exc}") from exc
+
+        if isinstance(data, list):
+            raise ValueError("Gemini 応答がオブジェクトではありません")
+        return WeeklyNarrativeCandidate.model_validate(data)
+
 
 _EXPERIMENT_SYSTEM_INSTRUCTION = """\
 あなたは高校生の興味発見を支援するアシスタントです。
@@ -269,4 +334,22 @@ _HYPOTHESIS_SYSTEM_INSTRUCTION = """\
 - confidence: 確信度（0.0〜1.0）
 - supporting_evidence: 根拠となる観察のリスト
 - suggested_next_domains: 次に試すべきドメインのリスト
+"""
+
+_WEEKLY_NARRATIVE_SYSTEM_INSTRUCTION = """\
+あなたは高校生の興味発見を支援するアシスタントです。
+生徒の直近7日間とその前の7日間の行動データを比較し、簡潔な週次レポートを生成してください。
+
+【あなたの役割】
+- 直近1週間の活動から気づきを述べる
+- 前週と比較した変化を述べる
+
+【絶対にやらないこと】
+- データに基づかない断定はしない
+- 生徒の能力や将来を決めつけない
+
+【出力形式】
+以下の JSON スキーマに厳密に従ってください。余計な説明は不要です。
+- weekly_insights: 直近1週間の気づき（200文字以内）
+- change_from_past: 前週からの変化（200文字以内）
 """

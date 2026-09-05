@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import datetime
 
-from discovery.aggregation import build_behavior_summary
+from discovery.aggregation import build_behavior_summary, build_behavior_summary_for_period
 from discovery.models import (
     ActionType,
     DomainType,
@@ -258,3 +258,200 @@ class TestBehaviorSummary:
         discrepancy = summary.discrepancies[0]
         assert discrepancy["type"] == "high_result_no_signal"
         assert discrepancy["domain"] == DomainType.ART.value
+
+
+class TestBehaviorSummaryForPeriod:
+    def _utc(self, day: int, hour: int = 0) -> datetime.datetime:
+        return datetime.datetime(2026, 9, day, hour, 0, 0, tzinfo=datetime.timezone.utc)
+
+    def test_empty_period_returns_zero_summary(self) -> None:
+        start = self._utc(1)
+        end = self._utc(8)
+        summary = build_behavior_summary_for_period([], [], [], start, end)
+        assert summary.total_signals == 0
+        assert summary.total_experiments == 0
+        assert summary.completed_experiments == 0
+
+    def test_filters_signals_by_created_at(self) -> None:
+        start = self._utc(1)
+        end = self._utc(8)
+        signals = [
+            InterestSignal(
+                session_id=1,
+                action_type=ActionType.SEARCH.value,
+                domain=DomainType.TECH.value,
+                content_summary="Recent",
+                source=InterestSignalSource.SEARCH_HISTORY.value,
+                occurred_at=self._utc(5),
+                created_at=self._utc(5),
+            ),
+            InterestSignal(
+                session_id=1,
+                action_type=ActionType.VIEW.value,
+                domain=DomainType.ART.value,
+                content_summary="Old",
+                source=InterestSignalSource.BROWSING_HISTORY.value,
+                occurred_at=self._utc(10),
+                created_at=self._utc(10),
+            ),
+        ]
+        summary = build_behavior_summary_for_period(signals, [], [], start, end)
+        assert summary.total_signals == 1
+        assert summary.domain_counts == {"tech": 1}
+
+    def test_filters_experiments_by_completed_at(self) -> None:
+        start = self._utc(1)
+        end = self._utc(8)
+        experiments = [
+            Experiment(
+                id=1,
+                session_id=1,
+                title="Recent experiment",
+                description="desc",
+                domain=DomainType.TECH.value,
+                planned_minutes=10,
+                status=ExperimentStatus.COMPLETED.value,
+                actual_minutes=10,
+                created_at=self._utc(5),
+                completed_at=self._utc(5),
+            ),
+            Experiment(
+                id=2,
+                session_id=1,
+                title="Old experiment",
+                description="desc",
+                domain=DomainType.ART.value,
+                planned_minutes=10,
+                status=ExperimentStatus.COMPLETED.value,
+                actual_minutes=10,
+                created_at=self._utc(10),
+                completed_at=self._utc(10),
+            ),
+        ]
+        summary = build_behavior_summary_for_period([], experiments, [], start, end)
+        assert summary.total_experiments == 1
+        assert summary.completed_experiments == 1
+        assert summary.domain_experiment_counts == {"tech": 1}
+
+    def test_excludes_experiments_not_completed_in_period(self) -> None:
+        start = self._utc(1)
+        end = self._utc(8)
+        experiments = [
+            Experiment(
+                id=1,
+                session_id=1,
+                title="Not completed",
+                description="desc",
+                domain=DomainType.TECH.value,
+                planned_minutes=10,
+                status=ExperimentStatus.GENERATED.value,
+                created_at=self._utc(5),
+            ),
+            Experiment(
+                id=2,
+                session_id=1,
+                title="Completed later",
+                description="desc",
+                domain=DomainType.ART.value,
+                planned_minutes=10,
+                status=ExperimentStatus.COMPLETED.value,
+                actual_minutes=10,
+                created_at=self._utc(5),
+                completed_at=self._utc(12),
+            ),
+        ]
+        summary = build_behavior_summary_for_period([], experiments, [], start, end)
+        assert summary.total_experiments == 0
+        assert summary.completed_experiments == 0
+
+    def test_includes_results_for_experiments_completed_in_period(self) -> None:
+        start = self._utc(1)
+        end = self._utc(8)
+        experiments = [
+            Experiment(
+                id=1,
+                session_id=1,
+                title="Completed in period",
+                description="desc",
+                domain=DomainType.TECH.value,
+                planned_minutes=10,
+                status=ExperimentStatus.COMPLETED.value,
+                actual_minutes=10,
+                created_at=self._utc(5),
+                completed_at=self._utc(5),
+            ),
+        ]
+        results = [
+            ExperimentResult(
+                experiment_id=1,
+                enjoyment=5,
+                curiosity=5,
+                retry_intent=5,
+                confidence=1.0,
+            ),
+        ]
+        summary = build_behavior_summary_for_period([], experiments, results, start, end)
+        assert summary.avg_enjoyment == 5.0
+        assert summary.avg_confidence == 1.0
+
+    def test_boundary_is_half_open(self) -> None:
+        start = self._utc(1)
+        end = self._utc(8)
+        signals = [
+            InterestSignal(
+                session_id=1,
+                action_type=ActionType.SEARCH.value,
+                domain=DomainType.TECH.value,
+                content_summary="Exactly at start",
+                source=InterestSignalSource.SEARCH_HISTORY.value,
+                occurred_at=start,
+                created_at=start,
+            ),
+            InterestSignal(
+                session_id=1,
+                action_type=ActionType.VIEW.value,
+                domain=DomainType.ART.value,
+                content_summary="Exactly at end",
+                source=InterestSignalSource.BROWSING_HISTORY.value,
+                occurred_at=end,
+                created_at=end,
+            ),
+        ]
+        summary = build_behavior_summary_for_period(signals, [], [], start, end)
+        assert summary.total_signals == 1
+        assert summary.domain_counts == {"tech": 1}
+
+    def test_computes_domain_counts_for_filtered_signals(self) -> None:
+        start = self._utc(1)
+        end = self._utc(8)
+        signals = [
+            InterestSignal(
+                session_id=1,
+                action_type=ActionType.SEARCH.value,
+                domain=DomainType.TECH.value,
+                content_summary="Recent tech",
+                source=InterestSignalSource.SEARCH_HISTORY.value,
+                occurred_at=self._utc(5),
+                created_at=self._utc(5),
+            ),
+            InterestSignal(
+                session_id=1,
+                action_type=ActionType.SEARCH.value,
+                domain=DomainType.TECH.value,
+                content_summary="Recent tech 2",
+                source=InterestSignalSource.SEARCH_HISTORY.value,
+                occurred_at=self._utc(6),
+                created_at=self._utc(6),
+            ),
+            InterestSignal(
+                session_id=1,
+                action_type=ActionType.VIEW.value,
+                domain=DomainType.ART.value,
+                content_summary="Old art",
+                source=InterestSignalSource.BROWSING_HISTORY.value,
+                occurred_at=self._utc(15),
+                created_at=self._utc(15),
+            ),
+        ]
+        summary = build_behavior_summary_for_period(signals, [], [], start, end)
+        assert summary.domain_counts == {"tech": 2}

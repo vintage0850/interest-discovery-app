@@ -246,16 +246,37 @@ class RealDiscoveryRepository(
         }
     }
 
+    override suspend fun getWeeklyNarrative(): WeeklyNarrative {
+        val id = ensureSession()
+        val response = client.get("/sessions/$id/report/weekly-narrative")
+        if (!response.status.isSuccess()) {
+            throw DiscoveryApiException("週次レポートの取得に失敗しました (HTTP ${response.status.value})")
+        }
+        val narrative = response.body<WeeklyNarrativeResponseDto>()
+        return WeeklyNarrative(
+            weeklyInsights = narrative.weeklyInsights,
+            changeFromPast = narrative.changeFromPast
+        )
+    }
+
     override suspend fun getReportData(): ReportData {
         val summary = fetchSummary().behaviorSummary
+        val narrative = try {
+            getWeeklyNarrative()
+        } catch (_: DiscoveryApiException) {
+            WeeklyNarrative(
+                weeklyInsights = "週次レポートは現在取得できません。",
+                changeFromPast = "週次レポートは現在取得できません。"
+            )
+        }
         val signalCounts = resolveSignalCounts(summary)
         val topSignal = signalCounts.maxByOrNull { it.value }?.key ?: BehaviorSignal.ANALYZE
         return ReportData(
             totalCompletedCount = summary.completedExperiments,
             totalMinutesSpent = summary.totalMinutesSpent,
             topSignal = topSignal,
-            weeklyInsights = "",
-            changeFromPast = "",
+            weeklyInsights = narrative.weeklyInsights,
+            changeFromPast = narrative.changeFromPast,
             signalDistribution = signalCounts.mapKeys { it.key.japaneseLabel }
         )
     }
@@ -401,6 +422,12 @@ private data class SessionSummaryDto(
     val behaviorSummary: BehaviorSummaryDto,
     val latestHypothesis: HypothesisResponseDto? = null,
     val criteria: List<CriterionResponseDto> = emptyList()
+)
+
+@Serializable
+private data class WeeklyNarrativeResponseDto(
+    val weeklyInsights: String,
+    val changeFromPast: String
 )
 
 @Serializable

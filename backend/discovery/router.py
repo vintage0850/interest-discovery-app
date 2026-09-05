@@ -7,7 +7,7 @@ from typing import Annotated, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import SQLModel, create_engine
 
-from discovery.aggregation import build_behavior_summary
+from discovery.aggregation import build_behavior_summary, build_behavior_summary_for_period
 from discovery.gemini_prompts import DiscoveryGeminiClient
 from discovery.models import (
     CriterionResponse,
@@ -32,6 +32,7 @@ from discovery.models import (
     SessionCreate,
     SessionResponse,
     SessionSummary,
+    WeeklyNarrativeResponse,
 )
 from discovery.repository import DiscoveryRepository, StateTransitionError
 
@@ -363,4 +364,53 @@ def get_summary(
         "behavior_summary": behavior_summary,
         "latest_hypothesis": latest_hypothesis,
         "criteria": criteria,
+    }
+
+
+def _compute_top_domain(summary: dict[str, Any]) -> str:
+    """ドメインカウントから最も活動の多かったドメインを返す。"""
+    domain_counts: dict[str, int] = summary.get("domain_counts") or {}
+    if not domain_counts:
+        return DomainType.OTHER.value
+    return max(domain_counts.items(), key=lambda item: item[1])[0]
+
+
+@router.get(
+    "/sessions/{session_id}/report/weekly-narrative",
+    response_model=WeeklyNarrativeResponse,
+)
+def get_weekly_narrative(
+    session_id: int,
+    repo: Annotated[DiscoveryRepository, Depends(get_repository)],
+    client: Annotated[DiscoveryGeminiClient, Depends(get_gemini_client)],
+) -> dict[str, str]:
+    """直近7日とその前7日を比較した週次AIナラティブを取得する。"""
+    _require_session(repo, session_id)
+    now = datetime.datetime.now(datetime.timezone.utc)
+    recent_start = now - datetime.timedelta(days=7)
+    previous_start = now - datetime.timedelta(days=14)
+
+    data = repo.get_summary_data(session_id)
+    recent_summary = build_behavior_summary_for_period(
+        data["signals"], data["experiments"], data["results"], recent_start, now
+    ).model_dump()
+    previous_summary = build_behavior_summary_for_period(
+        data["signals"], data["experiments"], data["results"], previous_start, recent_start
+    ).model_dump()
+
+    top_domain = _compute_top_domain(recent_summary)
+
+    try:
+        narrative_data = client.generate_weekly_narrative(
+            recent_summary, previous_summary, top_domain
+        )
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Weekly narrative generation is currently unavailable",
+        ) from exc
+
+    return {
+        "weekly_insights": narrative_data["weekly_insights"],
+        "change_from_past": narrative_data["change_from_past"],
     }

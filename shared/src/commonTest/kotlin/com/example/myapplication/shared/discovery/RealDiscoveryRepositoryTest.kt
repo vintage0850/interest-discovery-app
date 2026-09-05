@@ -124,6 +124,11 @@ private val SUMMARY_BODY_NO_DATA = """
      "latest_hypothesis": null}
 """.trimIndent()
 
+private val WEEKLY_NARRATIVE_BODY = """
+    {"weekly_insights": "今週は分析する活動に集中できました。",
+     "change_from_past": "先週より試行回数が増えています。"}
+""".trimIndent()
+
 private fun mockClient(handler: (path: String) -> Pair<HttpStatusCode, String>): Pair<HttpClient, MutableList<String>> {
     val requestedPaths = mutableListOf<String>()
     val engine = MockEngine { request ->
@@ -359,6 +364,7 @@ class RealDiscoveryRepositoryTest {
             when (path) {
                 "/sessions" -> HttpStatusCode.Created to SESSION_BODY
                 "/sessions/1/summary" -> HttpStatusCode.OK to SUMMARY_BODY_WITH_HYPOTHESIS
+                "/sessions/1/report/weekly-narrative" -> HttpStatusCode.OK to WEEKLY_NARRATIVE_BODY
                 else -> error("unexpected path: $path")
             }
         }
@@ -417,6 +423,7 @@ class RealDiscoveryRepositoryTest {
             when (path) {
                 "/sessions" -> HttpStatusCode.Created to SESSION_BODY
                 "/sessions/1/summary" -> HttpStatusCode.OK to SUMMARY_BODY_WITH_ACTION_TYPE_COUNTS
+                "/sessions/1/report/weekly-narrative" -> HttpStatusCode.OK to WEEKLY_NARRATIVE_BODY
                 else -> error("unexpected path: $path")
             }
         }
@@ -434,6 +441,7 @@ class RealDiscoveryRepositoryTest {
             when (path) {
                 "/sessions" -> HttpStatusCode.Created to SESSION_BODY
                 "/sessions/1/summary" -> HttpStatusCode.OK to SUMMARY_BODY_WITH_DOMAIN_COUNTS
+                "/sessions/1/report/weekly-narrative" -> HttpStatusCode.OK to WEEKLY_NARRATIVE_BODY
                 else -> error("unexpected path: $path")
             }
         }
@@ -451,6 +459,7 @@ class RealDiscoveryRepositoryTest {
             when (path) {
                 "/sessions" -> HttpStatusCode.Created to SESSION_BODY
                 "/sessions/1/summary" -> HttpStatusCode.OK to SUMMARY_BODY_NO_DATA
+                "/sessions/1/report/weekly-narrative" -> HttpStatusCode.OK to WEEKLY_NARRATIVE_BODY
                 else -> error("unexpected path: $path")
             }
         }
@@ -463,11 +472,12 @@ class RealDiscoveryRepositoryTest {
     }
 
     @Test
-    fun getReportData_returnsEmptyWeeklyInsightsAndChangeFromPast() = runTest {
+    fun getReportData_fallsBackToDefaultNarrativeWhenWeeklyNarrativeFails() = runTest {
         val (client, _) = mockClient { path ->
             when (path) {
                 "/sessions" -> HttpStatusCode.Created to SESSION_BODY
-                "/sessions/1/summary" -> HttpStatusCode.OK to SUMMARY_BODY_WITH_ACTION_TYPE_COUNTS
+                "/sessions/1/summary" -> HttpStatusCode.OK to SUMMARY_BODY_WITH_HYPOTHESIS
+                "/sessions/1/report/weekly-narrative" -> HttpStatusCode.ServiceUnavailable to """{"detail":"Gemini unavailable"}"""
                 else -> error("unexpected path: $path")
             }
         }
@@ -475,8 +485,65 @@ class RealDiscoveryRepositoryTest {
 
         val report = repo.getReportData()
 
-        assertEquals("", report.weeklyInsights)
-        assertEquals("", report.changeFromPast)
+        assertEquals(1, report.totalCompletedCount)
+        assertEquals(12, report.totalMinutesSpent)
+        assertEquals(BehaviorSignal.ANALYZE, report.topSignal)
+        assertEquals(mapOf("分析する" to 1), report.signalDistribution)
+        assertEquals("週次レポートは現在取得できません。", report.weeklyInsights)
+        assertEquals("週次レポートは現在取得できません。", report.changeFromPast)
+    }
+
+    @Test
+    fun getWeeklyNarrative_stillThrowsWhenServerReturnsError() = runTest {
+        val (client, _) = mockClient { path ->
+            when (path) {
+                "/sessions" -> HttpStatusCode.Created to SESSION_BODY
+                "/sessions/1/report/weekly-narrative" -> HttpStatusCode.ServiceUnavailable to """{"detail":"Gemini unavailable"}"""
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client)
+
+        val exception = runCatching { repo.getWeeklyNarrative() }.exceptionOrNull()
+
+        assertTrue(exception is DiscoveryApiException)
+        assertTrue(exception.message?.contains("503") == true)
+    }
+
+    @Test
+    fun getWeeklyNarrative_deserializesSnakeCaseResponse() = runTest {
+        val (client, paths) = mockClient { path ->
+            when (path) {
+                "/sessions" -> HttpStatusCode.Created to SESSION_BODY
+                "/sessions/1/report/weekly-narrative" -> HttpStatusCode.OK to WEEKLY_NARRATIVE_BODY
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client)
+
+        val narrative = repo.getWeeklyNarrative()
+
+        assertEquals("今週は分析する活動に集中できました。", narrative.weeklyInsights)
+        assertEquals("先週より試行回数が増えています。", narrative.changeFromPast)
+        assertEquals(listOf("/sessions", "/sessions/1/report/weekly-narrative"), paths)
+    }
+
+    @Test
+    fun getReportData_includesWeeklyNarrativeFromDedicatedEndpoint() = runTest {
+        val (client, _) = mockClient { path ->
+            when (path) {
+                "/sessions" -> HttpStatusCode.Created to SESSION_BODY
+                "/sessions/1/summary" -> HttpStatusCode.OK to SUMMARY_BODY_WITH_ACTION_TYPE_COUNTS
+                "/sessions/1/report/weekly-narrative" -> HttpStatusCode.OK to WEEKLY_NARRATIVE_BODY
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client)
+
+        val report = repo.getReportData()
+
+        assertEquals("今週は分析する活動に集中できました。", report.weeklyInsights)
+        assertEquals("先週より試行回数が増えています。", report.changeFromPast)
     }
 
     @Test

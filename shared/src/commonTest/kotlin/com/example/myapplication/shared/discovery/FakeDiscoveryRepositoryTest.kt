@@ -45,6 +45,17 @@ class FakeDiscoveryRepositoryTest {
     }
 
     @Test
+    fun getWeeklyNarrative_matchesNarrativeUsedByReportData() = runTest {
+        val repo = FakeDiscoveryRepository(FakeScenario.NORMAL, enableArtificialDelay = false)
+
+        val narrative = repo.getWeeklyNarrative()
+        val report = repo.getReportData()
+
+        assertEquals(narrative.weeklyInsights, report.weeklyInsights)
+        assertEquals(narrative.changeFromPast, report.changeFromPast)
+    }
+
+    @Test
     fun completeOnboarding_recordsArgumentsAndIncrementsCount() = runTest {
         val repo = FakeDiscoveryRepository(FakeScenario.NORMAL, enableArtificialDelay = false)
         repo.completeOnboarding(

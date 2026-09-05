@@ -2,6 +2,11 @@ package com.example.myapplication.shared.discovery
 
 import kotlinx.coroutines.delay
 
+private const val WEEKLY_INSIGHTS =
+    "「構造を見比べる」「UIを分析する」活動に自然と時間が伸びる傾向があります。"
+private const val CHANGE_FROM_PAST =
+    "先月は「つくる」中心でしたが、今月は「仕組みを見る」「比べる」ことへの関心が高まっています。"
+
 /**
  * 完全なインメモリ状態で動作する Discovery 機能のリポジトリ実装。
  */
@@ -367,15 +372,25 @@ class FakeDiscoveryRepository(
         return domainFields
     }
 
+    override suspend fun getWeeklyNarrative(): WeeklyNarrative {
+        simulateLatency()
+        checkErrorState()
+        return WeeklyNarrative(
+            weeklyInsights = WEEKLY_INSIGHTS,
+            changeFromPast = CHANGE_FROM_PAST
+        )
+    }
+
     override suspend fun getReportData(): ReportData {
         simulateLatency()
         checkErrorState()
+        val narrative = getWeeklyNarrative()
         return ReportData(
             totalCompletedCount = completedCount,
             totalMinutesSpent = completedCount * 7,
             topSignal = BehaviorSignal.ANALYZE,
-            weeklyInsights = "「構造を見比べる」「UIを分析する」活動に自然と時間が伸びる傾向があります。",
-            changeFromPast = "先月は「つくる」中心でしたが、今月は「仕組みを見る」「比べる」ことへの関心が高まっています。",
+            weeklyInsights = narrative.weeklyInsights,
+            changeFromPast = narrative.changeFromPast,
             signalDistribution = mapOf(
                 "分析する" to 4,
                 "比べる" to 3,

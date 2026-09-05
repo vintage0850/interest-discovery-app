@@ -21,6 +21,7 @@ interface DiscoveryRepository {
     suspend fun sendHypothesisFeedback(hypothesisId: Int, reaction: HypothesisReaction): HypothesisFeedbackOutcome
     suspend fun getNextExperiment(): Experiment
     suspend fun getDomainFields(): List<DomainField>
+    suspend fun getWeeklyNarrative(): WeeklyNarrative
     suspend fun getReportData(): ReportData
     suspend fun getSettings(): MyDataSettings
     suspend fun updateSettings(settings: MyDataSettings)
@@ -33,3 +34,9 @@ interface DiscoveryRepository {
         initialSelfUnderstandingScore: Float
     )
 }
+
+/** 直近7日とその前7日の比較から生成された週次レポート文。 */
+data class WeeklyNarrative(
+    val weeklyInsights: String,
+    val changeFromPast: String
+)

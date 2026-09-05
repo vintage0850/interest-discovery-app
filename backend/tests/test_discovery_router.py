@@ -970,3 +970,112 @@ class TestOnboardingEndpoints:
         )
         assert response.status_code == 200
         assert response.json()["initial_self_understanding_score"] == pytest.approx(0.0)
+
+
+class TestWeeklyNarrativeEndpoints:
+    def _create_full_session(self, test_client: TestClient) -> int:
+        session = test_client.post("/sessions", json={"student_label": "student-a"}).json()
+        session_id = session["id"]
+        test_client.post(
+            f"/sessions/{session_id}/signals",
+            json={
+                "action_type": "search",
+                "domain": "tech",
+                "content_summary": "Python tutorial",
+                "source": "search_history",
+                "occurred_at": "2026-09-01T10:00:00Z",
+            },
+        )
+
+        mock_client = MagicMock(spec=DiscoveryGeminiClient)
+        mock_client.generate_experiments.return_value = [
+            MagicMock(
+                title="Hello Python",
+                description="Write a one-line print script",
+                domain="tech",
+                planned_minutes=10,
+            ),
+        ]
+        app.dependency_overrides[get_gemini_client] = lambda: mock_client
+        generated = test_client.post(
+            f"/sessions/{session_id}/experiments/generate",
+            json={"n_candidates": 1},
+        ).json()
+        experiment_id = generated[0]["id"]
+        test_client.post(
+            f"/experiments/{experiment_id}/select",
+            json={"selection_note": "note"},
+        )
+        test_client.post(f"/experiments/{experiment_id}/start")
+        test_client.post(
+            f"/experiments/{experiment_id}/complete",
+            json={
+                "enjoyment": 4,
+                "curiosity": 5,
+                "retry_intent": 3,
+                "confidence": 0.8,
+            },
+        )
+        return session_id
+
+    def test_get_weekly_narrative(self, test_client: TestClient) -> None:
+        session_id = self._create_full_session(test_client)
+
+        mock_client = MagicMock(spec=DiscoveryGeminiClient)
+        mock_client.generate_weekly_narrative.return_value = {
+            "weekly_insights": "技術分野への興味が強い",
+            "change_from_past": "前週より実験完了数が増えた",
+        }
+        app.dependency_overrides[get_gemini_client] = lambda: mock_client
+
+        response = test_client.get(f"/sessions/{session_id}/report/weekly-narrative")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["weekly_insights"] == "技術分野への興味が強い"
+        assert data["change_from_past"] == "前週より実験完了数が増えた"
+
+    def test_get_weekly_narrative_session_not_found(self, test_client: TestClient) -> None:
+        response = test_client.get("/sessions/999/report/weekly-narrative")
+        assert response.status_code == 404
+
+    def test_get_weekly_narrative_gemini_error(self, test_client: TestClient) -> None:
+        session_id = self._create_full_session(test_client)
+
+        mock_client = MagicMock(spec=DiscoveryGeminiClient)
+        mock_client.generate_weekly_narrative.side_effect = ValueError("malformed json")
+        app.dependency_overrides[get_gemini_client] = lambda: mock_client
+
+        response = test_client.get(f"/sessions/{session_id}/report/weekly-narrative")
+        assert response.status_code == 503
+
+    def test_get_weekly_narrative_returns_503_when_api_key_missing(
+        self,
+        test_client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+        session_id = self._create_full_session(test_client)
+        app.dependency_overrides[get_gemini_client] = lambda: DiscoveryGeminiClient(api_key=None)
+
+        response = test_client.get(f"/sessions/{session_id}/report/weekly-narrative")
+        assert response.status_code == 503
+        assert "GEMINI_API_KEY" not in response.text
+
+    def test_get_weekly_narrative_calls_client_with_summaries(
+        self, test_client: TestClient
+    ) -> None:
+        session_id = self._create_full_session(test_client)
+
+        mock_client = MagicMock(spec=DiscoveryGeminiClient)
+        mock_client.generate_weekly_narrative.return_value = {
+            "weekly_insights": "技術分野への興味が強い",
+            "change_from_past": "前週より実験完了数が増えた",
+        }
+        app.dependency_overrides[get_gemini_client] = lambda: mock_client
+
+        test_client.get(f"/sessions/{session_id}/report/weekly-narrative")
+
+        call_args = mock_client.generate_weekly_narrative.call_args
+        assert call_args.args[2] == "tech"
+        assert call_args.args[0]["total_signals"] >= 1
+        assert call_args.args[1]["total_signals"] == 0
