@@ -4143,3 +4143,15 @@ Android/KMPのテスト再実行、差分確認、DBスキーマ無変更を独�
 
 **コミットID:** `0678e0c`
 
+### Claude統合検証（2026-09-07）
+
+Kimiの成果物をClaudeが独立に再検証。
+
+- `git show 0678e0c --stat` → 変更ファイルは担当宣言5ファイル＋`TASK.md`のみ。対象外項目（DBカラム追加、Fake実装、UI変更等）への逸脱なし
+- `cd backend && python -m pytest -q` → **253 passed, 5 warnings**（案件20完了時240件から13件増）
+- `./gradlew :shared:testDebugUnitTest --no-daemon --rerun-tasks --tests "*RealDiscoveryRepositoryTest*"` → **BUILD SUCCESSFUL**（キャッシュを無効化して強制再実行、新規テストの実行を確認）
+- `git status --short` → クリーン。`discovery.db`・マイグレーションファイルへの差分なし
+- 判定ロジック（`_compute_dive_candidate_domains`）を確認: 完了実験2件以上→評価付き実験2件以上→enjoyment/curiosity/retry_intent平均4.0以上・confidence平均0.70以上→時間比率1.5倍以上が1件、の順に絞り込み、ドメインID昇順で返す。Android側`RealDiscoveryRepository.kt`の優先順位（UNEXPLORED→EXPLORED→DIVE_CANDIDATE→TRIED）も仕様通り
+
+**次の担当:** ユーザー確認待ち（実機で複数ドメインの行動実験を高評価・長時間で完了させ、Explore タブでDive候補🔥が実データで表示されるか確認）。
+
