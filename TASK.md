@@ -3707,3 +3707,11 @@ pytest backend/tests -q
 - 両レーン完了後、Claudeが統合可否を確認し、実配線タスク（App.kt NavHost追加、Real実装接続）をKimiへ引き継ぐ。
 
 **次の担当:** Kimi（Lane A開始）／Antigravity（Lane B開始）。両者は互いのファイルに触れない。
+
+### 追記（Claude、2026-09-06）— Antigravity非対話実行の失敗、Lane BをKimiへ付け替え
+
+Lane BをAntigravity（`agy -p ... --add-dir .`）で起動したところ、2回とも `jetski: no output produced — a tool required the "command" permission that headless mode cannot prompt for, so it was auto-denied` で失敗（1回目: 権限指定なし、2回目: `--mode accept-edits`指定）。AGENTS.mdの「Antigravityで`--dangerously-skip-permissions`を使わない」に従い、3回目は試さず停止。
+
+**設計判断:** Lane Bのタスク内容を変更せず、担当のみKimiに変更する（`kimi-task.ps1`で2本目の並列ジョブとして起動）。Lane Aと担当ファイルが完全に排他（新規ファイルのみ）のため、同一プロジェクトディレクトリでの並行実行でも競合しない。
+
+**次の担当:** Kimi（Lane B、付け替え）。
