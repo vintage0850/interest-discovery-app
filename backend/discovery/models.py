@@ -4,9 +4,28 @@ import json
 from typing import Any, Optional
 
 from pydantic import Field, field_validator
-from sqlalchemy import JSON, String, UniqueConstraint
+from sqlalchemy import DateTime, JSON, String, TypeDecorator, UniqueConstraint
 from sqlalchemy.orm import validates
 from sqlmodel import Field as SQLField, Relationship, SQLModel
+
+
+class UTCDateTime(TypeDecorator):
+    """SQLite上でもタイムゾーン付きdatetimeを保持する型。
+
+    SQLAlchemyの ``DateTime(timezone=True)`` はSQLiteネイティブでは
+    tzinfoを失うため、読み込み時にnaiveなdatetimeをUTCとして解釈する。
+    書き込み値は常にUTC tz-awareであることを前提とする。
+    """
+
+    impl = DateTime(timezone=True)
+    cache_ok = True
+
+    def process_result_value(
+        self, value: datetime.datetime | None, dialect: Any
+    ) -> datetime.datetime | None:
+        if value is not None and value.tzinfo is None:
+            return value.replace(tzinfo=datetime.timezone.utc)
+        return value
 
 
 class ActionType(str, enum.Enum):
@@ -78,10 +97,12 @@ class DiscoverySession(SQLModel, table=True):
     student_label: str = SQLField(index=True)
     status: str = SQLField(default="active", sa_type=String(32))
     created_at: datetime.datetime = SQLField(
-        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc)
+        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc),
+        sa_type=UTCDateTime(),
     )
     updated_at: datetime.datetime = SQLField(
-        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc)
+        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc),
+        sa_type=UTCDateTime(),
     )
     nickname: Optional[str] = SQLField(default=None, sa_type=String(100))
     age_range: Optional[str] = SQLField(default=None, sa_type=String(32))
@@ -125,9 +146,10 @@ class InterestSignal(SQLModel, table=True):
     domain: str = SQLField(sa_type=String(32), index=True)
     content_summary: str
     source: str = SQLField(sa_type=String(32))
-    occurred_at: datetime.datetime
+    occurred_at: datetime.datetime = SQLField(sa_type=UTCDateTime())
     created_at: datetime.datetime = SQLField(
-        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc)
+        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc),
+        sa_type=UTCDateTime(),
     )
 
     session: "DiscoverySession" = Relationship(back_populates="signals")
@@ -144,7 +166,8 @@ class Evidence(SQLModel, table=True):
     signal_count: int
     summary_text: str = SQLField(sa_type=String(1000))
     created_at: datetime.datetime = SQLField(
-        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc)
+        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc),
+        sa_type=UTCDateTime(),
     )
 
     session: "DiscoverySession" = Relationship(back_populates="evidences")
@@ -182,15 +205,16 @@ class Experiment(SQLModel, table=True):
     domain: str = SQLField(sa_type=String(32), index=True)
     planned_minutes: int
     status: str = SQLField(default=ExperimentStatus.GENERATED.value, sa_type=String(32))
-    selected_at: Optional[datetime.datetime] = None
-    started_at: Optional[datetime.datetime] = None
-    completed_at: Optional[datetime.datetime] = None
-    skipped_at: Optional[datetime.datetime] = None
+    selected_at: Optional[datetime.datetime] = SQLField(default=None, sa_type=UTCDateTime())
+    started_at: Optional[datetime.datetime] = SQLField(default=None, sa_type=UTCDateTime())
+    completed_at: Optional[datetime.datetime] = SQLField(default=None, sa_type=UTCDateTime())
+    skipped_at: Optional[datetime.datetime] = SQLField(default=None, sa_type=UTCDateTime())
     selection_note: Optional[str] = None
     skip_reason: Optional[str] = None
     actual_minutes: Optional[int] = None
     created_at: datetime.datetime = SQLField(
-        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc)
+        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc),
+        sa_type=UTCDateTime(),
     )
 
     session: "DiscoverySession" = Relationship(back_populates="experiments")
@@ -219,7 +243,8 @@ class ExperimentResult(SQLModel, table=True):
     confidence: float
     reflection: Optional[str] = None
     created_at: datetime.datetime = SQLField(
-        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc)
+        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc),
+        sa_type=UTCDateTime(),
     )
 
     experiment: "Experiment" = Relationship(back_populates="result")
@@ -251,7 +276,8 @@ class InterestHypothesis(SQLModel, table=True):
     )
     suggested_next_domains: list[str] = SQLField(default_factory=list, sa_type=JSON)
     created_at: datetime.datetime = SQLField(
-        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc)
+        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc),
+        sa_type=UTCDateTime(),
     )
 
     session: "DiscoverySession" = Relationship(back_populates="hypotheses")
@@ -278,7 +304,8 @@ class HypothesisFeedback(SQLModel, table=True):
     hypothesis_id: int = SQLField(foreign_key="interest_hypothesis.id", index=True)
     reaction: str = SQLField(sa_type=String(16))
     created_at: datetime.datetime = SQLField(
-        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc)
+        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc),
+        sa_type=UTCDateTime(),
     )
 
 
@@ -292,10 +319,12 @@ class PsychAxisResult(SQLModel, table=True):
     axis: str = SQLField(sa_type=String(32))
     score: float
     created_at: datetime.datetime = SQLField(
-        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc)
+        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc),
+        sa_type=UTCDateTime(),
     )
     updated_at: datetime.datetime = SQLField(
-        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc)
+        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc),
+        sa_type=UTCDateTime(),
     )
 
     session: "DiscoverySession" = Relationship(back_populates="psych_axis_results")
@@ -327,7 +356,8 @@ class UserReflection(SQLModel, table=True):
     content: str = SQLField(sa_type=String(2000))
     mood: Optional[int] = SQLField(default=None)
     created_at: datetime.datetime = SQLField(
-        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc)
+        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc),
+        sa_type=UTCDateTime(),
     )
 
     session: "DiscoverySession" = Relationship(back_populates="reflections")
@@ -360,10 +390,12 @@ class Criterion(SQLModel, table=True):
     source_hypothesis_id: int = SQLField(foreign_key="interest_hypothesis.id", unique=True)
     user_confirmed: bool = SQLField(default=True)
     created_at: datetime.datetime = SQLField(
-        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc)
+        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc),
+        sa_type=UTCDateTime(),
     )
     updated_at: datetime.datetime = SQLField(
-        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc)
+        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc),
+        sa_type=UTCDateTime(),
     )
 
     @validates("confidence")

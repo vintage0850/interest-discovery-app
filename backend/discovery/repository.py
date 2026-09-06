@@ -347,7 +347,7 @@ class DiscoveryRepository:
         confidence: float,
         reflection: str | None = None,
     ) -> ExperimentResult:
-        now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+        now = datetime.datetime.now(datetime.timezone.utc)
         with Session(self._engine) as db:
             statement = (
                 update(Experiment)
@@ -381,7 +381,7 @@ class DiscoveryRepository:
             experiment.actual_minutes = max(
                 0,
                 round(
-                    (now - experiment.started_at.replace(tzinfo=None)).total_seconds() / 60
+                    (now - experiment.started_at).total_seconds() / 60
                 ),
             )
 
