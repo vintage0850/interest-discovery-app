@@ -3758,3 +3758,36 @@ Lane A/Bとも「新規機能の骨格」までが完了。以下の**実配線*
 - **[P2]** `PsychAxisSurveyScreen.kt:185-188` — 8問目回答直後（スクロール最下部）のまま結果画面(`showResult = true`)に切り替わるため、同じ`ScrollState`を再利用している結果画面が見出し・グラフを隠した状態で開く。結果画面へ遷移時・編集に戻る時に`scrollState`を先頭へリセットすること。
 
 **次の担当:** Kimi（実配線タスク完了後、または並行して着手可。`PsychAxisSurveyScreen.kt`は現在の実配線タスクの対象外ファイルのため競合しない）。
+
+## 案件19：Mikke設計書ギャップ対応（P0-3見送り分）— Signal→Evidence→Insightの3層分離（backend）
+
+**状態:** `設計判断済み・実装中`
+**担当:** Claude（設計判断）→ Antigravity（backend実装、Kimiの案件18実配線タスクと並行）
+
+### 背景
+
+案件15でP0-3（Signal→Evidence→Insightの3層分離、設計書§14）は「Criterion昇格の起点をSignalでなくHypothesisにしたため見送り」としていた。現状、`InterestHypothesis.supporting_evidence`はGeminiが仮説生成時にその場で作るJSONの塊であり、シグナルから独立した永続エンティティではない。ユーザーの指示により、YAGNI寄りの最小スコープで着手する。
+
+### 設計判断（Claude、2026-09-06）
+
+- `discovery/models.py`に`Evidence`テーブルを新設: `id, session_id(FK), domain, signal_count, summary_text, created_at`。
+- `discovery/repository.py`に`build_evidence(session_id)`を追加: 対象セッションの`InterestSignal`をdomain単位で集計し、`Evidence`レコードを作成・永続化する（既存の`aggregation.py`の集計ロジックを再利用してよい）。`list_evidence(session_id)`（作成日時降順）も追加。
+- `discovery/router.py`の`POST /sessions/{id}/hypothesis/update`のフローを変更: Geminiへ生シグナルを渡す前に、まず`build_evidence(session_id)`でEvidenceを永続化し、Evidenceの要約テキストのリストをGeminiへの入力として使う（`gemini_prompts.py`の`update_hypothesis`・`_build_hypothesis_prompt`の入力を「生シグナル」から「Evidence要約」へ差し替え）。
+- `InterestHypothesis.supporting_evidence`は、Gemini生成のJSONの塊ではなく、参照した`Evidence.id`のリスト（`list[int]`）に変更する。**既存の`HypothesisResponse.supporting_evidence`の型が`list[dict[str, Any]]`から`list[int]`に変わるため後方互換が壊れるが、案件15と同じ理由（本アプリ未リリース、外部利用者なし）でバージョニングは不要と判断する。**
+- 新規`GET /sessions/{id}/evidence`（`response_model=list[EvidenceResponse]`）をデバッグ・将来のUI表示用に追加。
+- TDD必須。既存のDiscoveryテストスイート（現在220件）が壊れないこと。特に`hypothesis/update`の既存テストはEvidence経由のフローに合わせて更新が必要（`supporting_evidence`の型変更に伴うテスト修正を含む）。
+
+### 対象ファイル（担当宣言：Antigravity、非対話実行）
+
+- `backend/discovery/models.py`
+- `backend/discovery/repository.py`
+- `backend/discovery/router.py`
+- `backend/discovery/aggregation.py`
+- `backend/discovery/gemini_prompts.py`
+- `backend/tests/test_discovery_models.py` / `test_discovery_repository.py` / `test_discovery_router.py`
+
+**Kimiの案件18実配線タスク（Android側: SessionStorage, RealDiscoveryRepository.kt, App.kt, SettingsTabScreen.kt, ReportTabScreen.kt）とはファイルが完全に排他のため並行実行可能。**
+
+**対象外（今回のスコープ外・次フェーズ）:** Android側の対応（`RealDiscoveryRepository.kt`のsupporting_evidence型変更への追従、Evidence一覧のUI表示）。backend完成後、別タスクとして着手する。
+
+**次の担当:** Antigravity。
