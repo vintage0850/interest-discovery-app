@@ -3749,3 +3749,12 @@ Lane A/Bとも「新規機能の骨格」までが完了。以下の**実配線*
 3. **(5)Reflection:** `RealDiscoveryRepository`に`addReflection()`/`getReflections()`実装、`ReportTabScreen.kt`への「振り返りを書く」セクション組み込み。
 
 **次の担当:** Kimi（実配線タスク、単独。他AIとの並行不要な統合作業のため）。
+
+### Codex Gate 4レビュー（2026-09-06、コミット`0aef902`対象、Claudeが並行実行）
+
+**判定: `CHANGES REQUIRED`（非ブロッキング、P2×2件）**
+
+- **[P2]** `PsychAxisSurveyScreen.kt:65-67` — 8問の回答と`showResult`が`remember`のみで保持されており、Android設定変更（画面回転等）やプロセス再生成で回答が全て失われる。`rememberSaveable`（Saver対応表現）で保持するか、永続的な画面状態へ引き上げること。
+- **[P2]** `PsychAxisSurveyScreen.kt:185-188` — 8問目回答直後（スクロール最下部）のまま結果画面(`showResult = true`)に切り替わるため、同じ`ScrollState`を再利用している結果画面が見出し・グラフを隠した状態で開く。結果画面へ遷移時・編集に戻る時に`scrollState`を先頭へリセットすること。
+
+**次の担当:** Kimi（実配線タスク完了後、または並行して着手可。`PsychAxisSurveyScreen.kt`は現在の実配線タスクの対象外ファイルのため競合しない）。
