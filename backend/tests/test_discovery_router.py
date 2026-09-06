@@ -48,6 +48,23 @@ class TestSessionEndpoints:
         assert response.status_code == 422
 
 
+class TestListSessionsEndpoints:
+    def test_list_sessions_requires_student_label(self, test_client: TestClient) -> None:
+        response = test_client.get("/sessions")
+        assert response.status_code == 422
+
+    def test_list_sessions_returns_sessions_for_label(self, test_client: TestClient) -> None:
+        test_client.post("/sessions", json={"student_label": "student-a"}).json()
+        test_client.post("/sessions", json={"student_label": "student-a"}).json()
+        test_client.post("/sessions", json={"student_label": "student-b"}).json()
+
+        response = test_client.get("/sessions?student_label=student-a")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) == 2
+        assert all(s["student_label"] == "student-a" for s in data)
+
+
 class TestSignalEndpoints:
     def test_add_signal(self, test_client: TestClient) -> None:
         session = test_client.post("/sessions", json={"student_label": "student-a"}).json()

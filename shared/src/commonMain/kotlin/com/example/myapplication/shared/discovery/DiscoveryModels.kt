@@ -1,5 +1,6 @@
 package com.example.myapplication.shared.discovery
 
+import kotlinx.datetime.Instant
 import kotlinx.serialization.Serializable
 
 /**
@@ -222,3 +223,41 @@ enum class FakeScenario {
     ERROR,
     EMPTY_DISCOVERY
 }
+
+/**
+ * 心理軸アンケートの4軸。
+ * バックエンド [backend/discovery/models.py] の PsychAxis と整合させる。
+ */
+@Serializable
+enum class PsychAxis(val label: String, val japaneseLabel: String) {
+    INVESTIGATE("INVESTIGATE", "探究する"),
+    CREATE("CREATE", "つくる"),
+    EXECUTE("EXECUTE", "実行する"),
+    COMMUNICATE("COMMUNICATE", "伝える");
+
+    companion object {
+        fun fromString(value: String): PsychAxis =
+            entries.firstOrNull { it.name.equals(value, ignoreCase = true) } ?: INVESTIGATE
+    }
+}
+
+/**
+ * 心理軸アンケートの結果表示用 UI モデル。
+ */
+@Serializable
+data class PsychAxisUiModel(
+    val axis: PsychAxis,
+    val score: Float
+)
+
+/**
+ * ユーザー主導 Reflection（日記的振り返り）の UI モデル。
+ * 作成日時は UTC の [Instant] を使う（TIMEZONE.md 準拠）。
+ */
+@Serializable
+data class ReflectionUiModel(
+    val id: String,
+    val content: String,
+    val mood: Int? = null,
+    val createdAt: Instant
+)

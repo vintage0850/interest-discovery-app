@@ -58,6 +58,16 @@ class DiscoveryRepository:
         with Session(self._engine) as db:
             return db.get(DiscoverySession, session_id)
 
+    def list_sessions(self, student_label: str) -> list[DiscoverySession]:
+        """指定した生徒ラベルのセッションを updated_at 降順で取得する。"""
+        with Session(self._engine) as db:
+            statement = (
+                select(DiscoverySession)
+                .where(DiscoverySession.student_label == student_label)
+                .order_by(desc(DiscoverySession.updated_at))
+            )
+            return list(db.exec(statement).all())
+
     def update_onboarding_info(
         self,
         session_id: int,
@@ -113,7 +123,18 @@ class DiscoveryRepository:
             db.add(signal)
             db.commit()
             db.refresh(signal)
-            return signal
+
+        self._touch_session_by_id(session_id)
+        return signal
+
+    def _touch_session_by_id(self, session_id: int) -> None:
+        """別トランザクションで完了した書き込み後に updated_at を更新する。"""
+        with Session(self._engine) as db:
+            session = db.get(DiscoverySession, session_id)
+            if session is not None:
+                session.updated_at = datetime.datetime.now(datetime.timezone.utc)
+                db.add(session)
+                db.commit()
 
     def list_signals(self, session_id: int) -> list[InterestSignal]:
         with Session(self._engine) as db:
@@ -139,7 +160,9 @@ class DiscoveryRepository:
             db.add(experiment)
             db.commit()
             db.refresh(experiment)
-            return experiment
+
+        self._touch_session_by_id(session_id)
+        return experiment
 
     def get_experiment(self, experiment_id: int) -> Experiment | None:
         with Session(self._engine) as db:
@@ -168,6 +191,11 @@ class DiscoveryRepository:
         )
         db.add(signal)
         return signal
+
+    def _touch_session(self, db: Session, session: DiscoverySession) -> None:
+        """セッションの updated_at を現在時刻に更新する。"""
+        session.updated_at = datetime.datetime.now(datetime.timezone.utc)
+        db.add(session)
 
     def _require_transition_success(
         self,
@@ -226,6 +254,7 @@ class DiscoveryRepository:
                 )
             db.commit()
             db.refresh(experiment)
+            self._touch_session_by_id(experiment.session_id)
             return experiment
 
     def skip_experiment(self, experiment_id: int, reason: str | None) -> Experiment:
@@ -260,6 +289,7 @@ class DiscoveryRepository:
                 )
             db.commit()
             db.refresh(experiment)
+            self._touch_session_by_id(experiment.session_id)
             return experiment
 
     def start_experiment(self, experiment_id: int) -> Experiment:
@@ -290,6 +320,7 @@ class DiscoveryRepository:
                 )
             db.commit()
             db.refresh(experiment)
+            self._touch_session_by_id(experiment.session_id)
             return experiment
 
     def _fetch_result_with_experiment(self, db: Session, result_id: int) -> ExperimentResult:
@@ -397,6 +428,7 @@ class DiscoveryRepository:
             db.commit()
             db.refresh(result)
             db.refresh(experiment)
+            self._touch_session_by_id(experiment.session_id)
             return self._fetch_result_with_experiment(db, result.id)
 
     def create_hypothesis(
@@ -418,7 +450,9 @@ class DiscoveryRepository:
             db.add(hypothesis)
             db.commit()
             db.refresh(hypothesis)
-            return hypothesis
+
+        self._touch_session_by_id(session_id)
+        return hypothesis
 
     def get_latest_hypothesis(self, session_id: int) -> InterestHypothesis | None:
         with Session(self._engine) as db:
@@ -478,6 +512,7 @@ class DiscoveryRepository:
             db.refresh(hypothesis)
             if criterion is not None:
                 db.refresh(criterion)
+            self._touch_session_by_id(hypothesis.session_id)
             return feedback, hypothesis, criterion
 
     def list_criteria(self, session_id: int) -> list[Criterion]:

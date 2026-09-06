@@ -4,7 +4,7 @@ import datetime
 import os
 from typing import Annotated, Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlmodel import SQLModel, create_engine
 
 from discovery.aggregation import build_behavior_summary, build_behavior_summary_for_period
@@ -82,6 +82,15 @@ def create_session(
 ) -> DiscoverySession:
     """新しい興味探索セッションを作成する。"""
     return repo.create_session(request.student_label)
+
+
+@router.get("/sessions", response_model=list[SessionResponse])
+def list_sessions(
+    student_label: Annotated[str, Query(min_length=1)],
+    repo: Annotated[DiscoveryRepository, Depends(get_repository)],
+) -> list[DiscoverySession]:
+    """指定した生徒ラベルのセッション一覧を updated_at 降順で取得する。"""
+    return repo.list_sessions(student_label)
 
 
 @router.patch(

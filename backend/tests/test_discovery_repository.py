@@ -644,3 +644,39 @@ class TestOnboardingRepository:
                 999,
                 nickname="Taro",
             )
+
+
+class TestSessionListRepository:
+    def test_list_sessions_orders_by_updated_at_desc(self, repository: DiscoveryRepository) -> None:
+        older = repository.create_session("student-a")
+        newer = repository.create_session("student-a")
+        # updated_at を変えるため、新しい方だけオンボーディングを更新する
+        repository.update_onboarding_info(newer.id, nickname="Newer")
+        sessions = repository.list_sessions("student-a")
+        assert len(sessions) == 2
+        assert sessions[0].id == newer.id
+        assert sessions[1].id == older.id
+
+    def test_list_sessions_filters_by_student_label(self, repository: DiscoveryRepository) -> None:
+        repository.create_session("student-a")
+        repository.create_session("student-b")
+        sessions = repository.list_sessions("student-a")
+        assert len(sessions) == 1
+        assert sessions[0].student_label == "student-a"
+
+
+class TestSessionUpdatedAt:
+    def test_add_signal_updates_session_updated_at(self, repository: DiscoveryRepository) -> None:
+        session = repository.create_session("student-a")
+        before = session.updated_at
+        repository.add_signal(
+            session.id,
+            action_type=ActionType.SEARCH,
+            domain=DomainType.TECH,
+            content_summary="Python",
+            source=InterestSignalSource.SEARCH_HISTORY,
+            occurred_at=datetime.datetime.now(datetime.timezone.utc),
+        )
+        after = repository.get_session(session.id)
+        assert after is not None
+        assert after.updated_at > before

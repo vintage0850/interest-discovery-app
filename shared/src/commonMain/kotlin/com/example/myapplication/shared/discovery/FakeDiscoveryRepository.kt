@@ -1,6 +1,8 @@
 package com.example.myapplication.shared.discovery
 
+import kotlin.time.Clock
 import kotlinx.coroutines.delay
+import kotlinx.datetime.Instant
 
 private const val WEEKLY_INSIGHTS =
     "「構造を見比べる」「UIを分析する」活動に自然と時間が伸びる傾向があります。"
@@ -453,5 +455,69 @@ class FakeDiscoveryRepository(
         lastCompletedOnboardingOptionalInterests = optionalInterests
         lastCompletedOnboardingScore = initialSelfUnderstandingScore
         onboardingCompletedCount++
+    }
+
+    // ---- Lane B：心理軸アンケート・ユーザー主導 Reflection（ダミー実装） ----
+
+    private val psychAxisScores = mutableMapOf<PsychAxis, Float>()
+    private val reflections = mutableListOf<ReflectionUiModel>()
+    private var reflectionIdCounter = 0
+
+    /**
+     * 心理軸アンケートを送信するダミー実装。
+     * 4軸すべてのスコアが 1.0〜5.0 の範囲内であることを検証し、
+     * 結果をメモリ上に保持して返却する。
+     */
+    suspend fun submitPsychAxisSurvey(scores: Map<PsychAxis, Float>): List<PsychAxisUiModel> {
+        simulateLatency()
+        checkErrorState()
+
+        require(scores.size == PsychAxis.entries.size) {
+            "4軸すべてのスコアが必要です（不足: ${PsychAxis.entries - scores.keys}）"
+        }
+        require(PsychAxis.entries.all { it in scores }) {
+            "4軸すべてのスコアが必要です"
+        }
+        scores.forEach { (axis, score) ->
+            require(score in 1.0f..5.0f) {
+                "${axis.name} のスコアは 1.0〜5.0 の範囲である必要があります: $score"
+            }
+        }
+
+        psychAxisScores.clear()
+        psychAxisScores.putAll(scores)
+
+        return scores.map { (axis, score) -> PsychAxisUiModel(axis, score) }
+    }
+
+    /**
+     * ユーザー主導 Reflection を追加するダミー実装。
+     */
+    suspend fun addReflection(content: String, mood: Int?) {
+        simulateLatency()
+        checkErrorState()
+
+        require(content.isNotBlank()) { "振り返りの内容を入力してください" }
+        require(content.length <= 2000) { "振り返りは2000文字以内で入力してください" }
+        mood?.let { require(it in 1..5) { "mood は 1〜5 の範囲である必要があります" } }
+
+        reflectionIdCounter++
+        val reflection = ReflectionUiModel(
+            id = "reflection-$reflectionIdCounter",
+            content = content.trim(),
+            mood = mood,
+            createdAt = Clock.System.now()
+        )
+        reflections.add(0, reflection)
+    }
+
+    /**
+     * ユーザー主導 Reflection の一覧を取得するダミー実装。
+     * 作成日時の降順（新しいものが先頭）で返す。
+     */
+    suspend fun getReflections(): List<ReflectionUiModel> {
+        simulateLatency()
+        checkErrorState()
+        return reflections.toList()
     }
 }
