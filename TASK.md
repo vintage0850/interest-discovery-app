@@ -3615,3 +3615,95 @@ pytest backend/tests -q
 - TDDのREDフェーズを再現することはできなかった（実装・テストが先行して存在する状態のため）。ただし、実装が承認済み方針に一致し、テストが期待通りの振る舞いを検証していることを確認した。
 - `.\gradlew.bat :shared:testDebugUnitTest`を実行し、**BUILD SUCCESSFUL**を確認（`testDebugUnitTest`はUP-TO-DATEで全テスト通過）。
 - 本セッションでは対象ファイルに変更を加えていない。git working treeはクリーン。
+
+## 案件18：Mikke設計書ギャップ対応（P1）— 既存セッション一覧・復帰、心理軸アンケート、ユーザー主導Reflection
+
+**状態:** `設計判断済み・実装中`
+**担当:** Claude（設計判断）→ Kimi（Lane A：バックエンド一括＋セッション機能）／Antigravity（Lane B：新規UI画面2種）
+
+### 背景
+
+ユーザーからの未実装ギャップ指摘（(3)既存セッション一覧・復帰／(4)心理軸アンケート／(5)ユーザー主導Reflection）を受け、並行実装を行う。3機能とも`backend/discovery/models.py`・`repository.py`・`router.py`、`shared/.../App.kt`に触れるため、AGENTS.mdのファイル所有権規則（1ファイルを複数AIが同時編集しない）に従い、バックエンド共通ファイルは**Kimi1人が一括担当**し、Android新規UI画面（新規ディレクトリのみで既存ファイルに触れない）を**Antigravityが並行担当**する2レーン構成とする。
+
+### 設計判断（Claude、2026-09-06）
+
+#### (3) 既存セッション一覧・復帰
+
+**問題:** `RealDiscoveryRepository.sessionId`はメモリ上のみで、アプリ再起動のたびに新規セッションが作られ、過去の実験履歴・仮説・基準に二度とアクセスできない。
+
+**バックエンド:**
+- `discovery/repository.py`に`list_sessions(student_label: str) -> list[DiscoverySession]`を追加（`updated_at`降順）。
+- `discovery/router.py`に`GET /sessions?student_label=xxx`を新設（`response_model=list[SessionResponse]`）。
+- `DiscoverySession.updated_at`を、実験・シグナル・仮説フィードバック等の主要な書き込み操作時に更新する（一覧の並び順を意味あるものにするため。既存の`repository.py`内の該当メソッドに`session.updated_at = now()`を追記）。
+
+**Androidクライアント（shared）:**
+- `DiscoverySettingsStorage`と同じパターンで`SessionStorage`インターフェース（`getLastSessionId(): Int?` / `saveLastSessionId(id: Int)`）を新設。Android実装は`SessionStorage.android.kt`として`SharedPreferences`に保存（`DiscoverySettingsStorage.android.kt`と同じ場所）。
+- `RealDiscoveryRepository.ensureSession()`を変更: メモリの`sessionId`が無い場合、まず`SessionStorage`から復元を試み、`GET /sessions/{id}/summary`で存在確認（404なら通常通り新規作成してから`SessionStorage`に保存）。
+- `DiscoveryRepository`インターフェースに`getSessionList(): List<SessionSummaryItem>`（`SessionSummaryItem(id, nickname, createdAt, updatedAt)`程度の軽量DTO）と`switchToSession(id: Int)`を追加。
+- 設定画面（`ui/discovery/SettingsTabScreen.kt`、既存ファイル）に「過去のセッション」セクションを追加し、一覧から選択して切り替え可能にする。**この既存ファイル変更はKimiが担当**（Antigravityの新規UI画面とは別ファイルのため競合しない）。
+
+#### (4) 心理軸アンケート
+
+**軸の定義（ユーザー承認済み）:** 「興味の方向性」を測る。既存の`BehaviorSignal`enum（ANALYZE/CREATE/IMPROVE/INVESTIGATE/EXPLAIN/ORGANIZE、`domainToBehaviorSignal`で実験ドメインと対応済み）と整合させ、次の4軸に絞る（YAGNI、質問数を絞るため類似軸は統合）:
+- `INVESTIGATE`（探究）— ANALYZE/INVESTIGATEを統合
+- `CREATE`（創造）
+- `EXECUTE`（実行）— IMPROVE/ORGANIZEを統合
+- `COMMUNICATE`（伝達）— EXPLAINを統合
+
+各軸2問、計8問の5件法（1〜5）アンケート。オンボーディングの必須フローには含めず、**設定画面から任意で受けられる機能**とする（オンボーディングの所要時間1〜3分を維持するため、スコープを増やさない）。
+
+**バックエンド:**
+- `discovery/models.py`に`PsychAxis` enum（INVESTIGATE/CREATE/EXECUTE/COMMUNICATE）と`PsychAxisResult`テーブル（id, session_id FK, axis, score: float[1.0-5.0], created_at, updated_at）を新設。`(session_id, axis)`に一意制約（再受験時は上書き＝upsert）。
+- `PsychAxisSurveySubmitRequest`スキーマ: `scores: dict[str, float]`（キーは`PsychAxis`の値、4キー必須、各1.0〜5.0範囲バリデーション）。
+- `router.py`に`POST /sessions/{id}/psych-axis-survey`（upsert、`response_model=list[PsychAxisResultResponse]`）を新設。
+- `SessionSummary`に`psych_axis_scores: dict[str, float]`（未回答なら空dict）を追加。
+- 質問文と軸の対応はクライアント側の静的定義とし、サーバーは軸ごとの平均値のみを受け取る（既存の`initial_self_understanding_score`と同じ設計方針＝クライアント側で平均計算、サーバーは検証のみ）。
+
+**Androidクライアント（shared、Antigravity担当・新規ファイルのみ）:**
+- 新規ディレクトリ`shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/survey/`に`PsychAxisSurveyScreen.kt`（8問Likert、`OnboardingSelfCheckScreen.kt`と同様のUI構造を踏襲）を作成。
+- 新規`PsychAxisQuestion.kt`に質問文8問と軸の対応表（静的定数）を定義。
+- 結果表示用に`PsychAxisResultCard.kt`（4軸のスコアを棒グラフ的に表示するシンプルなComposable）を新規作成。
+- **この時点ではバックエンド未接続。`FakeDiscoveryRepository`に`submitPsychAxisSurvey`のダミー実装を追加して単体で動作確認する。** 実配線（`RealDiscoveryRepository`への実装追加、`App.kt`のNavHostへのルート追加、設定画面からの導線）は本案件のバックエンドがKimiにより完了した後、別タスクとしてKimiが担当する。
+
+#### (5) ユーザー主導Reflection機能
+
+既存の`ExperimentResult.reflection`は実験完了時に紐づく振り返りであり、本機能はそれとは別に**いつでも自由に書ける振り返り（日記的な機能）**とする。
+
+**バックエンド:**
+- `discovery/models.py`に`UserReflection`テーブル（id, session_id FK, content: str[max 2000文字], mood: Optional[int][1-5], created_at）を新設。
+- `UserReflectionCreate`（content必須、mood任意）、`UserReflectionResponse`スキーマを追加。
+- `router.py`に`POST /sessions/{id}/reflections`（作成）、`GET /sessions/{id}/reflections`（一覧、`created_at`降順）を新設。
+
+**Androidクライアント（shared、Antigravity担当・新規ファイルのみ）:**
+- 新規ディレクトリ`shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/reflection/`に`ReflectionListScreen.kt`（過去の振り返り一覧＋新規追加用の入力欄とmoodピッカー1〜5、FAB）を作成。
+- 導線は**既存のレポートタブ（`ReportTabScreen.kt`）内に「振り返りを書く」セクションとして追加**する（新規タブ・新規ナビゲーションルートは作らずスコープを抑える）。この既存ファイル変更は導線追加のみの小さな差分のため**Kimiが担当**（Antigravityは新規`ReflectionListScreen.kt`のComposable本体のみ担当し、`ReportTabScreen.kt`への組み込みはKimiが行う）。
+- **この時点ではバックエンド未接続。`FakeDiscoveryRepository`にダミー実装を追加して単体で動作確認する。** 実配線はKimiが後続タスクで担当。
+
+### 対象ファイル（担当宣言・ファイル競合回避）
+
+**Lane A（Kimi、担当解除まで他AIは編集しない）:**
+- `backend/discovery/models.py`
+- `backend/discovery/repository.py`
+- `backend/discovery/router.py`
+- `backend/tests/test_discovery_models.py` / `test_discovery_repository.py` / `test_discovery_router.py`
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/SessionStorage.kt`（新規）
+- `shared/src/androidMain/kotlin/com/example/myapplication/shared/discovery/SessionStorage.android.kt`（新規）
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/RealDiscoveryRepository.kt`
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/DiscoveryRepository.kt`
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/discovery/SettingsTabScreen.kt`
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/discovery/ReportTabScreen.kt`（Reflection導線の組み込みのみ）
+- `shared/src/commonTest/**`（対応する新規テスト）
+
+**Lane B（Antigravity、担当解除まで他AIは編集しない。上記Lane Aのファイルには一切触れない）:**
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/survey/`配下（新規ディレクトリ、全ファイル新規）
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/reflection/ReflectionListScreen.kt`（新規、Composable本体のみ。`ReportTabScreen.kt`への組み込みはしない）
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/FakeDiscoveryRepository.kt`（`submitPsychAxisSurvey`・Reflection関連のダミー実装追加のみ。他のメソッドは変更しない）
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/DiscoveryModels.kt`（`PsychAxis`・`PsychAxisUiModel`・`ReflectionUiModel`等のUI用データクラス追加のみ。既存クラスは変更しない）
+- 対応するComposeプレビュー・単体テスト（新規ファイルのみ）
+
+**受入条件:**
+- Lane A: 既存のDiscoveryテストスイート（バックエンド、Kotlin discovery）が壊れないこと。新規エンドポイント・メソッドにTDDで先にテストを書く。
+- Lane B: 新規画面はFake実装のみで単体コンパイル・プレビュー動作すること。既存ファイルは一切変更しない。
+- 両レーン完了後、Claudeが統合可否を確認し、実配線タスク（App.kt NavHost追加、Real実装接続）をKimiへ引き継ぐ。
+
+**次の担当:** Kimi（Lane A開始）／Antigravity（Lane B開始）。両者は互いのファイルに触れない。
