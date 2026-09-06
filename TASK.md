@@ -3923,3 +3923,16 @@ Lane A/Bとも「新規機能の骨格」までが完了。以下の**実配線*
 
 - **コミットID:** `4a43f090c9be78e34c3ae582b1524948872ed313` (`4a43f09`)
 
+### Claude統合検証（2026-09-07）— Kimi(P2修正)・Antigravity(Evidence追従)両レーン完了後
+
+両レーンの成果物（コミット`100894c`・`4a43f09`・`eba0615`）を統合した状態でClaudeが独立に再検証。
+
+- `./gradlew :shared:compileDebugKotlinAndroid --no-daemon` → **BUILD SUCCESSFUL**
+- `./gradlew :shared:testDebugUnitTest --no-daemon` → **BUILD SUCCESSFUL**（全テスト通過。Antigravity並行作業中のみ見られたコンパイルエラーは両者コミット後は解消）
+- `cd backend && python -m pytest -q` → **237 passed, 5 warnings**
+- `git status --short` → クリーン（対象ファイルの重複・競合なし）
+
+案件18・19とも実配線・Android追従・Codex P2修正まで完了。次フェーズの未着手ギャップ: (1)Google Sign-In連携、(6)契約書PDF読込。全部終わったらoriginへpush（ユーザー許可要）。
+
+**次の担当:** ユーザー確認待ち（次にどのギャップに着手するか、またはこのままpushするか）。
+
