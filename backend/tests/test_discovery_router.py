@@ -8,7 +8,7 @@ from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel, create_engine
 
 from discovery.gemini_prompts import DiscoveryGeminiClient
-from discovery.models import DomainType
+from discovery.models import DomainType, PsychAxis
 from discovery.repository import DiscoveryRepository
 from discovery.router import get_gemini_client, get_repository
 from main import app
@@ -1096,3 +1096,127 @@ class TestWeeklyNarrativeEndpoints:
         assert call_args.args[2] == "tech"
         assert call_args.args[0]["total_signals"] >= 1
         assert call_args.args[1]["total_signals"] == 0
+
+
+class TestPsychAxisSurveyEndpoints:
+    def _valid_scores(self) -> dict[str, float]:
+        return {
+            PsychAxis.INVESTIGATE.value: 3.0,
+            PsychAxis.CREATE.value: 4.0,
+            PsychAxis.EXECUTE.value: 2.0,
+            PsychAxis.COMMUNICATE.value: 5.0,
+        }
+
+    def test_submit_survey_returns_results(self, test_client: TestClient) -> None:
+        session = test_client.post("/sessions", json={"student_label": "student-a"}).json()
+        response = test_client.post(
+            f"/sessions/{session['id']}/psych-axis-survey",
+            json={"scores": self._valid_scores()},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) == 4
+        assert all("axis" in item and "score" in item for item in data)
+        axes = {item["axis"] for item in data}
+        assert axes == {axis.value for axis in PsychAxis}
+
+    def test_submit_survey_invalid_score_returns_422(self, test_client: TestClient) -> None:
+        session = test_client.post("/sessions", json={"student_label": "student-a"}).json()
+        scores = dict(self._valid_scores())
+        scores[PsychAxis.INVESTIGATE.value] = 6.0
+        response = test_client.post(
+            f"/sessions/{session['id']}/psych-axis-survey",
+            json={"scores": scores},
+        )
+        assert response.status_code == 422
+
+    def test_submit_survey_unknown_axis_returns_422(self, test_client: TestClient) -> None:
+        session = test_client.post("/sessions", json={"student_label": "student-a"}).json()
+        scores = dict(self._valid_scores())
+        scores["UNKNOWN"] = 3.0
+        response = test_client.post(
+            f"/sessions/{session['id']}/psych-axis-survey",
+            json={"scores": scores},
+        )
+        assert response.status_code == 422
+
+    def test_submit_survey_session_not_found_returns_404(self, test_client: TestClient) -> None:
+        response = test_client.post(
+            "/sessions/999/psych-axis-survey",
+            json={"scores": self._valid_scores()},
+        )
+        assert response.status_code == 404
+
+
+class TestUserReflectionEndpoints:
+    def test_create_reflection(self, test_client: TestClient) -> None:
+        session = test_client.post("/sessions", json={"student_label": "student-a"}).json()
+        response = test_client.post(
+            f"/sessions/{session['id']}/reflections",
+            json={"content": "Today I felt curious.", "mood": 4},
+        )
+        assert response.status_code == 201
+        data = response.json()
+        assert data["session_id"] == session["id"]
+        assert data["content"] == "Today I felt curious."
+        assert data["mood"] == 4
+
+    def test_create_reflection_without_mood(self, test_client: TestClient) -> None:
+        session = test_client.post("/sessions", json={"student_label": "student-a"}).json()
+        response = test_client.post(
+            f"/sessions/{session['id']}/reflections",
+            json={"content": "Just a note."},
+        )
+        assert response.status_code == 201
+        assert response.json()["mood"] is None
+
+    def test_create_reflection_invalid_mood_returns_422(self, test_client: TestClient) -> None:
+        session = test_client.post("/sessions", json={"student_label": "student-a"}).json()
+        response = test_client.post(
+            f"/sessions/{session['id']}/reflections",
+            json={"content": "note", "mood": 6},
+        )
+        assert response.status_code == 422
+
+    def test_create_reflection_session_not_found_returns_404(self, test_client: TestClient) -> None:
+        response = test_client.post(
+            "/sessions/999/reflections",
+            json={"content": "note"},
+        )
+        assert response.status_code == 404
+
+    def test_list_reflections_returns_desc_order(self, test_client: TestClient) -> None:
+        session = test_client.post("/sessions", json={"student_label": "student-a"}).json()
+        first = test_client.post(
+            f"/sessions/{session['id']}/reflections",
+            json={"content": "First"},
+        ).json()
+        second = test_client.post(
+            f"/sessions/{session['id']}/reflections",
+            json={"content": "Second"},
+        ).json()
+        response = test_client.get(f"/sessions/{session['id']}/reflections")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) == 2
+        assert data[0]["id"] == second["id"]
+        assert data[1]["id"] == first["id"]
+
+
+class TestSessionSummaryWithPsychAxis:
+    def test_get_summary_includes_psych_axis_scores(self, test_client: TestClient) -> None:
+        session = test_client.post("/sessions", json={"student_label": "student-a"}).json()
+        scores = {
+            PsychAxis.INVESTIGATE.value: 3.0,
+            PsychAxis.CREATE.value: 4.0,
+            PsychAxis.EXECUTE.value: 2.0,
+            PsychAxis.COMMUNICATE.value: 5.0,
+        }
+        test_client.post(
+            f"/sessions/{session['id']}/psych-axis-survey",
+            json={"scores": scores},
+        )
+        response = test_client.get(f"/sessions/{session['id']}/summary")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["psych_axis_scores"] == scores

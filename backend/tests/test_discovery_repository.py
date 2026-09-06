@@ -15,6 +15,9 @@ from discovery.models import (
     HypothesisReaction,
     InterestSignal,
     InterestSignalSource,
+    PsychAxis,
+    PsychAxisResult,
+    UserReflection,
 )
 from discovery.repository import DiscoveryRepository, StateTransitionError
 
@@ -680,3 +683,179 @@ class TestSessionUpdatedAt:
         after = repository.get_session(session.id)
         assert after is not None
         assert after.updated_at > before
+
+    def test_create_experiment_updates_session_updated_at(self, repository: DiscoveryRepository) -> None:
+        session = repository.create_session("student-a")
+        before = session.updated_at
+        repository.create_experiment(
+            session.id,
+            title="Try coding",
+            description="Write Python",
+            domain=DomainType.TECH,
+            planned_minutes=10,
+        )
+        after = repository.get_session(session.id)
+        assert after is not None
+        assert after.updated_at > before
+
+    def test_complete_experiment_updates_session_updated_at(self, repository: DiscoveryRepository) -> None:
+        session = repository.create_session("student-a")
+        experiment = repository.create_experiment(
+            session.id,
+            title="Try coding",
+            description="Write Python",
+            domain=DomainType.TECH,
+            planned_minutes=10,
+        )
+        repository.select_experiment(experiment.id, "note")
+        repository.start_experiment(experiment.id)
+        before = repository.get_session(session.id).updated_at
+        repository.complete_experiment(
+            experiment.id,
+            enjoyment=4,
+            curiosity=5,
+            retry_intent=3,
+            confidence=0.8,
+        )
+        after = repository.get_session(session.id)
+        assert after is not None
+        assert after.updated_at > before
+
+    def test_add_hypothesis_feedback_updates_session_updated_at(self, repository: DiscoveryRepository) -> None:
+        session = repository.create_session("student-a")
+        hypothesis = repository.create_hypothesis(
+            session.id,
+            summary="Likes tech",
+            confidence=0.5,
+            supporting_evidence=[],
+            suggested_next_domains=[],
+        )
+        before = repository.get_session(session.id).updated_at
+        repository.add_hypothesis_feedback(hypothesis.id, HypothesisReaction.AGREE)
+        after = repository.get_session(session.id)
+        assert after is not None
+        assert after.updated_at > before
+
+    def test_upsert_psych_axis_results_updates_session_updated_at(
+        self, repository: DiscoveryRepository
+    ) -> None:
+        session = repository.create_session("student-a")
+        before = session.updated_at
+        repository.upsert_psych_axis_results(
+            session.id,
+            {
+                PsychAxis.INVESTIGATE.value: 3.0,
+                PsychAxis.CREATE.value: 4.0,
+                PsychAxis.EXECUTE.value: 2.0,
+                PsychAxis.COMMUNICATE.value: 5.0,
+            },
+        )
+        after = repository.get_session(session.id)
+        assert after is not None
+        assert after.updated_at > before
+
+    def test_create_reflection_updates_session_updated_at(self, repository: DiscoveryRepository) -> None:
+        session = repository.create_session("student-a")
+        before = session.updated_at
+        repository.create_user_reflection(session.id, "Today I felt curious.", mood=4)
+        after = repository.get_session(session.id)
+        assert after is not None
+        assert after.updated_at > before
+
+
+class TestPsychAxisRepository:
+    def test_upsert_psych_axis_results_creates_records(self, repository: DiscoveryRepository) -> None:
+        session = repository.create_session("student-a")
+        results = repository.upsert_psych_axis_results(
+            session.id,
+            {
+                PsychAxis.INVESTIGATE.value: 3.0,
+                PsychAxis.CREATE.value: 4.0,
+                PsychAxis.EXECUTE.value: 2.0,
+                PsychAxis.COMMUNICATE.value: 5.0,
+            },
+        )
+        assert len(results) == 4
+        assert all(r.session_id == session.id for r in results)
+        assert {r.axis for r in results} == {axis.value for axis in PsychAxis}
+
+    def test_upsert_overwrites_existing_axis(self, repository: DiscoveryRepository) -> None:
+        session = repository.create_session("student-a")
+        repository.upsert_psych_axis_results(
+            session.id,
+            {PsychAxis.INVESTIGATE.value: 3.0},
+        )
+        results = repository.upsert_psych_axis_results(
+            session.id,
+            {PsychAxis.INVESTIGATE.value: 4.5},
+        )
+        assert len(results) == 1
+        assert results[0].score == pytest.approx(4.5)
+
+    def test_get_psych_axis_results(self, repository: DiscoveryRepository) -> None:
+        session = repository.create_session("student-a")
+        repository.upsert_psych_axis_results(
+            session.id,
+            {
+                PsychAxis.INVESTIGATE.value: 3.0,
+                PsychAxis.CREATE.value: 4.0,
+            },
+        )
+        fetched = repository.get_psych_axis_results(session.id)
+        assert len(fetched) == 2
+        assert fetched[0].axis in {PsychAxis.INVESTIGATE.value, PsychAxis.CREATE.value}
+
+    def test_get_psych_axis_results_empty(self, repository: DiscoveryRepository) -> None:
+        session = repository.create_session("student-a")
+        assert repository.get_psych_axis_results(session.id) == []
+
+    def test_invalid_axis_rejected(self, repository: DiscoveryRepository) -> None:
+        session = repository.create_session("student-a")
+        with pytest.raises(ValueError):
+            repository.upsert_psych_axis_results(session.id, {"UNKNOWN": 3.0})
+
+    def test_invalid_score_rejected(self, repository: DiscoveryRepository) -> None:
+        session = repository.create_session("student-a")
+        with pytest.raises(ValueError):
+            repository.upsert_psych_axis_results(
+                session.id,
+                {PsychAxis.INVESTIGATE.value: 6.0},
+            )
+
+
+class TestUserReflectionRepository:
+    def test_create_reflection(self, repository: DiscoveryRepository) -> None:
+        session = repository.create_session("student-a")
+        reflection = repository.create_user_reflection(
+            session.id, "Today I felt curious.", mood=4
+        )
+        assert reflection.id is not None
+        assert reflection.session_id == session.id
+        assert reflection.content == "Today I felt curious."
+        assert reflection.mood == 4
+
+    def test_create_reflection_without_mood(self, repository: DiscoveryRepository) -> None:
+        session = repository.create_session("student-a")
+        reflection = repository.create_user_reflection(session.id, "Just a note.")
+        assert reflection.mood is None
+
+    def test_list_reflections_orders_by_created_at_desc(
+        self, repository: DiscoveryRepository
+    ) -> None:
+        session = repository.create_session("student-a")
+        first = repository.create_user_reflection(session.id, "First")
+        second = repository.create_user_reflection(session.id, "Second")
+        reflections = repository.list_user_reflections(session.id)
+        assert len(reflections) == 2
+        assert reflections[0].id == second.id
+        assert reflections[1].id == first.id
+
+    def test_create_reflection_rejects_empty_content(self, repository: DiscoveryRepository) -> None:
+        session = repository.create_session("student-a")
+        with pytest.raises(ValueError):
+            repository.create_user_reflection(session.id, "")
+
+    def test_create_reflection_rejects_too_long_content(self, repository: DiscoveryRepository) -> None:
+        session = repository.create_session("student-a")
+        with pytest.raises(ValueError):
+            repository.create_user_reflection(session.id, "x" * 2001)

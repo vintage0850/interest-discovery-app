@@ -23,6 +23,9 @@ from discovery.models import (
     InterestHypothesis,
     InterestSignal,
     InterestSignalSource,
+    PsychAxis,
+    PsychAxisResult,
+    UserReflection,
 )
 
 # 仮説へのユーザー反応が確信度に与える増減。同感で強まり、違うで弱まる。
@@ -521,6 +524,89 @@ class DiscoveryRepository:
                 select(Criterion)
                 .where(Criterion.session_id == session_id)
                 .order_by(desc(Criterion.confidence))
+            )
+            return list(db.exec(statement).all())
+
+    def upsert_psych_axis_results(
+        self, session_id: int, scores: dict[str, float]
+    ) -> list[PsychAxisResult]:
+        """心理軸アンケート結果を upsert する。同一軸があれば上書きする。"""
+        now = datetime.datetime.now(datetime.timezone.utc)
+        with Session(self._engine) as db:
+            session = db.get(DiscoverySession, session_id)
+            if session is None:
+                raise ValueError(f"Session {session_id} not found")
+
+            results: list[PsychAxisResult] = []
+            for axis, score in scores.items():
+                # SQLAlchemy validates で軸とスコアを検証
+                candidate = PsychAxisResult(
+                    session_id=session_id, axis=axis, score=score
+                )
+                existing = db.exec(
+                    select(PsychAxisResult).where(
+                        PsychAxisResult.session_id == session_id,
+                        PsychAxisResult.axis == axis,
+                    )
+                ).first()
+                if existing is not None:
+                    existing.score = candidate.score
+                    existing.updated_at = now
+                    db.add(existing)
+                    results.append(existing)
+                else:
+                    db.add(candidate)
+                    results.append(candidate)
+
+            session.updated_at = now
+            db.add(session)
+            db.commit()
+            for result in results:
+                db.refresh(result)
+            return results
+
+    def get_psych_axis_results(self, session_id: int) -> list[PsychAxisResult]:
+        """指定セッションの心理軸アンケート結果を created_at 降順で取得する。"""
+        with Session(self._engine) as db:
+            statement = (
+                select(PsychAxisResult)
+                .where(PsychAxisResult.session_id == session_id)
+                .order_by(desc(PsychAxisResult.created_at))
+            )
+            return list(db.exec(statement).all())
+
+    def get_psych_axis_scores(self, session_id: int) -> dict[str, float]:
+        """指定セッションの心理軸スコアを {axis: score} の dict で返す。"""
+        results = self.get_psych_axis_results(session_id)
+        return {result.axis: result.score for result in results}
+
+    def create_user_reflection(
+        self, session_id: int, content: str, mood: Optional[int] = None
+    ) -> UserReflection:
+        """ユーザー主導の振り返りを作成する。"""
+        now = datetime.datetime.now(datetime.timezone.utc)
+        with Session(self._engine) as db:
+            session = db.get(DiscoverySession, session_id)
+            if session is None:
+                raise ValueError(f"Session {session_id} not found")
+
+            reflection = UserReflection(
+                session_id=session_id, content=content, mood=mood
+            )
+            db.add(reflection)
+            session.updated_at = now
+            db.add(session)
+            db.commit()
+            db.refresh(reflection)
+            return reflection
+
+    def list_user_reflections(self, session_id: int) -> list[UserReflection]:
+        """指定セッションの振り返りを created_at 降順で取得する。"""
+        with Session(self._engine) as db:
+            statement = (
+                select(UserReflection)
+                .where(UserReflection.session_id == session_id)
+                .order_by(desc(UserReflection.created_at))
             )
             return list(db.exec(statement).all())
 

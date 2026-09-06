@@ -29,9 +29,15 @@ from discovery.models import (
     InterestSignalCreate,
     InterestSignalResponse,
     OnboardingUpdateRequest,
+    PsychAxisResult,
+    PsychAxisResultResponse,
+    PsychAxisSurveySubmitRequest,
     SessionCreate,
     SessionResponse,
     SessionSummary,
+    UserReflection,
+    UserReflectionCreate,
+    UserReflectionResponse,
     WeeklyNarrativeResponse,
 )
 from discovery.repository import DiscoveryRepository, StateTransitionError
@@ -91,6 +97,55 @@ def list_sessions(
 ) -> list[DiscoverySession]:
     """指定した生徒ラベルのセッション一覧を updated_at 降順で取得する。"""
     return repo.list_sessions(student_label)
+
+
+@router.post(
+    "/sessions/{session_id}/psych-axis-survey",
+    response_model=list[PsychAxisResultResponse],
+)
+def submit_psych_axis_survey(
+    session_id: int,
+    request: PsychAxisSurveySubmitRequest,
+    repo: Annotated[DiscoveryRepository, Depends(get_repository)],
+) -> list[PsychAxisResult]:
+    """心理軸アンケート結果を登録・更新する。"""
+    _require_session(repo, session_id)
+    return repo.upsert_psych_axis_results(session_id, request.scores)
+
+
+@router.post(
+    "/sessions/{session_id}/reflections",
+    response_model=UserReflectionResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_reflection(
+    session_id: int,
+    request: UserReflectionCreate,
+    repo: Annotated[DiscoveryRepository, Depends(get_repository)],
+) -> UserReflection:
+    """ユーザー主導の振り返りを作成する。"""
+    _require_session(repo, session_id)
+    try:
+        return repo.create_user_reflection(
+            session_id, content=request.content, mood=request.mood
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+
+
+@router.get(
+    "/sessions/{session_id}/reflections",
+    response_model=list[UserReflectionResponse],
+)
+def list_reflections(
+    session_id: int,
+    repo: Annotated[DiscoveryRepository, Depends(get_repository)],
+) -> list[UserReflection]:
+    """指定セッションの振り返り一覧を created_at 降順で取得する。"""
+    _require_session(repo, session_id)
+    return repo.list_user_reflections(session_id)
 
 
 @router.patch(
@@ -368,11 +423,13 @@ def get_summary(
     )
     latest_hypothesis = repo.get_latest_hypothesis(session_id)
     criteria = repo.list_criteria(session_id)
+    psych_axis_scores = repo.get_psych_axis_scores(session_id)
     return {
         "session": session,
         "behavior_summary": behavior_summary,
         "latest_hypothesis": latest_hypothesis,
         "criteria": criteria,
+        "psych_axis_scores": psych_axis_scores,
     }
 
 

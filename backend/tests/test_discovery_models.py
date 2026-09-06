@@ -13,6 +13,9 @@ from discovery.models import (
     InterestSignalCreate,
     InterestSignalSource,
     OnboardingUpdateRequest,
+    PsychAxis,
+    PsychAxisSurveySubmitRequest,
+    UserReflectionCreate,
 )
 
 
@@ -241,3 +244,75 @@ class TestOnboardingUpdateRequest:
     def test_score_at_upper_boundary_passes(self) -> None:
         req = OnboardingUpdateRequest(initial_self_understanding_score=5.0)
         assert req.initial_self_understanding_score == pytest.approx(5.0)
+
+
+class TestPsychAxisSurveySubmitRequest:
+    def _valid_scores(self) -> dict[str, float]:
+        return {
+            PsychAxis.INVESTIGATE.value: 3.0,
+            PsychAxis.CREATE.value: 4.0,
+            PsychAxis.EXECUTE.value: 2.0,
+            PsychAxis.COMMUNICATE.value: 5.0,
+        }
+
+    def test_valid_survey_passes(self) -> None:
+        req = PsychAxisSurveySubmitRequest(scores=self._valid_scores())
+        assert req.scores == self._valid_scores()
+
+    def test_missing_axis_rejected(self) -> None:
+        scores = dict(self._valid_scores())
+        del scores[PsychAxis.CREATE.value]
+        with pytest.raises(ValidationError):
+            PsychAxisSurveySubmitRequest(scores=scores)
+
+    def test_unknown_axis_rejected(self) -> None:
+        scores = dict(self._valid_scores())
+        scores["UNKNOWN"] = 3.0
+        with pytest.raises(ValidationError):
+            PsychAxisSurveySubmitRequest(scores=scores)
+
+    def test_score_below_1_rejected(self) -> None:
+        scores = dict(self._valid_scores())
+        scores[PsychAxis.INVESTIGATE.value] = 0.5
+        with pytest.raises(ValidationError):
+            PsychAxisSurveySubmitRequest(scores=scores)
+
+    def test_score_above_5_rejected(self) -> None:
+        scores = dict(self._valid_scores())
+        scores[PsychAxis.INVESTIGATE.value] = 5.5
+        with pytest.raises(ValidationError):
+            PsychAxisSurveySubmitRequest(scores=scores)
+
+    def test_non_numeric_score_rejected(self) -> None:
+        scores = dict(self._valid_scores())
+        scores[PsychAxis.INVESTIGATE.value] = "high"  # type: ignore[assignment]
+        with pytest.raises(ValidationError):
+            PsychAxisSurveySubmitRequest(scores=scores)
+
+
+class TestUserReflectionCreate:
+    def test_valid_reflection_passes(self) -> None:
+        req = UserReflectionCreate(content="Today I felt curious.", mood=4)
+        assert req.content == "Today I felt curious."
+        assert req.mood == 4
+
+    def test_reflection_without_mood_passes(self) -> None:
+        req = UserReflectionCreate(content="Just a note.")
+        assert req.content == "Just a note."
+        assert req.mood is None
+
+    def test_empty_content_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            UserReflectionCreate(content="")
+
+    def test_content_too_long_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            UserReflectionCreate(content="x" * 2001)
+
+    def test_mood_below_1_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            UserReflectionCreate(content="note", mood=0)
+
+    def test_mood_above_5_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            UserReflectionCreate(content="note", mood=6)

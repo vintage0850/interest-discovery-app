@@ -4,7 +4,7 @@ import json
 from typing import Any, Optional
 
 from pydantic import Field, field_validator
-from sqlalchemy import JSON, String
+from sqlalchemy import JSON, String, UniqueConstraint
 from sqlalchemy.orm import validates
 from sqlmodel import Field as SQLField, Relationship, SQLModel
 
@@ -57,6 +57,13 @@ class ExperimentStatus(str, enum.Enum):
     SKIPPED = "skipped"
 
 
+class PsychAxis(str, enum.Enum):
+    INVESTIGATE = "INVESTIGATE"
+    CREATE = "CREATE"
+    EXECUTE = "EXECUTE"
+    COMMUNICATE = "COMMUNICATE"
+
+
 # ---------------------------------------------------------------------------
 # SQLModel tables
 # ---------------------------------------------------------------------------
@@ -85,6 +92,8 @@ class DiscoverySession(SQLModel, table=True):
     signals: list["InterestSignal"] = Relationship(back_populates="session")
     experiments: list["Experiment"] = Relationship(back_populates="session")
     hypotheses: list["InterestHypothesis"] = Relationship(back_populates="session")
+    psych_axis_results: list["PsychAxisResult"] = Relationship(back_populates="session")
+    reflections: list["UserReflection"] = Relationship(back_populates="session")
 
     @field_validator("student_label")
     @classmethod
@@ -233,6 +242,71 @@ class HypothesisFeedback(SQLModel, table=True):
     created_at: datetime.datetime = SQLField(
         default_factory=lambda: datetime.datetime.now(datetime.timezone.utc)
     )
+
+
+class PsychAxisResult(SQLModel, table=True):
+    """心理軸アンケートの結果（軸ごとの平均スコア）。"""
+
+    __tablename__ = "psych_axis_result"
+
+    id: Optional[int] = SQLField(default=None, primary_key=True)
+    session_id: int = SQLField(foreign_key="discovery_session.id", index=True)
+    axis: str = SQLField(sa_type=String(32))
+    score: float
+    created_at: datetime.datetime = SQLField(
+        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc)
+    )
+    updated_at: datetime.datetime = SQLField(
+        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc)
+    )
+
+    session: "DiscoverySession" = Relationship(back_populates="psych_axis_results")
+
+    __table_args__ = (
+        UniqueConstraint("session_id", "axis", name="uq_psych_axis_result_session_axis"),
+    )
+
+    @validates("axis")
+    def _validate_axis(self, key: str, value: str) -> str:
+        if value not in {axis.value for axis in PsychAxis}:
+            raise ValueError(f"invalid psych axis: {value}")
+        return value
+
+    @validates("score")
+    def _validate_score(self, key: str, value: float) -> float:
+        if value < 1.0 or value > 5.0:
+            raise ValueError("score must be between 1.0 and 5.0")
+        return value
+
+
+class UserReflection(SQLModel, table=True):
+    """ユーザーが自由に書ける日記的振り返り。"""
+
+    __tablename__ = "user_reflection"
+
+    id: Optional[int] = SQLField(default=None, primary_key=True)
+    session_id: int = SQLField(foreign_key="discovery_session.id", index=True)
+    content: str = SQLField(sa_type=String(2000))
+    mood: Optional[int] = SQLField(default=None)
+    created_at: datetime.datetime = SQLField(
+        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc)
+    )
+
+    session: "DiscoverySession" = Relationship(back_populates="reflections")
+
+    @validates("content")
+    def _validate_content(self, key: str, value: str) -> str:
+        if not value or not value.strip():
+            raise ValueError("content must not be empty")
+        if len(value) > 2000:
+            raise ValueError("content must be 2000 characters or less")
+        return value
+
+    @validates("mood")
+    def _validate_mood(self, key: str, value: Optional[int]) -> Optional[int]:
+        if value is not None and (value < 1 or value > 5):
+            raise ValueError("mood must be between 1 and 5")
+        return value
 
 
 class Criterion(SQLModel, table=True):
@@ -453,8 +527,48 @@ class SessionSummary(SQLModel):
     behavior_summary: BehaviorSummary
     latest_hypothesis: Optional[HypothesisResponse]
     criteria: list[CriterionResponse] = Field(default_factory=list)
+    psych_axis_scores: dict[str, float] = Field(default_factory=dict)
 
 
 class WeeklyNarrativeResponse(SQLModel):
     weekly_insights: str = Field(..., min_length=1, max_length=200)
     change_from_past: str = Field(..., min_length=1, max_length=200)
+
+
+class PsychAxisSurveySubmitRequest(SQLModel):
+    scores: dict[str, float]
+
+    @field_validator("scores")
+    @classmethod
+    def _validate_scores(cls, value: dict[str, float]) -> dict[str, float]:
+        expected = {axis.value for axis in PsychAxis}
+        if set(value.keys()) != expected:
+            raise ValueError("scores must contain exactly the four psych axes")
+        for axis, score in value.items():
+            if not isinstance(score, (int, float)) or isinstance(score, bool):
+                raise ValueError(f"score for {axis} must be numeric")
+            if score < 1.0 or score > 5.0:
+                raise ValueError(f"score for {axis} must be between 1.0 and 5.0")
+        return value
+
+
+class PsychAxisResultResponse(SQLModel):
+    id: int
+    session_id: int
+    axis: str
+    score: float
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+
+class UserReflectionCreate(SQLModel):
+    content: str = Field(..., min_length=1, max_length=2000)
+    mood: Optional[int] = Field(default=None, ge=1, le=5)
+
+
+class UserReflectionResponse(SQLModel):
+    id: int
+    session_id: int
+    content: str
+    mood: Optional[int]
+    created_at: datetime.datetime
