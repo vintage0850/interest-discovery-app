@@ -3986,3 +3986,14 @@ cd backend && python -m pytest -q
 
 **コミットID:** `031f89f`
 
+### Claude統合検証（2026-09-07）
+
+Kimiの成果物をClaudeが独立に再検証。
+
+- `cd backend && python -m pytest -q` → **240 passed, 5 warnings**（再実行でも再現）
+- `git show 031f89f` の差分を確認: `UTCDateTime` TypeDecoratorの実装、`repository.py`の`.replace(tzinfo=None)`除去とも設計判断通り。当初指示の13箇所ではなく全18箇所への拡大適用は妥当（Optionalなdatetimeカラムの見落としを防いだ）
+- 既存`discovery.db`（153件のセッション）が削除・再作成なしにそのまま読み込めることを確認、`git status`もクリーン
+- port 8010で稼働中のbackend・cloudflaredトンネル（`https://declare-ken-fairly-kingston.trycloudflare.com`）は本修正の検証中も無停止で動作継続を確認
+
+**次の担当:** ユーザー確認待ち（実機で「行動実験を完了する」操作を再度実施し、日時パースエラーが解消したか確認）。
+
