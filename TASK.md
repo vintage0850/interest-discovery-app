@@ -3834,3 +3834,92 @@ Lane A/Bとも「新規機能の骨格」までが完了。以下の**実配線*
 - shared配下（Android/Kotlin）には一切変更なし（Claude確認済み、Kimiの並行タスクとの競合なし）。
 
 **次の担当:** 次フェーズでAndroid側の対応（`RealDiscoveryRepository.kt`の`supporting_evidence`型変更への追従、Evidence一覧のUI表示）。
+
+### 追記（Claude、2026-09-07）— 残作業2件を並行着手
+
+**現状確認:** `HypothesisResponseDto`（`RealDiscoveryRepository.kt:496`）は現在`id`/`summary`/`confidence`のみで`supporting_evidence`を一切パースしていない（kotlinx.serializationの`ignoreUnknownKeys`により黙って無視されている）。よって型変更自体による破壊はないが、参照Evidence IDを表示する機能が丸ごと未実装のため、以下を新規追加する。
+
+**担当:** Antigravity（backend未着手のAndroid追従一式、`--dangerously-skip-permissions --print-timeout 30m`で非対話実行）
+
+**対象ファイル（担当宣言）:**
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/RealDiscoveryRepository.kt`
+  - `HypothesisResponseDto`に`supportingEvidence: List<Int> = emptyList()`（JSONキーは`supporting_evidence`、`@SerialName`指定）を追加
+  - `GET /sessions/{id}/evidence`を呼ぶ`getEvidenceList(sessionId: Int): List<EvidenceUiModel>`相当のメソッドを追加（`EvidenceResponseDto(id, sessionId, domain, signalCount, summaryText, createdAt)`を新設してマッピング）
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/DiscoveryModels.kt`
+  - `EvidenceUiModel(id, domain, signalCount, summaryText, createdAt)`を新規追加。既存クラスは変更しない
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/DiscoveryRepository.kt`
+  - インターフェースに`suspend fun getEvidenceList(sessionId: Int): List<EvidenceUiModel>`を追加
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/FakeDiscoveryRepository.kt`
+  - 上記のダミー実装を追加（他のメソッドは変更しない）
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/discovery/EvidenceListScreen.kt`（新規）
+  - Evidenceの一覧表示（domain・signal_count・summary_text・created_at）。`ReflectionListScreen.kt`と同様の一覧UI構造を踏襲
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/DiscoveryState.kt`
+  - `loadEvidenceList()`メソッド追加（他の`load*`メソッドと同じパターン）
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/App.kt`
+  - `EvidenceListScreen`用のNavHostルート追加
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/discovery/ReportTabScreen.kt`
+  - 「エビデンス一覧」への導線（ボタン等）を追加
+
+**受入条件:**
+- TDD必須。既存Discoveryテストスイート（backend237件・Kotlin全テスト）を壊さない
+- `./gradlew :shared:compileDebugKotlinAndroid --no-daemon` / `:shared:testDebugUnitTest --no-daemon` がBUILD SUCCESSFUL
+- Fake実装のみで新規画面が単体コンパイル・動作すること
+
+---
+
+**担当:** Kimi（Codex Gate4 P2修正、Antigravityと並行・ファイル完全排他）
+
+**対象ファイル（担当宣言）:**
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/survey/PsychAxisSurveyScreen.kt`
+
+**修正内容（Codex指摘、上記「Codex Gate 4レビュー」参照）:**
+1. `PsychAxisSurveyScreen.kt:65-67` — 8問の回答と`showResult`が`remember`のみのため画面回転等で消失する。`rememberSaveable`（必要ならSaver実装）で保持するよう変更
+2. `PsychAxisSurveyScreen.kt:185-188` — 8問目回答直後のスクロール位置のまま結果画面に切り替わり見出し・グラフが隠れる。結果画面へ遷移時（および編集に戻る時）に`scrollState`を先頭へリセット
+
+**受入条件:**
+- 既存のComposeプレビュー・単体テスト（`PsychAxisQuestionTest`等）を壊さない
+- `./gradlew :shared:compileDebugKotlinAndroid --no-daemon` / `:shared:testDebugUnitTest --no-daemon` がBUILD SUCCESSFUL
+
+**次の担当:** Antigravity（Evidence追従一式）／Kimi（P2修正）。両者は互いのファイルに触れない（`PsychAxisSurveyScreen.kt` vs Evidence関連ファイル群は完全排他）。
+
+### 作業履歴・テスト結果（Kimi、2026-09-07）
+
+- `PsychAxisSurveyScreen.kt` の修正完了：
+  - `remember` → `rememberSaveable` に変更（`ratings` を `Map<Int, Int>` で保持、`showResult`）
+  - 結果画面遷移時・編集に戻る時に `LaunchedEffect(showResult)` で `scrollState.scrollTo(0)` を実行し先頭へリセット
+- `./gradlew :shared:compileDebugKotlinAndroid --no-daemon` → **BUILD SUCCESSFUL**
+- `./gradlew :shared:testDebugUnitTest --no-daemon` → BUILD FAILED（Antigravity並行作業中の `EvidenceFeatureTest.kt` および関連ファイルのコンパイルエラーによる。`PsychAxisSurveyScreen.kt` および既存の `PsychAxisQuestionTest` とは無関係）
+- `./gradlew :shared:testDebugUnitTest --no-daemon --tests "com.example.myapplication.shared.ui.survey.PsychAxisQuestionTest"` → **BUILD SUCCESSFUL**（既存テストは壊れていないことを確認）
+- コミットID: `100894c`
+
+### 作業履歴・テスト結果（Antigravity、2026-09-07）— Evidence追従一式
+
+- **実施内容:**
+  - `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/DiscoveryModels.kt`: `EvidenceUiModel(id, domain, signalCount, summaryText, createdAt)` を新規追加（既存クラスは一切変更なし）。
+  - `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/DiscoveryRepository.kt`: インターフェースに `suspend fun getEvidenceList(sessionId: Int): List<EvidenceUiModel>` を追加。
+  - `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/FakeDiscoveryRepository.kt`: `getEvidenceList(sessionId: Int)` のダミー実装を追加（他メソッドは一切変更なし）。
+  - `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/RealDiscoveryRepository.kt`:
+    - `HypothesisResponseDto` に `@SerialName("supporting_evidence") val supportingEvidence: List<Int> = emptyList()` を追加。
+    - `EvidenceResponseDto(id, sessionId, domain, signalCount, summaryText, createdAt)` を新設し、`GET /sessions/{id}/evidence` を呼び出して `EvidenceUiModel` へマッピングする `getEvidenceList(sessionId: Int)` を実装。
+  - `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/DiscoveryState.kt`:
+    - `EvidenceListUiState(isLoading, evidences, errorMessage)` を追加。
+    - `evidenceListState: StateFlow<EvidenceListUiState>` を公開し、`loadEvidenceList()` メソッドを追加。
+  - `shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/discovery/EvidenceListScreen.kt`（新規）:
+    - Evidence 一覧表示画面（domain・signal_count・summary_text・created_at）。`ReflectionListScreen.kt` と同様の一覧 UI 構造、空状態表示、プレビューを踏襲して実装。
+  - `shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/App.kt`:
+    - `@Serializable object EvidenceList` を追加し、NavHost に `EvidenceListScreen` 用のルートを追加。
+  - `shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/discovery/ReportTabScreen.kt`:
+    - 「行動エビデンス」一覧への導線カードおよび `onEvidenceListClick` コールバックを追加。
+  - `PsychAxisSurveyScreen.kt`:
+    - 一切変更なし（完全排他を遵守）。
+  - TDDテスト作成:
+    - `shared/src/commonTest/kotlin/com/example/myapplication/shared/discovery/EvidenceFeatureTest.kt`（新規）: EvidenceUiModel、Fake/Realリポジトリ、DiscoveryStateの動作を網羅。
+    - `shared/src/commonTest/kotlin/com/example/myapplication/shared/ui/discovery/EvidenceListFormatTest.kt`（新規）: 日時フォーマット検証。
+
+- **実行したテストコマンドと結果:**
+  - `./gradlew :shared:compileDebugKotlinAndroid --no-daemon` → **BUILD SUCCESSFUL** (1m 8s)
+  - `./gradlew :shared:testDebugUnitTest --no-daemon` → **BUILD SUCCESSFUL** (59s、全18テストクラス通過)
+  - `cd backend && pytest -q` → **237 passed, 5 warnings** (55.05s)
+
+- **コミットID:** `4a43f090c9be78e34c3ae582b1524948872ed313` (`4a43f09`)
+
