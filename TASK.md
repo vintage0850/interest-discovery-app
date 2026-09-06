@@ -3791,3 +3791,14 @@ Lane A/Bとも「新規機能の骨格」までが完了。以下の**実配線*
 **対象外（今回のスコープ外・次フェーズ）:** Android側の対応（`RealDiscoveryRepository.kt`のsupporting_evidence型変更への追従、Evidence一覧のUI表示）。backend完成後、別タスクとして着手する。
 
 **次の担当:** Antigravity。
+
+### 作業履歴・テスト結果（Antigravity、2026-09-06）
+
+- `Evidence`テーブル新設（domain/signal_count/summary_text/created_at、バリデーション付き）。
+- `aggregation.py`に`summarize_domain_signals()`を追加。`repository.py`に`build_evidence()`（ドメイン別集計・永続化）・`list_evidence()`を追加。
+- `hypothesis/update`フローを変更: 生シグナルではなくEvidence経由でGeminiへ渡し、`supporting_evidence`を`list[dict]`から参照Evidence IDの`list[int]`へ変更（設計判断通り、後方互換は考慮せず）。
+- 新規`GET /sessions/{id}/evidence`を追加。
+- TDDで実施。テスト結果: `cd backend && python -m pytest -q` → **237 passed**（既存220 + 新規17）。Claude独立検証でも同じ237 passed, 5 warnings, 56秒を確認。
+- shared配下（Android/Kotlin）には一切変更なし（Claude確認済み、Kimiの並行タスクとの競合なし）。
+
+**次の担当:** 次フェーズでAndroid側の対応（`RealDiscoveryRepository.kt`の`supporting_evidence`型変更への追従、Evidence一覧のUI表示）。

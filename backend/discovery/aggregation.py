@@ -178,3 +178,18 @@ def _detect_discrepancies(
             )
 
     return discrepancies
+
+
+def summarize_domain_signals(domain: str, signals: list[InterestSignal]) -> str:
+    """同一ドメインのシグナル群から要約テキストを生成する。"""
+    count = len(signals)
+    summaries = [s.content_summary for s in signals if s.content_summary]
+    if summaries:
+        details = "、".join(summaries[:5])
+        text = f"{domain}に関するシグナル{count}件: {details}"
+    else:
+        text = f"{domain}に関するシグナル{count}件"
+    if len(text) > 1000:
+        text = text[:997] + "..."
+    return text
+

@@ -94,6 +94,7 @@ class DiscoverySession(SQLModel, table=True):
     hypotheses: list["InterestHypothesis"] = Relationship(back_populates="session")
     psych_axis_results: list["PsychAxisResult"] = Relationship(back_populates="session")
     reflections: list["UserReflection"] = Relationship(back_populates="session")
+    evidences: list["Evidence"] = Relationship(back_populates="session")
 
     @field_validator("student_label")
     @classmethod
@@ -130,6 +131,43 @@ class InterestSignal(SQLModel, table=True):
     )
 
     session: "DiscoverySession" = Relationship(back_populates="signals")
+
+
+class Evidence(SQLModel, table=True):
+    """シグナルを集計・要約した観察証拠（エビデンス）。"""
+
+    __tablename__ = "evidence"
+
+    id: Optional[int] = SQLField(default=None, primary_key=True)
+    session_id: int = SQLField(foreign_key="discovery_session.id", index=True)
+    domain: str = SQLField(sa_type=String(32), index=True)
+    signal_count: int
+    summary_text: str = SQLField(sa_type=String(1000))
+    created_at: datetime.datetime = SQLField(
+        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc)
+    )
+
+    session: "DiscoverySession" = Relationship(back_populates="evidences")
+
+    @validates("domain")
+    def _validate_domain(self, key: str, value: str) -> str:
+        if value not in {d.value for d in DomainType}:
+            raise ValueError(f"invalid domain: {value}")
+        return value
+
+    @validates("signal_count")
+    def _validate_signal_count(self, key: str, value: int) -> int:
+        if value < 1:
+            raise ValueError("signal_count must be at least 1")
+        return value
+
+    @validates("summary_text")
+    def _validate_summary_text(self, key: str, value: str) -> str:
+        if not value or not value.strip():
+            raise ValueError("summary_text must not be empty")
+        if len(value) > 1000:
+            raise ValueError("summary_text must be 1000 characters or less")
+        return value
 
 
 class Experiment(SQLModel, table=True):
@@ -208,7 +246,7 @@ class InterestHypothesis(SQLModel, table=True):
     session_id: int = SQLField(foreign_key="discovery_session.id", index=True)
     summary: str
     confidence: float
-    supporting_evidence: list[dict[str, Any]] = SQLField(
+    supporting_evidence: list[int] = SQLField(
         default_factory=list, sa_type=JSON
     )
     suggested_next_domains: list[str] = SQLField(default_factory=list, sa_type=JSON)
@@ -411,6 +449,15 @@ class InterestSignalResponse(SQLModel):
     created_at: datetime.datetime
 
 
+class EvidenceResponse(SQLModel):
+    id: int
+    session_id: int
+    domain: str
+    signal_count: int
+    summary_text: str
+    created_at: datetime.datetime
+
+
 class ExperimentGenerateRequest(SQLModel):
     n_candidates: int = Field(default=3, ge=1, le=5)
 
@@ -469,7 +516,7 @@ class HypothesisResponse(SQLModel):
     session_id: int
     summary: str
     confidence: float
-    supporting_evidence: list[dict[str, Any]]
+    supporting_evidence: list[int]
     suggested_next_domains: list[str]
     created_at: datetime.datetime
 

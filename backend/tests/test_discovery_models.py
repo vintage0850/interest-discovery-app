@@ -316,3 +316,128 @@ class TestUserReflectionCreate:
     def test_mood_above_5_rejected(self) -> None:
         with pytest.raises(ValidationError):
             UserReflectionCreate(content="note", mood=6)
+
+
+class TestEvidenceValidation:
+    def test_valid_evidence_passes(self) -> None:
+        from discovery.models import Evidence, EvidenceResponse
+
+        evidence = Evidence(
+            session_id=1,
+            domain=DomainType.TECH.value,
+            signal_count=3,
+            summary_text="techに関するシグナル3件",
+        )
+        assert evidence.session_id == 1
+        assert evidence.domain == DomainType.TECH.value
+        assert evidence.signal_count == 3
+        assert evidence.summary_text == "techに関するシグナル3件"
+
+    def test_signal_count_below_1_rejected(self) -> None:
+        from discovery.models import Evidence
+
+        with pytest.raises(ValueError):
+            Evidence(
+                session_id=1,
+                domain=DomainType.TECH.value,
+                signal_count=0,
+                summary_text="tech summary",
+            )
+
+    def test_invalid_domain_rejected(self) -> None:
+        from discovery.models import Evidence
+
+        with pytest.raises(ValueError):
+            Evidence(
+                session_id=1,
+                domain="unknown_domain",
+                signal_count=1,
+                summary_text="tech summary",
+            )
+
+    def test_empty_summary_text_rejected(self) -> None:
+        from discovery.models import Evidence
+
+        with pytest.raises(ValueError):
+            Evidence(
+                session_id=1,
+                domain=DomainType.TECH.value,
+                signal_count=1,
+                summary_text="",
+            )
+
+    def test_whitespace_summary_text_rejected(self) -> None:
+        from discovery.models import Evidence
+
+        with pytest.raises(ValueError):
+            Evidence(
+                session_id=1,
+                domain=DomainType.TECH.value,
+                signal_count=1,
+                summary_text="   ",
+            )
+
+    def test_too_long_summary_text_rejected(self) -> None:
+        from discovery.models import Evidence
+
+        with pytest.raises(ValueError):
+            Evidence(
+                session_id=1,
+                domain=DomainType.TECH.value,
+                signal_count=1,
+                summary_text="a" * 1001,
+            )
+
+    def test_evidence_response_schema(self) -> None:
+        import datetime
+        from discovery.models import EvidenceResponse
+
+        now = datetime.datetime.now(datetime.timezone.utc)
+        resp = EvidenceResponse(
+            id=10,
+            session_id=1,
+            domain="tech",
+            signal_count=2,
+            summary_text="tech summary",
+            created_at=now,
+        )
+        assert resp.id == 10
+        assert resp.session_id == 1
+        assert resp.domain == "tech"
+        assert resp.signal_count == 2
+        assert resp.summary_text == "tech summary"
+
+
+class TestHypothesisResponseValidation:
+    def test_supporting_evidence_accepts_int_list(self) -> None:
+        import datetime
+        from discovery.models import HypothesisResponse
+
+        now = datetime.datetime.now(datetime.timezone.utc)
+        resp = HypothesisResponse(
+            id=1,
+            session_id=1,
+            summary="Likes tech",
+            confidence=0.8,
+            supporting_evidence=[1, 2, 3],
+            suggested_next_domains=["art"],
+            created_at=now,
+        )
+        assert resp.supporting_evidence == [1, 2, 3]
+
+    def test_supporting_evidence_rejects_dict_list(self) -> None:
+        import datetime
+        from discovery.models import HypothesisResponse
+
+        now = datetime.datetime.now(datetime.timezone.utc)
+        with pytest.raises(ValidationError):
+            HypothesisResponse(
+                id=1,
+                session_id=1,
+                summary="Likes tech",
+                confidence=0.8,
+                supporting_evidence=[{"domain": "tech"}],  # type: ignore[arg-type]
+                suggested_next_domains=["art"],
+                created_at=now,
+            )
+

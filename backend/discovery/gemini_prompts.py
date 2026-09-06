@@ -8,7 +8,7 @@ from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field, field_validator
 
-from discovery.models import DomainType, Experiment, ExperimentResult, ExperimentStatus, InterestSignal
+from discovery.models import DomainType, Evidence, Experiment, ExperimentResult, ExperimentStatus, InterestSignal
 
 
 def _sanitize_gemini_error_message(exc: Exception) -> str:
@@ -44,7 +44,7 @@ class HypothesisCandidate(BaseModel):
 
     summary: str = Field(..., min_length=1, max_length=1000)
     confidence: float = Field(..., ge=0.0, le=1.0)
-    supporting_evidence: list[SupportingEvidence] = Field(default_factory=list)
+    supporting_evidence: list[int] = Field(default_factory=list)
     suggested_next_domains: list[str] = Field(default_factory=list)
 
     @field_validator("suggested_next_domains")
@@ -115,7 +115,7 @@ class DiscoveryGeminiClient:
 
     def update_hypothesis(
         self,
-        signals: list[InterestSignal],
+        evidences: list[Evidence],
         experiments: list[Experiment],
         results: list[ExperimentResult],
     ) -> dict[str, Any]:
@@ -123,7 +123,7 @@ class DiscoveryGeminiClient:
         from google.genai.errors import APIError
 
         client = self._ensure_client()
-        prompt = self._build_hypothesis_prompt(signals, experiments, results)
+        prompt = self._build_hypothesis_prompt(evidences, experiments, results)
         try:
             response = client.models.generate_content(
                 model="gemini-2.5-flash",
@@ -192,18 +192,19 @@ class DiscoveryGeminiClient:
 
     def _build_hypothesis_prompt(
         self,
-        signals: list[InterestSignal],
+        evidences: list[Evidence],
         experiments: list[Experiment],
         results: list[ExperimentResult],
     ) -> str:
-        signal_text = json.dumps(
+        evidence_text = json.dumps(
             [
                 {
-                    "action_type": s.action_type,
-                    "domain": s.domain,
-                    "content_summary": s.content_summary,
+                    "id": e.id,
+                    "domain": e.domain,
+                    "signal_count": e.signal_count,
+                    "summary_text": e.summary_text,
                 }
-                for s in signals
+                for e in evidences
             ],
             ensure_ascii=False,
             indent=2,
@@ -233,13 +234,13 @@ class DiscoveryGeminiClient:
             indent=2,
         )
         return (
-            "以下は高校生の興味シグナルと行動実験結果です。\n\n"
-            "【シグナル】\n"
-            f"{signal_text}\n\n"
+            "以下は高校生のエビデンス（興味シグナルの集計・要約）と行動実験結果です。\n\n"
+            "【エビデンス】\n"
+            f"{evidence_text}\n\n"
             "【実験結果】\n"
             f"{experiment_text}\n\n"
             "これらを基に、生徒の興味に関する簡潔な仮説を生成してください。\n"
-            "根拠は実データに基づき、次に試すべき別ドメインを提案してください。"
+            "根拠となったエビデンスの id を supporting_evidence に指定し、次に試すべき別ドメインを提案してください。"
         )
 
     def _parse_experiment_response(self, raw: str) -> list[ExperimentCandidate]:
@@ -316,12 +317,13 @@ _EXPERIMENT_SYSTEM_INSTRUCTION = """\
 """
 
 _HYPOTHESIS_SYSTEM_INSTRUCTION = """\
-あなたは高校生の興味発見を支援するアシスタントです。
-生徒の興味シグナルと行動実験結果から、仮の興味仮説を生成してください。
+あなたはお高校生の興味発見を支援するアシスタントです。
+生徒のエビデンス（興味シグナルの集計・要約）と行動実験結果から、仮の興味仮説を生成してください。
 
 【あなたの役割】
 - 行動データから興味の傾向を読み取る
 - 実データに基づく簡潔な仮説を述べる
+- 根拠となったエビデンスのIDリスト (supporting_evidence) を指定する
 - 次に試すべき別ドメインを提案する
 
 【絶対にやらないこと】
@@ -332,7 +334,7 @@ _HYPOTHESIS_SYSTEM_INSTRUCTION = """\
 以下の JSON スキーマに厳密に従ってください。
 - summary: 興味仮説（200文字以内）
 - confidence: 確信度（0.0〜1.0）
-- supporting_evidence: 根拠となる観察のリスト
+- supporting_evidence: 根拠となったエビデンスIDのリスト（整数のリスト）
 - suggested_next_domains: 次に試すべきドメインのリスト
 """
 

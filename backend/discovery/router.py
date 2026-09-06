@@ -13,6 +13,8 @@ from discovery.models import (
     CriterionResponse,
     DiscoverySession,
     DomainType,
+    Evidence,
+    EvidenceResponse,
     Experiment,
     ExperimentGenerateRequest,
     ExperimentResponse,
@@ -344,10 +346,11 @@ def update_hypothesis(
     （でっち上げの気づきより「まだ根拠が足りない」の方が誠実、§34）。
     """
     _require_session(repo, session_id)
+    evidences = repo.build_evidence(session_id)
     data = repo.get_summary_data(session_id)
     try:
         hypothesis_data = client.update_hypothesis(
-            data["signals"], data["experiments"], data["results"]
+            evidences, data["experiments"], data["results"]
         )
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(
@@ -398,6 +401,16 @@ def add_hypothesis_feedback(
         "updated_hypothesis": hypothesis,
         "new_criterion": criterion,
     }
+
+
+@router.get("/sessions/{session_id}/evidence", response_model=list[EvidenceResponse])
+def list_evidence(
+    session_id: int,
+    repo: Annotated[DiscoveryRepository, Depends(get_repository)],
+) -> list[Evidence]:
+    """セッションのエビデンス一覧を作成日時降順で取得する。"""
+    _require_session(repo, session_id)
+    return repo.list_evidence(session_id)
 
 
 @router.get("/sessions/{session_id}/criteria", response_model=list[CriterionResponse])

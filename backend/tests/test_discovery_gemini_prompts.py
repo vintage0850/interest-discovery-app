@@ -105,24 +105,23 @@ class TestGenerateExperiments:
 
 class TestUpdateHypothesis:
     def test_returns_hypothesis_data(self, client: DiscoveryGeminiClient) -> None:
+        from discovery.models import Evidence
+
         response = MagicMock()
         response.text = """{
             "summary": "技術分野への興味が強い",
             "confidence": 0.8,
-            "supporting_evidence": [
-                {"domain": "tech", "description": "検索シグナルが多い"}
-            ],
+            "supporting_evidence": [1],
             "suggested_next_domains": ["art", "music"]
         }"""
         client._client.models.generate_content.return_value = response
-        signals = [
-            InterestSignal(
+        evidences = [
+            Evidence(
+                id=1,
                 session_id=1,
-                action_type=ActionType.SEARCH.value,
                 domain=DomainType.TECH.value,
-                content_summary="Python tutorial",
-                source=InterestSignalSource.SEARCH_HISTORY.value,
-                occurred_at="2026-09-01T10:00:00Z",
+                signal_count=2,
+                summary_text="techに関するシグナル2件: Python tutorial",
             ),
         ]
         experiments = [
@@ -146,10 +145,15 @@ class TestUpdateHypothesis:
                 confidence=0.8,
             ),
         ]
-        hypothesis = client.update_hypothesis(signals, experiments, results)
+        hypothesis = client.update_hypothesis(evidences, experiments, results)
         assert hypothesis["summary"] == "技術分野への興味が強い"
         assert hypothesis["confidence"] == 0.8
+        assert hypothesis["supporting_evidence"] == [1]
         assert hypothesis["suggested_next_domains"] == ["art", "music"]
+
+        call_args = client._client.models.generate_content.call_args
+        prompt = call_args.kwargs["contents"]
+        assert "Python tutorial" in prompt or "エビデンス" in prompt
 
     def test_rejects_malformed_hypothesis_json(self, client: DiscoveryGeminiClient) -> None:
         response = MagicMock()

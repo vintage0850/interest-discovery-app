@@ -333,11 +333,12 @@ class TestHypothesisRepository:
             session.id,
             summary="Likes tech",
             confidence=0.7,
-            supporting_evidence=[{"domain": "tech", "count": 3}],
+            supporting_evidence=[1, 2],
             suggested_next_domains=["art", "music"],
         )
         assert hypothesis.id is not None
         assert hypothesis.summary == "Likes tech"
+        assert hypothesis.supporting_evidence == [1, 2]
 
     def test_get_latest_hypothesis(self, repository: DiscoveryRepository) -> None:
         session = repository.create_session("student-a")
@@ -859,3 +860,99 @@ class TestUserReflectionRepository:
         session = repository.create_session("student-a")
         with pytest.raises(ValueError):
             repository.create_user_reflection(session.id, "x" * 2001)
+
+
+class TestEvidenceRepository:
+    def test_build_evidence_creates_records_by_domain(
+        self, repository: DiscoveryRepository
+    ) -> None:
+        import datetime
+        from discovery.models import ActionType, DomainType, InterestSignalSource
+
+        session = repository.create_session("student-a")
+        now = datetime.datetime.now(datetime.timezone.utc)
+        repository.add_signal(
+            session_id=session.id,
+            action_type=ActionType.SEARCH.value,
+            domain=DomainType.TECH,
+            content_summary="Python入門",
+            source=InterestSignalSource.SEARCH_HISTORY.value,
+            occurred_at=now,
+        )
+        repository.add_signal(
+            session_id=session.id,
+            action_type=ActionType.VIEW.value,
+            domain=DomainType.TECH,
+            content_summary="FastAPIガイド",
+            source=InterestSignalSource.BROWSING_HISTORY.value,
+            occurred_at=now,
+        )
+        repository.add_signal(
+            session_id=session.id,
+            action_type=ActionType.SEARCH.value,
+            domain=DomainType.ART,
+            content_summary="デッサン入門",
+            source=InterestSignalSource.SEARCH_HISTORY.value,
+            occurred_at=now,
+        )
+
+        evidences = repository.build_evidence(session.id)
+        assert len(evidences) == 2
+
+        evidence_by_domain = {e.domain: e for e in evidences}
+        assert "tech" in evidence_by_domain
+        assert "art" in evidence_by_domain
+
+        tech_ev = evidence_by_domain["tech"]
+        assert tech_ev.session_id == session.id
+        assert tech_ev.signal_count == 2
+        assert "Python入門" in tech_ev.summary_text or "tech" in tech_ev.summary_text
+        assert tech_ev.id is not None
+        assert tech_ev.created_at is not None
+
+        art_ev = evidence_by_domain["art"]
+        assert art_ev.session_id == session.id
+        assert art_ev.signal_count == 1
+        assert art_ev.id is not None
+
+    def test_build_evidence_no_signals_returns_empty(
+        self, repository: DiscoveryRepository
+    ) -> None:
+        session = repository.create_session("student-a")
+        evidences = repository.build_evidence(session.id)
+        assert evidences == []
+
+    def test_build_evidence_nonexistent_session_raises(
+        self, repository: DiscoveryRepository
+    ) -> None:
+        with pytest.raises(ValueError):
+            repository.build_evidence(99999)
+
+    def test_list_evidence_orders_by_created_at_desc(
+        self, repository: DiscoveryRepository
+    ) -> None:
+        import datetime
+        from discovery.models import ActionType, DomainType, InterestSignalSource
+
+        session = repository.create_session("student-a")
+        now = datetime.datetime.now(datetime.timezone.utc)
+        repository.add_signal(
+            session_id=session.id,
+            action_type=ActionType.SEARCH.value,
+            domain=DomainType.TECH,
+            content_summary="Python入門",
+            source=InterestSignalSource.SEARCH_HISTORY.value,
+            occurred_at=now,
+        )
+        repository.build_evidence(session.id)
+
+        evidence_list = repository.list_evidence(session.id)
+        assert len(evidence_list) >= 1
+        assert evidence_list[0].session_id == session.id
+
+    def test_list_evidence_returns_empty_when_none_exist(
+        self, repository: DiscoveryRepository
+    ) -> None:
+        session = repository.create_session("student-a")
+        assert repository.list_evidence(session.id) == []
+

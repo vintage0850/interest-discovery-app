@@ -10,11 +10,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 from sqlmodel import Session, select
 
+from discovery.aggregation import summarize_domain_signals
 from discovery.models import (
     ActionType,
     Criterion,
     DiscoverySession,
     DomainType,
+    Evidence,
     Experiment,
     ExperimentResult,
     ExperimentStatus,
@@ -439,7 +441,7 @@ class DiscoveryRepository:
         session_id: int,
         summary: str,
         confidence: float,
-        supporting_evidence: list[dict[str, Any]],
+        supporting_evidence: list[int],
         suggested_next_domains: list[str],
     ) -> InterestHypothesis:
         hypothesis = InterestHypothesis(
@@ -634,3 +636,51 @@ class DiscoveryRepository:
                 "experiments": experiments,
                 "results": results,
             }
+
+    def build_evidence(self, session_id: int) -> list[Evidence]:
+        """対象セッションの InterestSignal を domain 単位で集計し、Evidence レコードを作成・永続化する。"""
+        with Session(self._engine) as db:
+            session = db.get(DiscoverySession, session_id)
+            if session is None:
+                raise ValueError(f"Session {session_id} not found")
+
+            statement = select(InterestSignal).where(InterestSignal.session_id == session_id)
+            signals = list(db.exec(statement).all())
+            if not signals:
+                return []
+
+            from collections import defaultdict
+            signals_by_domain: dict[str, list[InterestSignal]] = defaultdict(list)
+            for signal in signals:
+                signals_by_domain[signal.domain].append(signal)
+
+            evidences: list[Evidence] = []
+            for domain in sorted(signals_by_domain.keys()):
+                domain_signals = signals_by_domain[domain]
+                summary = summarize_domain_signals(domain, domain_signals)
+                evidence = Evidence(
+                    session_id=session_id,
+                    domain=domain,
+                    signal_count=len(domain_signals),
+                    summary_text=summary,
+                )
+                db.add(evidence)
+                evidences.append(evidence)
+
+            session.updated_at = datetime.datetime.now(datetime.timezone.utc)
+            db.add(session)
+            db.commit()
+            for evidence in evidences:
+                db.refresh(evidence)
+            return evidences
+
+    def list_evidence(self, session_id: int) -> list[Evidence]:
+        """指定セッションのエビデンス一覧を作成日時降順で取得する。"""
+        with Session(self._engine) as db:
+            statement = (
+                select(Evidence)
+                .where(Evidence.session_id == session_id)
+                .order_by(desc(Evidence.created_at), desc(Evidence.id))
+            )
+            return list(db.exec(statement).all())
+

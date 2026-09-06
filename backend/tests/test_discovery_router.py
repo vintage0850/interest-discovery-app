@@ -594,7 +594,7 @@ class TestExperimentEndpoints:
         mock_client.update_hypothesis.return_value = {
             "summary": "技術分野への興味が強い",
             "confidence": 0.8,
-            "supporting_evidence": [{"domain": "tech", "description": "検索シグナルが多い"}],
+            "supporting_evidence": [1],
             "suggested_next_domains": ["art", "music"],
         }
         app.dependency_overrides[get_gemini_client] = lambda: mock_client
@@ -607,7 +607,16 @@ class TestExperimentEndpoints:
         data = response.json()
         assert data["summary"] == "技術分野への興味が強い"
         assert data["confidence"] == 0.8
+        assert data["supporting_evidence"] == [1]
         assert data["suggested_next_domains"] == ["art", "music"]
+
+        # Geminiクライアントに生シグナルではなくEvidenceリストが渡されていることを検証
+        call_args = mock_client.update_hypothesis.call_args
+        first_arg = call_args.args[0]
+        from discovery.models import Evidence
+        assert isinstance(first_arg, list)
+        assert len(first_arg) > 0
+        assert all(isinstance(e, Evidence) for e in first_arg)
 
     def test_update_hypothesis_gemini_error(self, test_client: TestClient) -> None:
         session_id = self._create_full_session(test_client)
@@ -1220,3 +1229,57 @@ class TestSessionSummaryWithPsychAxis:
         assert response.status_code == 200
         data = response.json()
         assert data["psych_axis_scores"] == scores
+
+
+class TestEvidenceEndpoints:
+    def test_get_evidence_empty(self, test_client: TestClient) -> None:
+        session = test_client.post("/sessions", json={"student_label": "student-a"}).json()
+        response = test_client.get(f"/sessions/{session['id']}/evidence")
+        assert response.status_code == 200
+        assert response.json() == []
+
+    def test_get_evidence_nonexistent_session_returns_404(self, test_client: TestClient) -> None:
+        response = test_client.get("/sessions/99999/evidence")
+        assert response.status_code == 404
+
+    def test_get_evidence_after_hypothesis_update(self, test_client: TestClient) -> None:
+        session = test_client.post("/sessions", json={"student_label": "student-a"}).json()
+        session_id = session["id"]
+
+        # シグナルを追加
+        test_client.post(
+            f"/sessions/{session_id}/signals",
+            json={
+                "action_type": "search",
+                "domain": "tech",
+                "content_summary": "Python basics",
+                "source": "search_history",
+                "occurred_at": "2026-09-01T10:00:00Z",
+            },
+        )
+
+        mock_client = MagicMock(spec=DiscoveryGeminiClient)
+        mock_client.update_hypothesis.return_value = {
+            "summary": "Tech interest",
+            "confidence": 0.8,
+            "supporting_evidence": [1],
+            "suggested_next_domains": ["art"],
+        }
+        app.dependency_overrides[get_gemini_client] = lambda: mock_client
+
+        # hypothesis update を呼び出すと build_evidence が実行される
+        update_resp = test_client.post(f"/sessions/{session_id}/hypothesis/update", json={})
+        assert update_resp.status_code == 201
+
+        # GET /sessions/{session_id}/evidence で Evidence が取得できる
+        resp = test_client.get(f"/sessions/{session_id}/evidence")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 1
+        ev = data[0]
+        assert ev["session_id"] == session_id
+        assert ev["domain"] == "tech"
+        assert ev["signal_count"] == 1
+        assert "summary_text" in ev
+        assert "created_at" in ev
+
