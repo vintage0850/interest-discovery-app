@@ -23,17 +23,22 @@ import com.example.myapplication.shared.discovery.DiscoverySettingsStorage
 import com.example.myapplication.shared.discovery.DiscoveryState
 import com.example.myapplication.shared.discovery.InMemoryDiscoverySettingsStorage
 import com.example.myapplication.shared.discovery.InMemoryOnboardingStorage
+import com.example.myapplication.shared.discovery.InMemorySessionStorage
 import com.example.myapplication.shared.discovery.OnboardingStorage
 import com.example.myapplication.shared.discovery.RealDiscoveryRepository
+import com.example.myapplication.shared.discovery.SessionStorage
 import com.example.myapplication.shared.ui.discovery.DiscoveryMainScaffold
 import com.example.myapplication.shared.ui.discovery.DiscoveryResultScreen
 import com.example.myapplication.shared.ui.discovery.ExperimentDetailScreen
 import com.example.myapplication.shared.ui.discovery.ExperimentRunningScreen
 import com.example.myapplication.shared.ui.discovery.ReflectionScreen
+import com.example.myapplication.shared.ui.discovery.SessionListScreen
 import com.example.myapplication.shared.ui.onboarding.OnboardingBasicInfo as OnboardingBasicInfoData
 import com.example.myapplication.shared.ui.onboarding.OnboardingBasicInfoScreen
 import com.example.myapplication.shared.ui.onboarding.OnboardingSelfCheckScreen
 import com.example.myapplication.shared.ui.onboarding.OnboardingWelcomeScreen
+import com.example.myapplication.shared.ui.reflection.ReflectionListScreen
+import com.example.myapplication.shared.ui.survey.PsychAxisSurveyScreen
 import kotlinx.serialization.Serializable
 
 // オンボーディング（Onboarding Flow）のルート
@@ -48,10 +53,16 @@ import kotlinx.serialization.Serializable
 @Serializable object DiscoveryReflection
 @Serializable object DiscoveryResult
 
+// 案件18：セッション一覧・心理軸アンケート・ユーザー主導 Reflection のルート
+@Serializable object ReflectionList
+@Serializable object PsychAxisSurvey
+@Serializable object SessionList
+
 @Composable
 fun App(
     driverFactory: DatabaseDriverFactory? = null,
     discoverySettingsStorage: DiscoverySettingsStorage = InMemoryDiscoverySettingsStorage(),
+    sessionStorage: SessionStorage = InMemorySessionStorage(),
     onboardingStorage: OnboardingStorage = InMemoryOnboardingStorage(),
     enableDiscoveryHttpLogging: Boolean = false,
     discoveryBaseUrl: String = "http://localhost:8000",
@@ -64,6 +75,7 @@ fun App(
                 RealDiscoveryRepository(
                     baseUrl = discoveryBaseUrl,
                     settingsStorage = discoverySettingsStorage,
+                    sessionStorage = sessionStorage,
                     enableHttpLogging = enableDiscoveryHttpLogging
                 ),
                 scope
@@ -141,6 +153,15 @@ fun App(
                     onViewDiscoveryDetail = {
                         discoveryState.loadDiscovery()
                         navController.navigate(DiscoveryResult) { launchSingleTop = true }
+                    },
+                    onReflectionListClick = {
+                        navController.navigate(ReflectionList) { launchSingleTop = true }
+                    },
+                    onPsychAxisSurveyClick = {
+                        navController.navigate(PsychAxisSurvey) { launchSingleTop = true }
+                    },
+                    onSessionListClick = {
+                        navController.navigate(SessionList) { launchSingleTop = true }
                     }
                 )
             }
@@ -207,6 +228,50 @@ fun App(
                         navController.popBackStack(DiscoveryHome, inclusive = false)
                     },
                     onRetry = { discoveryState.loadDiscovery() }
+                )
+            }
+
+            // 6. 日々の振り返り一覧画面
+            composable<ReflectionList> {
+                val reflectionListState by discoveryState.reflectionListState.collectAsState()
+                LaunchedEffect(Unit) {
+                    discoveryState.loadReflections()
+                }
+                ReflectionListScreen(
+                    reflections = reflectionListState.reflections,
+                    onAddReflection = { content, mood ->
+                        discoveryState.addReflection(content, mood)
+                    },
+                    onBack = { navController.popBackStack() }
+                )
+            }
+
+            // 7. 心理4軸アンケート画面
+            composable<PsychAxisSurvey> {
+                PsychAxisSurveyScreen(
+                    onComplete = { scores ->
+                        discoveryState.submitPsychAxisSurvey(scores) {
+                            navController.popBackStack()
+                        }
+                    },
+                    onBack = { navController.popBackStack() }
+                )
+            }
+
+            // 8. 過去のセッション一覧画面
+            composable<SessionList> {
+                val sessionListState by discoveryState.sessionListState.collectAsState()
+                LaunchedEffect(Unit) {
+                    discoveryState.loadSessionList()
+                }
+                SessionListScreen(
+                    uiState = sessionListState,
+                    onBack = { navController.popBackStack() },
+                    onSwitchSession = { id ->
+                        discoveryState.switchSession(id) {
+                            navController.popBackStack()
+                        }
+                    }
                 )
             }
             }

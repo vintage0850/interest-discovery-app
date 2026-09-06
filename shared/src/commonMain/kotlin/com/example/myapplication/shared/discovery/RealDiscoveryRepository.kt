@@ -12,10 +12,12 @@ import io.ktor.client.request.get
 import io.ktor.client.request.patch
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
+import io.ktor.client.request.url
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
+import kotlinx.datetime.Instant
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNamingStrategy
@@ -32,6 +34,7 @@ class RealDiscoveryRepository(
     httpClient: HttpClient? = null,
     private val studentLabel: String = "test_user",
     private val settingsStorage: DiscoverySettingsStorage = InMemoryDiscoverySettingsStorage(),
+    private val sessionStorage: SessionStorage = InMemorySessionStorage(),
     enableHttpLogging: Boolean = false
 ) : DiscoveryRepository {
 
@@ -65,6 +68,17 @@ class RealDiscoveryRepository(
 
     private suspend fun ensureSession(): Int {
         sessionId?.let { return it }
+
+        // 永続化されたセッション ID があれば、存在確認して復帰する。
+        sessionStorage.getLastSessionId()?.let { storedId ->
+            val verify = client.get("/sessions/$storedId/summary")
+            if (verify.status.isSuccess()) {
+                sessionId = storedId
+                return storedId
+            }
+        }
+
+        // 復帰できなければ新規作成する。
         val response = client.post("/sessions") {
             contentType(ContentType.Application.Json)
             setBody(SessionCreateRequest(studentLabel = studentLabel))
@@ -74,6 +88,7 @@ class RealDiscoveryRepository(
         }
         val created = response.body<SessionResponseDto>()
         sessionId = created.id
+        sessionStorage.saveLastSessionId(created.id)
         return created.id
     }
 
@@ -305,6 +320,7 @@ class RealDiscoveryRepository(
         sessionId = null
         cachedExperiments = emptyList()
         cycleIndex = 0
+        sessionStorage.clear()
     }
 
     override suspend fun completeOnboarding(
@@ -332,6 +348,81 @@ class RealDiscoveryRepository(
         }
     }
 
+    // ---- 案件18：既存セッション一覧・復帰 ----
+
+    override suspend fun getSessionList(): List<SessionSummaryItem> {
+        val response = client.get("/sessions") {
+            url { parameters.append("student_label", studentLabel) }
+        }
+        if (!response.status.isSuccess()) {
+            throw DiscoveryApiException("セッション一覧の取得に失敗しました (HTTP ${response.status.value})")
+        }
+        return response.body<List<SessionResponseDto>>().map {
+            SessionSummaryItem(
+                id = it.id,
+                nickname = it.nickname,
+                createdAt = it.createdAt,
+                updatedAt = it.updatedAt
+            )
+        }
+    }
+
+    override suspend fun switchToSession(id: Int) {
+        sessionId = id
+        sessionStorage.saveLastSessionId(id)
+        cachedExperiments = emptyList()
+        cycleIndex = 0
+    }
+
+    // ---- 案件18：心理軸アンケート ----
+
+    override suspend fun submitPsychAxisSurvey(scores: Map<PsychAxis, Float>): List<PsychAxisUiModel> {
+        val id = ensureSession()
+        val response = client.post("/sessions/$id/psych-axis-survey") {
+            contentType(ContentType.Application.Json)
+            setBody(PsychAxisSurveySubmitRequest(scores = scores.mapKeys { it.key.name.uppercase() }))
+        }
+        if (!response.status.isSuccess()) {
+            throw DiscoveryApiException("心理軸アンケートの送信に失敗しました (HTTP ${response.status.value})")
+        }
+        val results = response.body<List<PsychAxisResultResponseDto>>()
+        return results.map {
+            PsychAxisUiModel(
+                axis = PsychAxis.fromString(it.axis),
+                score = it.score
+            )
+        }
+    }
+
+    // ---- 案件18：ユーザー主導 Reflection ----
+
+    override suspend fun addReflection(content: String, mood: Int?) {
+        val id = ensureSession()
+        val response = client.post("/sessions/$id/reflections") {
+            contentType(ContentType.Application.Json)
+            setBody(UserReflectionCreateRequest(content = content, mood = mood))
+        }
+        if (!response.status.isSuccess()) {
+            throw DiscoveryApiException("振り返りの保存に失敗しました (HTTP ${response.status.value})")
+        }
+    }
+
+    override suspend fun getReflections(): List<ReflectionUiModel> {
+        val id = ensureSession()
+        val response = client.get("/sessions/$id/reflections")
+        if (!response.status.isSuccess()) {
+            throw DiscoveryApiException("振り返り一覧の取得に失敗しました (HTTP ${response.status.value})")
+        }
+        return response.body<List<UserReflectionResponseDto>>().map {
+            ReflectionUiModel(
+                id = it.id.toString(),
+                content = it.content,
+                mood = it.mood,
+                createdAt = it.createdAt
+            )
+        }
+    }
+
     companion object {
         /** エミュレータから開発機 localhost を参照するための標準 URL。実機では呼び出し元でLAN IPを渡す。 */
         const val DEFAULT_BASE_URL = "http://10.0.2.2:8000"
@@ -354,7 +445,12 @@ private data class OnboardingUpdateRequest(
 private data class SessionCreateRequest(val studentLabel: String)
 
 @Serializable
-private data class SessionResponseDto(val id: Int)
+private data class SessionResponseDto(
+    val id: Int,
+    val nickname: String? = null,
+    val createdAt: Instant,
+    val updatedAt: Instant
+)
 
 @Serializable
 private data class ExperimentGenerateRequest(val nCandidates: Int = 3)
@@ -445,6 +541,34 @@ private data class HypothesisFeedbackResultDto(
     val feedback: HypothesisFeedbackResponseDto,
     val updatedHypothesis: HypothesisResponseDto,
     val newCriterion: CriterionResponseDto? = null
+)
+
+@Serializable
+private data class PsychAxisSurveySubmitRequest(val scores: Map<String, Float>)
+
+@Serializable
+private data class PsychAxisResultResponseDto(
+    val id: Int,
+    val sessionId: Int,
+    val axis: String,
+    val score: Float,
+    val createdAt: Instant,
+    val updatedAt: Instant
+)
+
+@Serializable
+private data class UserReflectionCreateRequest(
+    val content: String,
+    val mood: Int? = null
+)
+
+@Serializable
+private data class UserReflectionResponseDto(
+    val id: Int,
+    val sessionId: Int,
+    val content: String,
+    val mood: Int?,
+    val createdAt: Instant
 )
 
 private fun Float.roundedTo1Decimal(): String {

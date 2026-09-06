@@ -91,6 +91,27 @@ data class SettingsUiState(
     val isResetting: Boolean = false
 )
 
+/** Reflection 一覧画面の UI ステート。 */
+data class ReflectionListUiState(
+    val isLoading: Boolean = false,
+    val reflections: List<ReflectionUiModel> = emptyList(),
+    val errorMessage: String? = null
+)
+
+/** セッション一覧画面の UI ステート。 */
+data class SessionListUiState(
+    val isLoading: Boolean = false,
+    val sessions: List<SessionSummaryItem> = emptyList(),
+    val errorMessage: String? = null
+)
+
+/** 心理4軸アンケート画面の UI ステート。 */
+data class PsychAxisSurveyUiState(
+    val isSubmitting: Boolean = false,
+    val submitted: Boolean = false,
+    val errorMessage: String? = null
+)
+
 /**
  * Discovery 機能全体の ViewModel / State Holder。
  */
@@ -131,6 +152,15 @@ class DiscoveryState(
 
     private val _settingsState = MutableStateFlow(SettingsUiState())
     val settingsState: StateFlow<SettingsUiState> = _settingsState.asStateFlow()
+
+    private val _reflectionListState = MutableStateFlow(ReflectionListUiState())
+    val reflectionListState: StateFlow<ReflectionListUiState> = _reflectionListState.asStateFlow()
+
+    private val _sessionListState = MutableStateFlow(SessionListUiState())
+    val sessionListState: StateFlow<SessionListUiState> = _sessionListState.asStateFlow()
+
+    private val _psychAxisSurveyState = MutableStateFlow(PsychAxisSurveyUiState())
+    val psychAxisSurveyState: StateFlow<PsychAxisSurveyUiState> = _psychAxisSurveyState.asStateFlow()
 
     private val _selectedExperiment = MutableStateFlow<Experiment?>(null)
     val selectedExperiment: StateFlow<Experiment?> = _selectedExperiment.asStateFlow()
@@ -487,6 +517,101 @@ class DiscoveryState(
         loadHomeData()
         loadDiscovery()
         loadReportData()
+    }
+
+    fun loadReflections() {
+        scope.launch {
+            _reflectionListState.update { it.copy(isLoading = true, errorMessage = null) }
+            try {
+                val list = repository.getReflections()
+                _reflectionListState.update {
+                    it.copy(isLoading = false, reflections = list, errorMessage = null)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _reflectionListState.update {
+                    it.copy(
+                        isLoading = false,
+                        errorMessage = e.message ?: "振り返りの読み込みに失敗しました。"
+                    )
+                }
+            }
+        }
+    }
+
+    fun addReflection(content: String, mood: Int?) {
+        scope.launch {
+            try {
+                repository.addReflection(content, mood)
+                loadReflections()
+                _messages.tryEmit("振り返りを記録しました。")
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _messages.tryEmit(e.message ?: "振り返りの保存に失敗しました。")
+            }
+        }
+    }
+
+    fun loadSessionList() {
+        scope.launch {
+            _sessionListState.update { it.copy(isLoading = true, errorMessage = null) }
+            try {
+                val list = repository.getSessionList()
+                _sessionListState.update {
+                    it.copy(isLoading = false, sessions = list, errorMessage = null)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _sessionListState.update {
+                    it.copy(
+                        isLoading = false,
+                        errorMessage = e.message ?: "セッション一覧の読み込みに失敗しました。"
+                    )
+                }
+            }
+        }
+    }
+
+    fun switchSession(id: Int, onComplete: () -> Unit) {
+        scope.launch {
+            try {
+                repository.switchToSession(id)
+                // セッション切り替え後は各種キャッシュを再読み込みする。
+                loadHomeData()
+                loadDiscovery()
+                loadReportData()
+                loadSessionList()
+                _messages.tryEmit("セッションを切り替えました。")
+                onComplete()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _messages.tryEmit(e.message ?: "セッションの切り替えに失敗しました。")
+            }
+        }
+    }
+
+    fun submitPsychAxisSurvey(scores: Map<PsychAxis, Float>, onComplete: () -> Unit) {
+        scope.launch {
+            _psychAxisSurveyState.update { it.copy(isSubmitting = true, errorMessage = null) }
+            try {
+                repository.submitPsychAxisSurvey(scores)
+                _psychAxisSurveyState.update {
+                    it.copy(isSubmitting = false, submitted = true, errorMessage = null)
+                }
+                _messages.tryEmit("心理4軸アンケートを保存しました。")
+                onComplete()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _psychAxisSurveyState.update {
+                    it.copy(isSubmitting = false, errorMessage = e.message ?: "送信に失敗しました。")
+                }
+            }
+        }
     }
 
     fun close() {

@@ -462,13 +462,35 @@ class FakeDiscoveryRepository(
     private val psychAxisScores = mutableMapOf<PsychAxis, Float>()
     private val reflections = mutableListOf<ReflectionUiModel>()
     private var reflectionIdCounter = 0
+    private var currentSessionId: Int? = null
+
+    override suspend fun getSessionList(): List<SessionSummaryItem> {
+        simulateLatency()
+        checkErrorState()
+        val sessionId = currentSessionId ?: 1
+        return listOf(
+            SessionSummaryItem(
+                id = sessionId,
+                nickname = null,
+                createdAt = Instant.fromEpochMilliseconds(1725624000000L),
+                updatedAt = Instant.fromEpochMilliseconds(1725624000000L)
+            )
+        )
+    }
+
+    override suspend fun switchToSession(id: Int) {
+        simulateLatency()
+        checkErrorState()
+        currentSessionId = id
+        currentExperimentIndex = 0
+    }
 
     /**
      * 心理軸アンケートを送信するダミー実装。
      * 4軸すべてのスコアが 1.0〜5.0 の範囲内であることを検証し、
      * 結果をメモリ上に保持して返却する。
      */
-    suspend fun submitPsychAxisSurvey(scores: Map<PsychAxis, Float>): List<PsychAxisUiModel> {
+    override suspend fun submitPsychAxisSurvey(scores: Map<PsychAxis, Float>): List<PsychAxisUiModel> {
         simulateLatency()
         checkErrorState()
 
@@ -493,7 +515,7 @@ class FakeDiscoveryRepository(
     /**
      * ユーザー主導 Reflection を追加するダミー実装。
      */
-    suspend fun addReflection(content: String, mood: Int?) {
+    override suspend fun addReflection(content: String, mood: Int?) {
         simulateLatency()
         checkErrorState()
 
@@ -515,7 +537,7 @@ class FakeDiscoveryRepository(
      * ユーザー主導 Reflection の一覧を取得するダミー実装。
      * 作成日時の降順（新しいものが先頭）で返す。
      */
-    suspend fun getReflections(): List<ReflectionUiModel> {
+    override suspend fun getReflections(): List<ReflectionUiModel> {
         simulateLatency()
         checkErrorState()
         return reflections.toList()

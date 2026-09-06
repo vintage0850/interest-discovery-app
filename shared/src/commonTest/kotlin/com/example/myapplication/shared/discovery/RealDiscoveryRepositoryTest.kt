@@ -851,4 +851,210 @@ class RealDiscoveryRepositoryTest {
 
         client.close()
     }
+
+    // ---- 案件18：セッション復帰・一覧・心理軸・Reflection ----
+
+    @Test
+    fun ensureSession_restoresFromStorageWhenSummaryExists() = runTest {
+        val storage = InMemorySessionStorage()
+        storage.saveLastSessionId(42)
+        val (client, paths) = mockClient { path ->
+            when (path) {
+                "/sessions/42/summary" -> HttpStatusCode.OK to SUMMARY_BODY_NO_HYPOTHESIS
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client, sessionStorage = storage)
+
+        repo.getDiscovery()
+
+        // ensureSession() で存在確認の GET、fetchSummary() で取得の GET の 2 回呼ばれる。
+        assertEquals(listOf("/sessions/42/summary", "/sessions/42/summary"), paths)
+        assertEquals(42, storage.getLastSessionId())
+    }
+
+    @Test
+    fun ensureSession_createsNewSessionWhenStoredSessionNotFound() = runTest {
+        val storage = InMemorySessionStorage()
+        storage.saveLastSessionId(99)
+        val (client, paths) = mockClient { path ->
+            when (path) {
+                "/sessions/99/summary" -> HttpStatusCode.NotFound to """{"detail":"not found"}"""
+                "/sessions" -> HttpStatusCode.Created to SESSION_BODY
+                "/sessions/1/summary" -> HttpStatusCode.OK to SUMMARY_BODY_NO_HYPOTHESIS
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client, sessionStorage = storage)
+
+        repo.getDiscovery()
+
+        assertEquals(listOf("/sessions/99/summary", "/sessions", "/sessions/1/summary"), paths)
+        assertEquals(1, storage.getLastSessionId())
+    }
+
+    @Test
+    fun getSessionList_fetchesSessionsForStudentLabel() = runTest {
+        val (client, paths) = mockClient { path ->
+            when (path) {
+                "/sessions" -> HttpStatusCode.OK to """
+                    [{"id": 2, "student_label": "test_user", "status": "active",
+                      "created_at": "2026-09-02T00:00:00+00:00", "updated_at": "2026-09-03T00:00:00+00:00"},
+                     {"id": 1, "student_label": "test_user", "status": "active",
+                      "created_at": "2026-09-01T00:00:00+00:00", "updated_at": "2026-09-01T00:00:00+00:00"}]
+                """.trimIndent()
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client)
+
+        val sessions = repo.getSessionList()
+
+        assertEquals(listOf("/sessions"), paths)
+        assertEquals(2, sessions.size)
+        assertEquals(2, sessions[0].id)
+        assertEquals(1, sessions[1].id)
+    }
+
+    @Test
+    fun switchToSession_persistsToStorageAndClearsCache() = runTest {
+        val storage = InMemorySessionStorage()
+        val (client, paths) = mockClient { path ->
+            when (path) {
+                "/sessions" -> HttpStatusCode.Created to SESSION_BODY
+                "/sessions/1/experiments/generate" -> HttpStatusCode.Created to twoExperimentsBody()
+                "/sessions/7/experiments/generate" -> HttpStatusCode.Created to twoExperimentsBody()
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client, sessionStorage = storage)
+        repo.getSuggestedExperiments()
+        paths.clear()
+
+        repo.switchToSession(7)
+
+        assertEquals(7, storage.getLastSessionId())
+        // キャッシュがクリアされているため、次の取得で新しいセッション ID のエンドポイントが呼ばれる。
+        repo.getSuggestedExperiments()
+        assertEquals(listOf("/sessions/7/experiments/generate"), paths)
+    }
+
+    @Test
+    fun submitPsychAxisSurvey_postsScores() = runTest {
+        var capturedBody: String? = null
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/sessions" -> respond(
+                    content = SESSION_BODY,
+                    status = HttpStatusCode.Created,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json")
+                )
+                "/sessions/1/psych-axis-survey" -> {
+                    capturedBody = (request.body as io.ktor.http.content.TextContent).text
+                    respond(
+                        content = """
+                            [{"id": 1, "session_id": 1, "axis": "INVESTIGATE", "score": 4.5,
+                              "created_at": "2026-09-02T00:00:00+00:00", "updated_at": "2026-09-02T00:00:00+00:00"},
+                             {"id": 2, "session_id": 1, "axis": "CREATE", "score": 3.0,
+                              "created_at": "2026-09-02T00:00:00+00:00", "updated_at": "2026-09-02T00:00:00+00:00"},
+                             {"id": 3, "session_id": 1, "axis": "EXECUTE", "score": 4.0,
+                              "created_at": "2026-09-02T00:00:00+00:00", "updated_at": "2026-09-02T00:00:00+00:00"},
+                             {"id": 4, "session_id": 1, "axis": "COMMUNICATE", "score": 2.5,
+                              "created_at": "2026-09-02T00:00:00+00:00", "updated_at": "2026-09-02T00:00:00+00:00"}]
+                        """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json")
+                    )
+                }
+                else -> error("unexpected path: ${request.url.encodedPath}")
+            }
+        }
+        val customClient = HttpClient(engine) {
+            install(ContentNegotiation) {
+                json(Json {
+                    ignoreUnknownKeys = true
+                    namingStrategy = JsonNamingStrategy.SnakeCase
+                })
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = customClient)
+        val scores = mapOf(
+            PsychAxis.INVESTIGATE to 4.5f,
+            PsychAxis.CREATE to 3.0f,
+            PsychAxis.EXECUTE to 4.0f,
+            PsychAxis.COMMUNICATE to 2.5f
+        )
+
+        val results = repo.submitPsychAxisSurvey(scores)
+
+        assertNotNull(capturedBody)
+        assertTrue(capturedBody!!.contains("\"scores\""))
+        assertTrue(capturedBody!!.contains("\"INVESTIGATE\":4.5"))
+        assertTrue(capturedBody!!.contains("\"COMMUNICATE\":2.5"))
+        assertEquals(4, results.size)
+        assertEquals(4.5f, results.first { it.axis == PsychAxis.INVESTIGATE }.score)
+    }
+
+    @Test
+    fun addReflection_postsReflection() = runTest {
+        var capturedBody: String? = null
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/sessions" -> respond(
+                    content = SESSION_BODY,
+                    status = HttpStatusCode.Created,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json")
+                )
+                "/sessions/1/reflections" -> {
+                    capturedBody = (request.body as io.ktor.http.content.TextContent).text
+                    respond(
+                        content = """
+                            {"id": 1, "session_id": 1, "content": "今日は楽しかった", "mood": 4,
+                             "created_at": "2026-09-02T00:00:00+00:00"}
+                        """.trimIndent(),
+                        status = HttpStatusCode.Created,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json")
+                    )
+                }
+                else -> error("unexpected path: ${request.url.encodedPath}")
+            }
+        }
+        val customClient = HttpClient(engine) {
+            install(ContentNegotiation) {
+                json(Json {
+                    ignoreUnknownKeys = true
+                    namingStrategy = JsonNamingStrategy.SnakeCase
+                })
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = customClient)
+
+        repo.addReflection("今日は楽しかった", mood = 4)
+
+        assertNotNull(capturedBody)
+        assertTrue(capturedBody!!.contains("\"content\":\"今日は楽しかった\""))
+        assertTrue(capturedBody!!.contains("\"mood\":4"))
+    }
+
+    @Test
+    fun getReflections_fetchesReflections() = runTest {
+        val (client, paths) = mockClient { path ->
+            when (path) {
+                "/sessions" -> HttpStatusCode.Created to SESSION_BODY
+                "/sessions/1/reflections" -> HttpStatusCode.OK to """
+                    [{"id": 1, "session_id": 1, "content": "今日は楽しかった", "mood": 4,
+                      "created_at": "2026-09-02T00:00:00+00:00"}]
+                """.trimIndent()
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client)
+
+        val reflections = repo.getReflections()
+
+        assertTrue(paths.contains("/sessions/1/reflections"))
+        assertEquals(1, reflections.size)
+        assertEquals("今日は楽しかった", reflections[0].content)
+        assertEquals(4, reflections[0].mood)
+    }
 }

@@ -41,6 +41,8 @@ fun SettingsTabScreen(
     settingsState: SettingsUiState,
     onToggleNotifications: (Boolean) -> Unit,
     onResetData: () -> Unit,
+    onPsychAxisSurveyClick: () -> Unit,
+    onSessionListClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var activeModal by remember { mutableStateOf<String?>(null) }
@@ -117,7 +119,29 @@ fun SettingsTabScreen(
 
             Spacer(modifier = Modifier.height(DiscoverySpacing.lg))
 
-            // 5. その他
+            // 5. データ・セッション
+            SectionHeader(title = "データ・セッション")
+            SettingsCard {
+                Column {
+                    SettingsRow(
+                        icon = "🧠",
+                        title = "興味の方向性チェック",
+                        subtitle = "心理4軸アンケート",
+                        onClick = onPsychAxisSurveyClick
+                    )
+                    Spacer(modifier = Modifier.height(1.dp).fillMaxWidth().background(DiscoveryColors.BorderSubtle))
+                    SettingsRow(
+                        icon = "🕒",
+                        title = "過去のセッション",
+                        subtitle = "別のセッションに切り替える",
+                        onClick = onSessionListClick
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(DiscoverySpacing.lg))
+
+            // 6. その他
             SectionHeader(title = "その他")
             SettingsCard {
                 Column {

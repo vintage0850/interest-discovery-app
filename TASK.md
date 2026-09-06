@@ -3759,6 +3759,38 @@ Lane A/Bとも「新規機能の骨格」までが完了。以下の**実配線*
 
 **次の担当:** Kimi（実配線タスク完了後、または並行して着手可。`PsychAxisSurveyScreen.kt`は現在の実配線タスクの対象外ファイルのため競合しない）。
 
+### 追記（Kimi、2026-09-06）— 案件18実配線タスク完了
+
+**実施内容:**
+- `DiscoveryMainScaffold.kt`に`onReflectionListClick`/`onPsychAxisSurveyClick`/`onSessionListClick`パラメータを追加し、`ReportTabScreen`/`SettingsTabScreen`へ配線。
+- `App.kt`に`ReflectionListScreen`/`PsychAxisSurveyScreen`/`SessionListScreen`用のNavHostルートを追加し、各画面と`DiscoveryState`のメソッド（`loadReflections`/`addReflection`/`submitPsychAxisSurvey`/`loadSessionList`/`switchSession`）を接続。
+- `App.kt`の`RealDiscoveryRepository`初期化に`sessionStorage`パラメータを追加し、Android側から`AndroidSessionStorage`を注入可能にした。
+
+**実行したテストコマンドと結果:**
+
+```powershell
+.\gradlew.bat :shared:compileDebugKotlinAndroid --no-daemon
+.\gradlew.bat :shared:testDebugUnitTest --no-daemon
+```
+
+両方とも**BUILD SUCCESSFUL**を確認（`testDebugUnitTest`は全テスト通過）。
+
+**変更ファイル一覧（本セッションで編集）:**
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/App.kt`
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/discovery/DiscoveryMainScaffold.kt`
+
+**案件18関連のその他変更・新規ファイル（git working tree上）:**
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/DiscoveryRepository.kt`
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/DiscoveryState.kt`
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/FakeDiscoveryRepository.kt`
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/RealDiscoveryRepository.kt`
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/discovery/ReportTabScreen.kt`
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/discovery/SettingsTabScreen.kt`
+- `shared/src/commonTest/kotlin/com/example/myapplication/shared/discovery/RealDiscoveryRepositoryTest.kt`
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/SessionStorage.kt`（新規）
+- `shared/src/androidMain/kotlin/com/example/myapplication/shared/discovery/SessionStorage.android.kt`（新規）
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/discovery/SessionListScreen.kt`（新規）
+
 ## 案件19：Mikke設計書ギャップ対応（P0-3見送り分）— Signal→Evidence→Insightの3層分離（backend）
 
 **状態:** `設計判断済み・実装中`

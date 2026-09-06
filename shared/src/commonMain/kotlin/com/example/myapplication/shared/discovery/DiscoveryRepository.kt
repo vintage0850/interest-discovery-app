@@ -1,5 +1,7 @@
 package com.example.myapplication.shared.discovery
 
+import kotlinx.datetime.Instant
+
 /**
  * 興味発見機能のリポジトリ抽象化インターフェース。
  */
@@ -33,10 +35,41 @@ interface DiscoveryRepository {
         optionalInterests: List<String>,
         initialSelfUnderstandingScore: Float
     )
+
+    // ---- 案件18：既存セッション一覧・復帰 ----
+
+    /** 同一 student_label のセッション一覧を取得する（updated_at 降順）。 */
+    suspend fun getSessionList(): List<SessionSummaryItem>
+
+    /** 指定した既存セッションに切り替える。 */
+    suspend fun switchToSession(id: Int)
+
+    // ---- 案件18：心理軸アンケート ----
+
+    /** 心理4軸アンケート結果を送信する。 */
+    suspend fun submitPsychAxisSurvey(scores: Map<PsychAxis, Float>): List<PsychAxisUiModel>
+
+    // ---- 案件18：ユーザー主導 Reflection ----
+
+    /** ユーザー主導の振り返りを追加する。 */
+    suspend fun addReflection(content: String, mood: Int?)
+
+    /** ユーザー主導の振り返り一覧を取得する（created_at 降順）。 */
+    suspend fun getReflections(): List<ReflectionUiModel>
 }
 
 /** 直近7日とその前7日の比較から生成された週次レポート文。 */
 data class WeeklyNarrative(
     val weeklyInsights: String,
     val changeFromPast: String
+)
+
+/**
+ * セッション一覧表示用の軽量 DTO。
+ */
+data class SessionSummaryItem(
+    val id: Int,
+    val nickname: String?,
+    val createdAt: Instant,
+    val updatedAt: Instant
 )

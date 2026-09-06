@@ -38,6 +38,9 @@ fun DiscoveryMainScaffold(
     discoveryState: DiscoveryState,
     onStartExperiment: (Experiment) -> Unit,
     onViewDiscoveryDetail: () -> Unit,
+    onReflectionListClick: () -> Unit,
+    onPsychAxisSurveyClick: () -> Unit,
+    onSessionListClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val currentTab by discoveryState.currentTab.collectAsState()
@@ -125,12 +128,15 @@ fun DiscoveryMainScaffold(
                 )
                 AppTab.REPORT -> ReportTabScreen(
                     reportState = reportUiState,
-                    onRetry = { discoveryState.loadReportData() }
+                    onRetry = { discoveryState.loadReportData() },
+                    onReflectionListClick = onReflectionListClick
                 )
                 AppTab.SETTINGS -> SettingsTabScreen(
                     settingsState = settingsUiState,
                     onToggleNotifications = { discoveryState.toggleNotifications(it) },
-                    onResetData = { discoveryState.resetAllData { discoveryState.selectTab(AppTab.HOME) } }
+                    onResetData = { discoveryState.resetAllData { discoveryState.selectTab(AppTab.HOME) } },
+                    onPsychAxisSurveyClick = onPsychAxisSurveyClick,
+                    onSessionListClick = onSessionListClick
                 )
             }
         }

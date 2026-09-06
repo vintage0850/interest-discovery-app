@@ -2,6 +2,7 @@ package com.example.myapplication.shared.ui.discovery
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,6 +34,7 @@ import com.example.myapplication.shared.discovery.ReportUiState
 fun ReportTabScreen(
     reportState: ReportUiState,
     onRetry: () -> Unit,
+    onReflectionListClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Box(
@@ -75,7 +77,47 @@ fun ReportTabScreen(
             } else {
                 val data = reportState.reportData
                 if (data != null) {
-                    // 1. 今週の数字サマリー（完了数 / 取り組み時間）
+                    // 1. 日々の振り返りへの導線
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(DiscoveryRadius.card))
+                            .background(DiscoveryColors.Surface)
+                            .border(1.dp, DiscoveryColors.BorderSubtle, RoundedCornerShape(DiscoveryRadius.card))
+                            .clickable(onClick = onReflectionListClick)
+                            .padding(DiscoverySpacing.cardPadding)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "📝 日々の振り返り",
+                                    color = DiscoveryColors.TextPrimary,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.height(DiscoverySpacing.xs))
+                                Text(
+                                    text = "気づきや想いを書き留める",
+                                    color = DiscoveryColors.TextSecondary,
+                                    fontSize = 13.sp
+                                )
+                            }
+                            Text(
+                                text = "開く ›",
+                                color = DiscoveryColors.Accent,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(DiscoverySpacing.base))
+
+                    // 2. 今週の数字サマリー（完了数 / 取り組み時間）
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(DiscoverySpacing.md)
