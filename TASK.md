@@ -3715,3 +3715,37 @@ Lane BをAntigravity（`agy -p ... --add-dir .`）で起動したところ、2�
 **設計判断:** Lane Bのタスク内容を変更せず、担当のみKimiに変更する（`kimi-task.ps1`で2本目の並列ジョブとして起動）。Lane Aと担当ファイルが完全に排他（新規ファイルのみ）のため、同一プロジェクトディレクトリでの並行実行でも競合しない。
 
 **次の担当:** Kimi（Lane B、付け替え）。
+
+### 作業履歴・テスト結果（Lane A: Kimi、Lane B: Antigravity、2026-09-06）
+
+**Lane A（Kimi、バックエンド一括）:**
+- (3)既存セッション一覧・復帰: `GET /sessions?student_label=xxx`（`list_sessions`、`updated_at`降順）を実装。
+- (4)心理軸アンケート: `PsychAxis` enum（INVESTIGATE/CREATE/EXECUTE/COMMUNICATE）、`PsychAxisResult`テーブル、`POST /sessions/{id}/psych-axis-survey`、`SessionSummary.psych_axis_scores`を実装。
+- (5)ユーザー主導Reflection: `UserReflection`テーブル、`POST /sessions/{id}/reflections`、`GET /sessions/{id}/reflections`を実装。
+- `DiscoverySession.updated_at`を主要な書き込み操作（シグナル・実験・仮説フィードバック・オンボーディング・心理軸・Reflection）で更新するよう修正。
+- TDDで実施。テスト結果: `cd backend && python -m pytest -q` → **220 passed**（Claude独立検証でも同じ220 passed, 5 warnings, 43.45秒を確認）。
+
+**Lane B（Antigravity、UI画面新規作成。非対話実行の権限問題により2回失敗後、`--dangerously-skip-permissions --print-timeout 30m`で成功。詳細は上記「Antigravity非対話実行の失敗」参照）:**
+- `ui/survey/PsychAxisQuestion.kt`（質問8問・軸対応表・スコア計算）、`PsychAxisResultCard.kt`（結果表示）、`PsychAxisSurveyScreen.kt`（アンケート画面、`OnboardingSelfCheckScreen.kt`のUI構造踏襲）を新規作成。
+- `ui/reflection/ReflectionListScreen.kt`（一覧・FAB・新規追加ダイアログ・moodピッカー・空状態UI）を新規作成。
+- 対応する単体テスト（`PsychAxisQuestionTest`5件、`ReflectionListFormatTest`1件）を新規作成。
+- 既存ファイル（backend配下、`RealDiscoveryRepository.kt`、`App.kt`、`SettingsTabScreen.kt`、`ReportTabScreen.kt`、`DiscoveryModels.kt`、`FakeDiscoveryRepository.kt`）には一切変更なし（Claude確認済み）。
+- テスト結果: `./gradlew :shared:assembleDebug` → BUILD SUCCESSFUL、`./gradlew :shared:testDebugUnitTest` → BUILD SUCCESSFUL（新規6テスト含め全通過）。
+
+**Claude統合検証（2026-09-06）:**
+- 両レーンの成果物をマージした状態で独立に再検証。
+  - `cd backend && python -m pytest -q` → **220 passed, 5 warnings**
+  - `./gradlew :shared:compileDebugKotlinAndroid --no-daemon` → BUILD SUCCESSFUL
+  - `./gradlew :shared:testDebugUnitTest --no-daemon` → BUILD SUCCESSFUL（全テスト通過）
+- Lane A/Bの担当ファイルに重複・競合なし（git diffで確認）。
+- 詳細レポートは`TASK-lane-a-report.md`・`TASK-lane-b-report.md`に作成されたが、本セクションへの統合後、両ファイルは削除する（一時的な作業ログのため）。
+
+### 残作業（次フェーズ）
+
+Lane A/Bとも「新規機能の骨格」までが完了。以下の**実配線**が未着手:
+
+1. **(3)既存セッション一覧・復帰:** `SessionStorage.kt`（新規）・`SessionStorage.android.kt`（新規）、`RealDiscoveryRepository.ensureSession()`の復元ロジック、`DiscoveryRepository`への`getSessionList()`/`switchToSession()`追加、`SettingsTabScreen.kt`への一覧UI組み込み。
+2. **(4)心理軸アンケート:** `RealDiscoveryRepository`に`submitPsychAxisSurvey()`実装（バックエンドの`POST /sessions/{id}/psych-axis-survey`を呼ぶ）、`App.kt`のNavHostへのルート追加、設定画面からの導線追加。
+3. **(5)Reflection:** `RealDiscoveryRepository`に`addReflection()`/`getReflections()`実装、`ReportTabScreen.kt`への「振り返りを書く」セクション組み込み。
+
+**次の担当:** Kimi（実配線タスク、単独。他AIとの並行不要な統合作業のため）。
