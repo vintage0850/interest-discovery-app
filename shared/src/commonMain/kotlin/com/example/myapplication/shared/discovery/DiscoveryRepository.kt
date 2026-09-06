@@ -56,6 +56,11 @@ interface DiscoveryRepository {
 
     /** ユーザー主導の振り返り一覧を取得する（created_at 降順）。 */
     suspend fun getReflections(): List<ReflectionUiModel>
+
+    // ---- 案件19：Evidence 一覧 ----
+
+    /** 指定したセッションの Evidence 一覧を取得する（created_at 降順）。 */
+    suspend fun getEvidenceList(sessionId: Int): List<EvidenceUiModel>
 }
 
 /** 直近7日とその前7日の比較から生成された週次レポート文。 */

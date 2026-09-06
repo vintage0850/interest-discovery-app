@@ -18,6 +18,7 @@ import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.datetime.Instant
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNamingStrategy
@@ -423,6 +424,16 @@ class RealDiscoveryRepository(
         }
     }
 
+    // ---- 案件19：Evidence 一覧 ----
+
+    override suspend fun getEvidenceList(sessionId: Int): List<EvidenceUiModel> {
+        val response = client.get("/sessions/$sessionId/evidence")
+        if (!response.status.isSuccess()) {
+            throw DiscoveryApiException("エビデンス一覧の取得に失敗しました (HTTP ${response.status.value})")
+        }
+        return response.body<List<EvidenceResponseDto>>().map { it.toUiModel() }
+    }
+
     companion object {
         /** エミュレータから開発機 localhost を参照するための標準 URL。実機では呼び出し元でLAN IPを渡す。 */
         const val DEFAULT_BASE_URL = "http://10.0.2.2:8000"
@@ -496,8 +507,29 @@ private data class BehaviorSummaryDto(
 private data class HypothesisResponseDto(
     val id: Int,
     val summary: String,
-    val confidence: Float
+    val confidence: Float,
+    @SerialName("supporting_evidence")
+    val supportingEvidence: List<Int> = emptyList()
 )
+
+@Serializable
+private data class EvidenceResponseDto(
+    val id: Int,
+    val sessionId: Int,
+    val domain: String,
+    val signalCount: Int,
+    val summaryText: String,
+    val createdAt: Instant
+)
+
+private fun EvidenceResponseDto.toUiModel(): EvidenceUiModel = EvidenceUiModel(
+    id = id,
+    domain = domain,
+    signalCount = signalCount,
+    summaryText = summaryText,
+    createdAt = createdAt
+)
+
 
 @Serializable
 private data class CriterionResponseDto(

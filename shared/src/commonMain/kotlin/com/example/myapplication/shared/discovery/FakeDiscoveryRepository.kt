@@ -542,4 +542,33 @@ class FakeDiscoveryRepository(
         checkErrorState()
         return reflections.toList()
     }
+
+    // ---- 案件19：Evidence 一覧（ダミー実装） ----
+
+    private val fakeEvidences = mutableListOf(
+        EvidenceUiModel(
+            id = 1,
+            domain = "tech",
+            signalCount = 3,
+            summaryText = "プログラミングやアルゴリズムの実験に高い関心を示し、想定時間を超えて取り組みました。",
+            createdAt = Instant.fromEpochMilliseconds(1725624000000L)
+        ),
+        EvidenceUiModel(
+            id = 2,
+            domain = "art",
+            signalCount = 2,
+            summaryText = "UIの配色やレイアウトの比較において、細かな違いに気づく傾向が観察されました。",
+            createdAt = Instant.fromEpochMilliseconds(1725537600000L)
+        )
+    )
+
+    override suspend fun getEvidenceList(sessionId: Int): List<EvidenceUiModel> {
+        simulateLatency()
+        checkErrorState()
+        return if (scenario == FakeScenario.FIRST_TIME_USER || scenario == FakeScenario.EMPTY_DISCOVERY) {
+            emptyList()
+        } else {
+            fakeEvidences.toList()
+        }
+    }
 }

@@ -29,6 +29,7 @@ import com.example.myapplication.shared.discovery.RealDiscoveryRepository
 import com.example.myapplication.shared.discovery.SessionStorage
 import com.example.myapplication.shared.ui.discovery.DiscoveryMainScaffold
 import com.example.myapplication.shared.ui.discovery.DiscoveryResultScreen
+import com.example.myapplication.shared.ui.discovery.EvidenceListScreen
 import com.example.myapplication.shared.ui.discovery.ExperimentDetailScreen
 import com.example.myapplication.shared.ui.discovery.ExperimentRunningScreen
 import com.example.myapplication.shared.ui.discovery.ReflectionScreen
@@ -57,6 +58,10 @@ import kotlinx.serialization.Serializable
 @Serializable object ReflectionList
 @Serializable object PsychAxisSurvey
 @Serializable object SessionList
+
+// 案件19：エビデンス一覧のルート
+@Serializable object EvidenceList
+
 
 @Composable
 fun App(
@@ -272,6 +277,21 @@ fun App(
                             navController.popBackStack()
                         }
                     }
+                )
+            }
+
+            // 9. エビデンス一覧画面
+            composable<EvidenceList> {
+                val evidenceListState by discoveryState.evidenceListState.collectAsState()
+                LaunchedEffect(Unit) {
+                    discoveryState.loadEvidenceList()
+                }
+                EvidenceListScreen(
+                    evidences = evidenceListState.evidences,
+                    isLoading = evidenceListState.isLoading,
+                    errorMessage = evidenceListState.errorMessage,
+                    onRetry = { discoveryState.loadEvidenceList() },
+                    onBack = { navController.popBackStack() }
                 )
             }
             }

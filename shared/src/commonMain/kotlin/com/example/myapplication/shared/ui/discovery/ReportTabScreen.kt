@@ -35,6 +35,7 @@ fun ReportTabScreen(
     reportState: ReportUiState,
     onRetry: () -> Unit,
     onReflectionListClick: () -> Unit,
+    onEvidenceListClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Box(
@@ -102,6 +103,46 @@ fun ReportTabScreen(
                                 Spacer(modifier = Modifier.height(DiscoverySpacing.xs))
                                 Text(
                                     text = "気づきや想いを書き留める",
+                                    color = DiscoveryColors.TextSecondary,
+                                    fontSize = 13.sp
+                                )
+                            }
+                            Text(
+                                text = "開く ›",
+                                color = DiscoveryColors.Accent,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(DiscoverySpacing.base))
+
+                    // 2. エビデンス一覧への導線
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(DiscoveryRadius.card))
+                            .background(DiscoveryColors.Surface)
+                            .border(1.dp, DiscoveryColors.BorderSubtle, RoundedCornerShape(DiscoveryRadius.card))
+                            .clickable(onClick = onEvidenceListClick)
+                            .padding(DiscoverySpacing.cardPadding)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "🔬 行動エビデンス",
+                                    color = DiscoveryColors.TextPrimary,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.height(DiscoverySpacing.xs))
+                                Text(
+                                    text = "蓄積された行動シグナルの要約を見る",
                                     color = DiscoveryColors.TextSecondary,
                                     fontSize = 13.sp
                                 )

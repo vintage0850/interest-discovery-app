@@ -261,3 +261,17 @@ data class ReflectionUiModel(
     val mood: Int? = null,
     val createdAt: Instant
 )
+
+/**
+ * 行動シグナルから集約されたエビデンス（Evidence）の UI モデル。
+ * 作成日時は UTC の [Instant] を使う（TIMEZONE.md 準拠）。
+ */
+@Serializable
+data class EvidenceUiModel(
+    val id: Int,
+    val domain: String,
+    val signalCount: Int,
+    val summaryText: String,
+    val createdAt: Instant
+)
+

@@ -112,6 +112,14 @@ data class PsychAxisSurveyUiState(
     val errorMessage: String? = null
 )
 
+/** Evidence 一覧画面の UI ステート。 */
+data class EvidenceListUiState(
+    val isLoading: Boolean = false,
+    val evidences: List<EvidenceUiModel> = emptyList(),
+    val errorMessage: String? = null
+)
+
+
 /**
  * Discovery 機能全体の ViewModel / State Holder。
  */
@@ -161,6 +169,10 @@ class DiscoveryState(
 
     private val _psychAxisSurveyState = MutableStateFlow(PsychAxisSurveyUiState())
     val psychAxisSurveyState: StateFlow<PsychAxisSurveyUiState> = _psychAxisSurveyState.asStateFlow()
+
+    private val _evidenceListState = MutableStateFlow(EvidenceListUiState())
+    val evidenceListState: StateFlow<EvidenceListUiState> = _evidenceListState.asStateFlow()
+
 
     private val _selectedExperiment = MutableStateFlow<Experiment?>(null)
     val selectedExperiment: StateFlow<Experiment?> = _selectedExperiment.asStateFlow()
@@ -539,6 +551,29 @@ class DiscoveryState(
             }
         }
     }
+
+    fun loadEvidenceList(sessionId: Int? = null) {
+        scope.launch {
+            _evidenceListState.update { it.copy(isLoading = true, errorMessage = null) }
+            try {
+                val targetSessionId = sessionId ?: (repository.getSessionList().firstOrNull()?.id ?: 1)
+                val list = repository.getEvidenceList(targetSessionId)
+                _evidenceListState.update {
+                    it.copy(isLoading = false, evidences = list, errorMessage = null)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _evidenceListState.update {
+                    it.copy(
+                        isLoading = false,
+                        errorMessage = e.message ?: "エビデンスの読み込みに失敗しました。"
+                    )
+                }
+            }
+        }
+    }
+
 
     fun addReflection(content: String, mood: Int?) {
         scope.launch {
