@@ -3997,3 +3997,149 @@ Kimiの成果物をClaudeが独立に再検証。
 
 **次の担当:** ユーザー確認待ち（実機で「行動実験を完了する」操作を再度実施し、日時パースエラーが解消したか確認）。
 
+---
+
+## 案件21：DIVE_CANDIDATE判定ロジックの実装
+
+**状態:** 仕様確定・実装未着手（2026-09-07、CTO・品質保証責任者による裁定）。実装担当はKimi。
+
+### 目的
+
+Exploreタブの「Dive候補 🔥」をダミーデータ専用の表示から実データに基づく状態へ移行する。
+判定には既存の行動実験・主観評価・予定時間に対する実施時間だけを使い、DBカラム追加や
+マイグレーションは行わない。
+
+### 判定基準（確定仕様）
+
+backendの`build_behavior_summary()`が、セッション全期間のデータをドメイン別に集計し、
+次の条件を**すべて**満たすドメインIDを`BehaviorSummary.dive_candidate_domains`として返す。
+返却値は重複なし・ドメインIDの昇順とし、該当なしは空リストとする。
+
+1. 同一ドメインで`COMPLETED`の実験が2件以上ある。
+2. そのうち`ExperimentResult`が存在する完了実験が2件以上ある。
+3. 2で対象にした結果の`enjoyment`平均が4.0以上である。
+4. 同じ結果の`curiosity`平均が4.0以上である。
+5. 同じ結果の`retry_intent`平均が4.0以上である。
+6. 同じ結果の`confidence`平均が0.70以上である。
+7. 2で対象にした評価付き完了実験に、`actual_minutes / planned_minutes >= 1.5`の実験が1件以上ある。
+   既存の`duration_ratio_high`と同じ境界を使い、2.0倍以上の実験もこの1件に含める。
+
+平均値はドメイン内の評価付き完了実験だけから算出する。`ExperimentResult`または
+`actual_minutes`が欠けた実験、`GENERATED`・`SELECTED`・`SKIPPED`の実験は、満たしていない条件を
+補完する材料として扱わない。別ドメインの高評価・長時間実施も混ぜない。
+
+Androidの`RealDiscoveryRepository.getDomainFields()`は、既存状態を次の優先順位で決める。
+
+1. `experimentCount == 0`なら`UNEXPLORED`
+2. `triedCount == 0`なら`EXPLORED`
+3. 上記以外でドメインIDが`diveCandidateDomains`に含まれるなら`DIVE_CANDIDATE`
+4. それ以外は`TRIED`
+
+この順序により、backendから矛盾した候補IDが返っても、未探索・未完了ドメインを
+`DIVE_CANDIDATE`にはしない。Android DTOの`diveCandidateDomains`は既定値を`emptyList()`とし、
+backendとAndroidの更新順が前後しても従来の3状態表示を維持する。
+
+### 設計判断
+
+- 判定ロジックの正本はbackendに置く。Androidで平均値や時間比率を再計算せず、APIが返す
+  `dive_candidate_domains`を表示状態へ写像するだけにする。
+- `BehaviorSummary`への追加フィールドは`Field(default_factory=list)`を持つ後方互換なレスポンス拡張とし、
+  新規エンドポイントは作らない。
+- 完了1件のみでは偶然の高評価を除けないため候補にしない。一方、初期運用で候補が極端に出にくく
+  ならないよう、最低件数は3件ではなく2件とする。
+- 3種類の主観評価をすべて4.0以上とし、平均`confidence` 0.70以上を要求する。さらに
+  `duration_ratio_high`相当の実行行動を1件要求し、自己申告だけで候補にならないようにする。
+- 閾値はモジュール定数として名前を付け、テストから境界値が読み取れるようにする。
+
+### 対象外（今回実装しない）
+
+- `ExperimentResult`、`Experiment`その他のDBテーブルへのカラム追加、既存カラム変更、マイグレーション
+- ML・Geminiによる候補判定、自由記述`reflection`の自然言語解析、心理軸・仮説・Evidenceの利用
+- 期間減衰、直近N件だけの集計、ユーザー別の閾値調整、A/Bテスト、ランキングや候補数の上限制御
+- `duration_ratio_very_high`への追加加点、スコア制・OR条件など、上記7条件以外の判定方式
+- Exploreタブのレイアウト・色・ラベル変更、候補理由の表示、新しい画面や通知・Dive開始導線の追加
+- `FakeDiscoveryRepository.kt`のダミーデータ調整
+- 既存の`UNEXPLORED`／`EXPLORED`／`TRIED`の意味、実験完了フロー、summaryエンドポイントURLの変更
+
+### 対象ファイル（担当宣言）
+
+**担当:** Kimi。以下の実装・テストファイルを担当し、担当解除まで他のAIは編集しない。
+
+backend:
+- `backend/discovery/aggregation.py` — ドメイン別集計と候補判定、閾値定数
+- `backend/discovery/models.py` — `BehaviorSummary.dive_candidate_domains`の追加
+- `backend/tests/test_discovery_aggregation.py` — 判定条件・境界値・ドメイン分離のテスト
+
+Android/KMP:
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/RealDiscoveryRepository.kt` —
+  DTO追従と4状態への写像
+- `shared/src/commonTest/kotlin/com/example/myapplication/shared/discovery/RealDiscoveryRepositoryTest.kt` —
+  APIレスポンスからの状態判定テスト
+
+原則として上記5ファイル以外は変更しない。`DiscoveryModels.kt`の`ExploreStatus.DIVE_CANDIDATE`は
+既に定義済みのため変更不要。実装上やむを得ず対象追加が必要になった場合は、先にTASK.mdへ理由を記録し、
+CTO・品質保証責任者の再承認を受ける。
+
+### 受入条件
+
+- TDD必須。backend・Androidとも、以下の失敗テストを先に追加してから実装する。
+- backendで、同一ドメインに評価付き完了実験が2件あり、3主観平均がちょうど4.0、平均confidenceが
+  ちょうど0.70、うち1件の時間比率がちょうど1.5の場合、そのドメインが候補になる。
+- backendで、次の各ケースは候補にならないことを個別に検証する: 完了1件のみ、評価結果1件のみ、
+  `enjoyment`／`curiosity`／`retry_intent`のいずれかの平均が4.0未満、平均confidenceが0.70未満、
+  同一ドメインに時間比率1.5以上が1件もない。
+- backendで、時間比率2.0以上は`duration_ratio_high`にも含まれるため候補条件を満たせる。
+- backendで、別ドメインの評価結果・`duration_ratio_high`、未完了・スキップ済み実験、
+  `ExperimentResult`または`actual_minutes`欠落データが混在しても誤判定・例外が発生しない。
+- backendで、複数候補は重複なし・ドメインID昇順、候補なしは`[]`となる。
+- 既存のグローバル集計値（`avg_enjoyment`等）と`domain_experiment_counts`／
+  `domain_completed_counts`／`duration_ratio_high`の意味・値を変えない。
+- Androidで、候補IDかつ`triedCount > 0`の既知ドメインが`DIVE_CANDIDATE`となり、候補外の完了済み
+  ドメインは`TRIED`のままとなる。
+- Androidで、候補リストに含まれていても`experimentCount == 0`なら`UNEXPLORED`、
+  `experimentCount > 0 && triedCount == 0`なら`EXPLORED`となる。
+- Androidで、`dive_candidate_domains`が欠落した旧形式のレスポンスは空リストとして読め、
+  従来の`UNEXPLORED`／`EXPLORED`／`TRIED`判定を維持する。未知のドメインIDは無視する。
+- DBスキーマ、`discovery.db`、マイグレーションファイルに差分がない。
+- `cd backend && python -m pytest -q`が全件PASSする。
+- `./gradlew :shared:testDebugUnitTest --no-daemon`が全件PASSする。
+
+### 引き継ぎ
+
+**次の担当:** Kimiが上記5ファイルをTDDで実装。実装完了後、CTO・品質保証責任者がbackendと
+Android/KMPのテスト再実行、差分確認、DBスキーマ無変更を独立検証する。
+
+---
+
+### 実施記録（2026-09-07、Kimi）
+
+**実施内容:**
+- backend/discovery/aggregation.py に DIVE_CANDIDATE 判定ロジックを追加。閾値定数
+  (`_DIVE_CANDIDATE_MIN_RESULT_COUNT=2`, `_DIVE_CANDIDATE_MIN_RATING=4.0`,
+  `_DIVE_CANDIDATE_MIN_CONFIDENCE=0.70`) を導入し、同一ドメインの評価付き完了実験が
+  2件以上、3主観平均が4.0以上、confidence平均が0.70以上、かつ
+  `actual_minutes / planned_minutes >= 1.5` の実験が1件以上あるドメインを抽出。
+  候補は重複なし・ドメインID昇順・該当なしは空リスト。
+- backend/discovery/models.py の `BehaviorSummary` に
+  `dive_candidate_domains: list[str] = Field(default_factory=list)` を追加し、
+  後方互換なレスポンス拡張とした。
+- backend/tests/test_discovery_aggregation.py に境界値・否定条件・ドメイン分離・
+  後方互換性を網羅したテストを追加。
+- shared/.../RealDiscoveryRepository.kt の `BehaviorSummaryDto` に
+  `diveCandidateDomains: List<String> = emptyList()` を追加し、`getDomainFields()` の
+  状態判定を `UNEXPLORED -> EXPLORED -> DIVE_CANDIDATE -> TRIED` の優先順位に変更。
+- shared/.../RealDiscoveryRepositoryTest.kt に DIVE_CANDIDATE 表示・未探索/未完了の
+  優先・旧形式レスポンス・未知ドメイン無視のテストを追加。
+
+**テスト結果:**
+- `cd backend && python -m pytest -q` → 253 passed
+- `./gradlew :shared:testDebugUnitTest --no-daemon` → BUILD SUCCESSFUL
+
+**対象外遵守:**
+- DBカラム追加・マイグレーション、ML判定、期間減衰、レイアウト変更、
+  FakeDiscoveryRepository調整等は未実施。
+- git status で変更は担当5ファイル + TASK.md のみ。`discovery.db` および
+  マイグレーションファイルに差分なし。
+
+**コミットID:** `[TODO: コミット後に追記]`
+

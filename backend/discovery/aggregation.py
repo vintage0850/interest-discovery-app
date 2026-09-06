@@ -11,6 +11,10 @@ from discovery.models import BehaviorSummary, Experiment, ExperimentResult, Expe
 _DURATION_RATIO_HIGH = 1.5
 _DURATION_RATIO_VERY_HIGH = 2.0
 
+_DIVE_CANDIDATE_MIN_RESULT_COUNT = 2
+_DIVE_CANDIDATE_MIN_RATING = 4.0
+_DIVE_CANDIDATE_MIN_CONFIDENCE = 0.70
+
 
 def build_behavior_summary_for_period(
     signals: list[InterestSignal],
@@ -119,6 +123,8 @@ def build_behavior_summary(
         results=results,
     )
 
+    dive_candidate_domains = _compute_dive_candidate_domains(experiments, results)
+
     return BehaviorSummary(
         total_signals=len(signals),
         action_type_counts=dict(action_type_counts),
@@ -136,6 +142,7 @@ def build_behavior_summary(
         total_minutes_spent=total_minutes_spent,
         domain_experiment_counts=dict(domain_experiment_counts),
         domain_completed_counts=dict(domain_completed_counts),
+        dive_candidate_domains=dive_candidate_domains,
     )
 
 
@@ -143,6 +150,59 @@ def _avg(values: list[float | int]) -> float | None:
     if not values:
         return None
     return mean(values)
+
+
+def _compute_dive_candidate_domains(
+    experiments: list[Experiment],
+    results: list[ExperimentResult],
+) -> list[str]:
+    """DIVE_CANDIDATE 判定基準を満たすドメインID一覧を返す。
+
+    各ドメインについて、評価付き完了実験が2件以上あり、
+    enjoyment/curiosity/retry_intent の平均が4.0以上、
+    confidence 平均が0.70以上、かつ planned_minutes の1.5倍以上で
+    実施した実験が1件以上あれば候補とする。
+    """
+    result_by_experiment_id = {r.experiment_id: r for r in results}
+
+    domain_completed: dict[str, list[Experiment]] = defaultdict(list)
+    for experiment in experiments:
+        if experiment.status == ExperimentStatus.COMPLETED.value:
+            domain_completed[experiment.domain].append(experiment)
+
+    candidates: list[str] = []
+    for domain, completed in domain_completed.items():
+        if len(completed) < _DIVE_CANDIDATE_MIN_RESULT_COUNT:
+            continue
+
+        rated = [
+            e
+            for e in completed
+            if e.id in result_by_experiment_id and e.actual_minutes is not None
+        ]
+        if len(rated) < _DIVE_CANDIDATE_MIN_RESULT_COUNT:
+            continue
+
+        rated_results = [result_by_experiment_id[e.id] for e in rated]
+        if (
+            _avg([r.enjoyment for r in rated_results]) < _DIVE_CANDIDATE_MIN_RATING
+            or _avg([r.curiosity for r in rated_results]) < _DIVE_CANDIDATE_MIN_RATING
+            or _avg([r.retry_intent for r in rated_results])
+            < _DIVE_CANDIDATE_MIN_RATING
+            or _avg([r.confidence for r in rated_results])
+            < _DIVE_CANDIDATE_MIN_CONFIDENCE
+        ):
+            continue
+
+        if not any(
+            e.actual_minutes / e.planned_minutes >= _DURATION_RATIO_HIGH
+            for e in rated
+        ):
+            continue
+
+        candidates.append(domain)
+
+    return sorted(candidates)
 
 
 def _detect_discrepancies(

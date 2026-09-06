@@ -247,6 +247,7 @@ class RealDiscoveryRepository(
             val status = when {
                 experimentCount == 0 -> ExploreStatus.UNEXPLORED
                 triedCount == 0 -> ExploreStatus.EXPLORED
+                meta.id in summary.diveCandidateDomains -> ExploreStatus.DIVE_CANDIDATE
                 else -> ExploreStatus.TRIED
             }
             DomainField(
@@ -500,7 +501,8 @@ private data class BehaviorSummaryDto(
     val totalSignals: Int = 0,
     val domainExperimentCounts: Map<String, Int> = emptyMap(),
     val domainCompletedCounts: Map<String, Int> = emptyMap(),
-    val actionTypeCounts: Map<String, Int> = emptyMap()
+    val actionTypeCounts: Map<String, Int> = emptyMap(),
+    val diveCandidateDomains: List<String> = emptyList()
 )
 
 @Serializable

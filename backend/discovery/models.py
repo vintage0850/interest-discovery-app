@@ -599,6 +599,7 @@ class BehaviorSummary(SQLModel):
     total_minutes_spent: int
     domain_experiment_counts: dict[str, int]
     domain_completed_counts: dict[str, int]
+    dive_candidate_domains: list[str] = Field(default_factory=list)
 
 
 class SessionSummary(SQLModel):

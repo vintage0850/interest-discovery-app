@@ -109,6 +109,85 @@ private val SUMMARY_BODY_WITH_DOMAIN_COUNTS = """
      "latest_hypothesis": null}
 """.trimIndent()
 
+private val SUMMARY_BODY_WITH_DIVE_CANDIDATE = """
+    {"session": {"id": 1, "student_label": "test_user", "status": "active",
+     "created_at": "2026-09-02T00:00:00+00:00", "updated_at": "2026-09-02T00:00:00+00:00"},
+     "behavior_summary": {
+       "total_signals": 0, "action_type_counts": {}, "domain_counts": {},
+       "total_experiments": 3, "completed_experiments": 3, "skipped_experiments": 0,
+       "avg_enjoyment": 4.0, "avg_curiosity": 4.0, "avg_retry_intent": 4.0, "avg_confidence": 0.70,
+       "duration_ratio_high": [1, 3], "duration_ratio_very_high": [], "discrepancies": [],
+       "total_minutes_spent": 36,
+       "domain_experiment_counts": {"tech": 2, "art": 1, "music": 1},
+       "domain_completed_counts": {"tech": 2, "art": 1, "music": 0},
+       "dive_candidate_domains": ["tech"]
+     },
+     "latest_hypothesis": null}
+""".trimIndent()
+
+private val SUMMARY_BODY_WITH_CANDIDATE_BUT_UNEXPLORED = """
+    {"session": {"id": 1, "student_label": "test_user", "status": "active",
+     "created_at": "2026-09-02T00:00:00+00:00", "updated_at": "2026-09-02T00:00:00+00:00"},
+     "behavior_summary": {
+       "total_signals": 0, "action_type_counts": {}, "domain_counts": {},
+       "total_experiments": 0, "completed_experiments": 0, "skipped_experiments": 0,
+       "avg_enjoyment": null, "avg_curiosity": null, "avg_retry_intent": null, "avg_confidence": null,
+       "duration_ratio_high": [], "duration_ratio_very_high": [], "discrepancies": [],
+       "total_minutes_spent": 0,
+       "domain_experiment_counts": {},
+       "domain_completed_counts": {},
+       "dive_candidate_domains": ["tech"]
+     },
+     "latest_hypothesis": null}
+""".trimIndent()
+
+private val SUMMARY_BODY_WITH_CANDIDATE_BUT_EXPLORED = """
+    {"session": {"id": 1, "student_label": "test_user", "status": "active",
+     "created_at": "2026-09-02T00:00:00+00:00", "updated_at": "2026-09-02T00:00:00+00:00"},
+     "behavior_summary": {
+       "total_signals": 0, "action_type_counts": {}, "domain_counts": {},
+       "total_experiments": 1, "completed_experiments": 0, "skipped_experiments": 0,
+       "avg_enjoyment": null, "avg_curiosity": null, "avg_retry_intent": null, "avg_confidence": null,
+       "duration_ratio_high": [], "duration_ratio_very_high": [], "discrepancies": [],
+       "total_minutes_spent": 0,
+       "domain_experiment_counts": {"tech": 1},
+       "domain_completed_counts": {"tech": 0},
+       "dive_candidate_domains": ["tech"]
+     },
+     "latest_hypothesis": null}
+""".trimIndent()
+
+private val SUMMARY_BODY_OLD_FORMAT = """
+    {"session": {"id": 1, "student_label": "test_user", "status": "active",
+     "created_at": "2026-09-02T00:00:00+00:00", "updated_at": "2026-09-02T00:00:00+00:00"},
+     "behavior_summary": {
+       "total_signals": 0, "action_type_counts": {},
+       "total_experiments": 0, "completed_experiments": 2, "skipped_experiments": 0,
+       "avg_enjoyment": null, "avg_curiosity": null, "avg_retry_intent": null, "avg_confidence": null,
+       "duration_ratio_high": [], "duration_ratio_very_high": [], "discrepancies": [],
+       "total_minutes_spent": 12,
+       "domain_experiment_counts": {"tech": 2, "art": 1},
+       "domain_completed_counts": {"tech": 2, "art": 1}
+     },
+     "latest_hypothesis": null}
+""".trimIndent()
+
+private val SUMMARY_BODY_WITH_UNKNOWN_CANDIDATE = """
+    {"session": {"id": 1, "student_label": "test_user", "status": "active",
+     "created_at": "2026-09-02T00:00:00+00:00", "updated_at": "2026-09-02T00:00:00+00:00"},
+     "behavior_summary": {
+       "total_signals": 0, "action_type_counts": {},
+       "total_experiments": 1, "completed_experiments": 1, "skipped_experiments": 0,
+       "avg_enjoyment": null, "avg_curiosity": null, "avg_retry_intent": null, "avg_confidence": null,
+       "duration_ratio_high": [], "duration_ratio_very_high": [], "discrepancies": [],
+       "total_minutes_spent": 12,
+       "domain_experiment_counts": {"tech": 1},
+       "domain_completed_counts": {"tech": 1},
+       "dive_candidate_domains": ["tech", "unknown_domain"]
+     },
+     "latest_hypothesis": null}
+""".trimIndent()
+
 private val SUMMARY_BODY_NO_DATA = """
     {"session": {"id": 1, "student_label": "test_user", "status": "active",
      "created_at": "2026-09-02T00:00:00+00:00", "updated_at": "2026-09-02T00:00:00+00:00"},
@@ -374,6 +453,93 @@ class RealDiscoveryRepositoryTest {
 
         assertEquals(1, report.totalCompletedCount)
         assertEquals(12, report.totalMinutesSpent)
+    }
+
+    @Test
+    fun getDomainFields_mapsDiveCandidateStatusForMatchingCompletedDomain() = runTest {
+        val (client, _) = mockClient { path ->
+            when (path) {
+                "/sessions" -> HttpStatusCode.Created to SESSION_BODY
+                "/sessions/1/summary" -> HttpStatusCode.OK to SUMMARY_BODY_WITH_DIVE_CANDIDATE
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client)
+
+        val fields = repo.getDomainFields()
+
+        val techField = fields.first { it.id == "tech" }
+        val artField = fields.first { it.id == "art" }
+        assertEquals(ExploreStatus.DIVE_CANDIDATE, techField.status)
+        assertEquals(ExploreStatus.TRIED, artField.status)
+    }
+
+    @Test
+    fun getDomainFields_diveCandidateIgnoredWhenExperimentCountZero() = runTest {
+        val (client, _) = mockClient { path ->
+            when (path) {
+                "/sessions" -> HttpStatusCode.Created to SESSION_BODY
+                "/sessions/1/summary" -> HttpStatusCode.OK to SUMMARY_BODY_WITH_CANDIDATE_BUT_UNEXPLORED
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client)
+
+        val fields = repo.getDomainFields()
+
+        val techField = fields.first { it.id == "tech" }
+        assertEquals(ExploreStatus.UNEXPLORED, techField.status)
+    }
+
+    @Test
+    fun getDomainFields_diveCandidateIgnoredWhenTriedCountZero() = runTest {
+        val (client, _) = mockClient { path ->
+            when (path) {
+                "/sessions" -> HttpStatusCode.Created to SESSION_BODY
+                "/sessions/1/summary" -> HttpStatusCode.OK to SUMMARY_BODY_WITH_CANDIDATE_BUT_EXPLORED
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client)
+
+        val fields = repo.getDomainFields()
+
+        val techField = fields.first { it.id == "tech" }
+        assertEquals(ExploreStatus.EXPLORED, techField.status)
+    }
+
+    @Test
+    fun getDomainFields_oldFormatWithoutDiveCandidateDefaultsToEmptyList() = runTest {
+        val (client, _) = mockClient { path ->
+            when (path) {
+                "/sessions" -> HttpStatusCode.Created to SESSION_BODY
+                "/sessions/1/summary" -> HttpStatusCode.OK to SUMMARY_BODY_OLD_FORMAT
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client)
+
+        val fields = repo.getDomainFields()
+
+        val techField = fields.first { it.id == "tech" }
+        assertEquals(ExploreStatus.TRIED, techField.status)
+    }
+
+    @Test
+    fun getDomainFields_unknownCandidateDomainIgnored() = runTest {
+        val (client, _) = mockClient { path ->
+            when (path) {
+                "/sessions" -> HttpStatusCode.Created to SESSION_BODY
+                "/sessions/1/summary" -> HttpStatusCode.OK to SUMMARY_BODY_WITH_UNKNOWN_CANDIDATE
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client)
+
+        val fields = repo.getDomainFields()
+
+        val techField = fields.first { it.id == "tech" }
+        assertEquals(ExploreStatus.DIVE_CANDIDATE, techField.status)
     }
 
     @Test
