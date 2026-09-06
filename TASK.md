@@ -3936,3 +3936,53 @@ Lane A/Bとも「新規機能の骨格」までが完了。以下の**実配線*
 
 **次の担当:** ユーザー確認待ち（次にどのギャップに着手するか、またはこのままpushするか）。
 
+---
+
+## 案件20：Discovery API 日時シリアライズ不具合（DBカラムのUTC情報欠落）
+
+**発見経緯:** 実機（Pixel 10a）でDiscovery機能を動作確認中、`Instant`パース時に
+`The UTC offset at the end of the string is missing when parsing an Instant from "2026-09-06T22:45:45.714252"`
+が発生し操作が止まった。
+
+**Claudeによる設計判断（2026-09-07、DB構造に関わるため）:**
+
+- **原因:** `backend/discovery/models.py` の全datetimeカラムが`sa_type`未指定（デフォルトのSQLAlchemy `DateTime`）のため、Pythonコード側では`datetime.datetime.now(datetime.timezone.utc)`でtz-aware値を生成していても、SQLiteへ書き込む際にtzinfoが失われる。実際に`discovery.db`を直接確認し、`created_at`が`'2026-09-06 08:21:10.161736'`のようにoffsetなしで格納されていることを確認済み。DBから読み直した値をAPIレスポンスへ返す全エンドポイント（セッション一覧・実験結果など）が影響を受ける、`completed_at`固有ではない設計全体の不具合。
+- **判断:** `models.py`内の全datetimeカラム（約13箇所、`SQLField(default_factory=...)`のもの）に`sa_type=DateTime(timezone=True)`を付与し、書き込み・読み込みの両方でtzinfoを保持する。既存DBへのマイグレーション（ALTER TABLE）は不要（SQLiteはDATETIME型を内部的にTEXTとして保存するため、既存の`'2026-09-06 08:21:10.161736'`という値はUTCとしてそのまま再解釈できる）。
+- **付随修正（担当ファイル内で完結）:** `repository.py:350`の`datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)`と、同ファイル`:384`の`experiment.started_at.replace(tzinfo=None)`は、上記のカラム型変更後は両辺がtz-awareになるため`.replace(tzinfo=None)`を両方とも削除してよい（naiveに戻す理由がなくなるため）。
+- **却下した案:** レスポンスモデル側に`field_serializer`を追加する案は、将来追加されるレスポンスモデルにも同じ対応が毎回必要になり保守負荷が高いため却下。DB層で一度直す方が恒久的。
+
+**担当:** Kimi
+
+**対象ファイル（担当宣言）:**
+- `backend/discovery/models.py`
+- `backend/discovery/repository.py`
+
+**受入条件:**
+- TDD必須。まず「DBから読み直した`ExperimentResponse.completed_at`・`InterestSignalResponse.created_at`等がoffset付き文字列（`+00:00`または`Z`）でシリアライズされること」を検証する失敗テストを追加してから直す
+- 既存の `backend/tests/` 配下のテストスイート（237件）を壊さない
+- `cd backend && python -m pytest -q` が全件PASS
+- `models.py`のdatetimeカラム約13箇所すべてに`sa_type=DateTime(timezone=True)`が付与されている（`from sqlalchemy import DateTime`のimport追加が必要）
+- 既存の`discovery.db`を削除・再作成せず、そのまま読み込めることを確認する（起動して既存セッション一覧が読めるか確認）
+
+**次の担当:** Kimi実装完了後、Claudeが統合検証（backend pytest再実行）してTASK.mdに記録。
+
+**実施内容（Kimi / 2026-09-07）:**
+
+- `backend/tests/test_discovery_datetime_serialization.py` を新規作成。TDDで先に `SessionResponse.created_at` / `InterestSignalResponse.created_at` / `ExperimentResponse.completed_at` / `ExperimentResponse.started_at` が DB 読み直し後も `+00:00` または `Z` 付きでシリアライズされることを検証する失敗テストを追加。
+- `backend/discovery/models.py` に `UTCDateTime` 型（`TypeDecorator` で `DateTime(timezone=True)` をラップし、SQLite 読み込み時に naive な datetime を UTC として解釈）を定義し、**すべての datetime カラム 18 箇所**に `sa_type=UTCDateTime()` を付与。
+  - 当初案の「約13箇所（`SQLField(default_factory=...)` のもの）」のみでは、`completed_at` / `started_at` / `selected_at` / `skipped_at` / `occurred_at` といった optional な datetime カラムが tzinfo を失うため、対象を全 datetime カラムに拡大。
+  - 既存 `discovery.db` の値は SQLite 上で TEXT として保存されているため、読み込み時に UTC として再解釈でき、マイグレーション不要。
+- `backend/discovery/repository.py` から `complete_experiment` 内の `.replace(tzinfo=None)` を2箇所削除。`now` と `experiment.started_at` の両方が tz-aware になったため、naive に戻す必要がなくなった。
+
+**テスト結果:**
+
+```
+cd backend && python -m pytest -q
+240 passed, 5 warnings in 43.32s
+```
+
+- 既存 237 件 + 新規 3 件 = 240 件すべて PASS。
+- 既存 `discovery.db` を削除・再作成せず、152 件の既存セッションを読み込めることを確認。読み込んだ `created_at` は `tzinfo=datetime.timezone.utc` になった。
+
+**コミットID:** `031f89f`
+
