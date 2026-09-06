@@ -25,10 +25,10 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -62,15 +62,19 @@ fun PsychAxisSurveyScreen(
     modifier: Modifier = Modifier
 ) {
     // 質問ごとの回答状態（questionId: 1..8 -> rating: 1..5）
-    val ratings = remember { mutableStateMapOf<Int, Int>() }
+    var ratings by rememberSaveable { mutableStateOf(mapOf<Int, Int>()) }
     // 結果表示モードのフラグ
-    var showResult by remember { mutableStateOf(false) }
+    var showResult by rememberSaveable { mutableStateOf(false) }
 
     val answeredCount = ratings.size
     val totalCount = PSYCH_AXIS_QUESTIONS.size
     val isAllAnswered = answeredCount == totalCount
 
     val scrollState = rememberScrollState()
+
+    LaunchedEffect(showResult) {
+        scrollState.scrollTo(0)
+    }
 
     Column(
         modifier = modifier
@@ -167,7 +171,7 @@ fun PsychAxisSurveyScreen(
                     question = "${index + 1}. ${question.text}",
                     selectedRating = ratings[question.id] ?: 0,
                     onRatingSelected = { selected ->
-                        ratings[question.id] = selected
+                        ratings = ratings + (question.id to selected)
                     },
                     modifier = Modifier.fillMaxWidth()
                 )
