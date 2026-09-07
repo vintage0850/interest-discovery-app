@@ -4397,7 +4397,7 @@ DB／マイグレーション変更が必要になった場合は実装を止め
 
 ## 案件24：発見タブ「今わかってきたこと」が更新されないバグ
 
-**状態:** 仕様確定・実装未着手（2026-09-07、CTO・品質保証責任者による裁定）。実装担当はKimi。
+**状態:** `完了（Gate 4 PASS）`（2026-09-07）
 
 ### 症状（ユーザー報告）
 
@@ -4625,4 +4625,22 @@ $ git diff --check
 
 - backend、DBスキーマ、`discovery.db`、マイグレーション、Web、Android ホスト `app/` に差分はない。
 - コミット時に案件22の仕様追加（本ファイル 4158 行目以降）も同じ `TASK.md` に含まれる。
+
+### Claude独立検証（2026-09-07、Gate 4）
+
+- `git show 7d7b528 --stat` → 変更ファイルは対象宣言7ファイル＋`TASK.md`のみ。backend／app／DBスキーマへの逸脱なし。
+- `DiscoveryState.kt`の差分を確認: `completeExperiment()`成功後に`updateHypothesis()`を`try/catch`で呼び、
+  `CancellationException`は再throw、それ以外の失敗は「実験は完了しましたが、気づきの更新に失敗しました。」を
+  通知した上で`isSubmitting=false`・`isCompleted=true`・3つの再読込・`onComplete()`を継続。仕様通り。
+- `RealDiscoveryRepository.updateHypothesis()`の差分を確認: `POST /sessions/{id}/hypothesis/update`へ空
+  `JsonObject`を送信し、非成功ステータスのみ例外化。レスポンスは`HypothesisResponseDto?`として受け、
+  confidence不足によるnullも例外にしない。仕様通り。
+- `./gradlew :shared:testDebugUnitTest --no-daemon --rerun-tasks --tests "*RealDiscoveryRepositoryTest*" --tests "*DiscoveryStateTest*" --tests "*FakeDiscoveryRepositoryTest*"`
+  → **BUILD SUCCESSFUL**（キャッシュ無効化・強制再実行で確認。warningは既存の未使用API/opt-in系のみで本件と無関係）。
+
+**判定: PASS。** 案件24は完了。
+
+**次の担当:** ユーザー確認待ち（実機で実験を1件完了させ、発見タブ「💡 今わかってきたこと」が
+更新される、または「まだはっきりした傾向は見えていません」のフォールバック文言のままなら
+confidence不足として正常、を確認）。
 
