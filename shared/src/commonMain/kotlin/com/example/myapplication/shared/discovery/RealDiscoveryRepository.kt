@@ -17,6 +17,7 @@ import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
+import kotlinx.coroutines.CancellationException
 import kotlinx.datetime.Instant
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -205,8 +206,58 @@ class RealDiscoveryRepository(
             observation = observation,
             hypothesis = hypothesis,
             hypothesisId = summary.latestHypothesis?.id,
+            testingFocus = buildTestingFocus(behavior),
+            recentChanges = buildRecentChanges(),
+            evidenceReason = buildEvidenceReason(summary.latestHypothesis),
             criteria = summary.criteria.map { it.toUiModel() }
         )
+    }
+
+    /** 現在進行中（実験数 > 完了数）のドメインから「今確かめていること」を組み立てる。 */
+    private fun buildTestingFocus(behavior: BehaviorSummaryDto): String {
+        val inProgressDomainId = behavior.domainExperimentCounts.entries
+            .firstOrNull { (domain, count) -> count > (behavior.domainCompletedCounts[domain] ?: 0) }
+            ?.key
+        val domainTitle = inProgressDomainId?.let { id -> DOMAIN_FIELD_META.firstOrNull { it.id == id }?.title }
+        return if (domainTitle != null) {
+            "『${domainTitle}』分野の実験を試して、興味の反応を観察中です。"
+        } else {
+            "次にどの分野を試すか、幅広く反応を観察中です。"
+        }
+    }
+
+    /**
+     * 前週比の週次ナラティブ（Report タブと同じ Gemini 生成エンドポイント）から「以前と変わったこと」を取得する。
+     * データ不足やAPI障害（Gemini側の一時的な問題等）でも Discover 画面全体を壊さないよう、失敗時はフォールバック文にする。
+     */
+    private suspend fun buildRecentChanges(): String {
+        return try {
+            getWeeklyNarrative().changeFromPast
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            "変化を確認するには、もう少しデータが必要です。"
+        }
+    }
+
+    /** 仮説の supporting_evidence に紐づくエビデンスの要約から「なぜそう表示されたか」を組み立てる。 */
+    private suspend fun buildEvidenceReason(hypothesis: HypothesisResponseDto?): String {
+        if (hypothesis == null || hypothesis.supportingEvidence.isEmpty()) {
+            return "まだ十分な根拠がありません。実験を重ねると、ここに理由が表示されます。"
+        }
+        return try {
+            val id = ensureSession()
+            val matched = getEvidenceList(id).filter { it.id in hypothesis.supportingEvidence }
+            if (matched.isEmpty()) {
+                "まだ十分な根拠がありません。実験を重ねると、ここに理由が表示されます。"
+            } else {
+                matched.take(2).joinToString("、") { it.summaryText } + "という記録が根拠になっています。"
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            "まだ十分な根拠がありません。実験を重ねると、ここに理由が表示されます。"
+        }
     }
 
     override suspend fun updateHypothesis() {

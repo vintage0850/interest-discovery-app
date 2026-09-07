@@ -208,6 +208,34 @@ private val WEEKLY_NARRATIVE_BODY = """
      "change_from_past": "先週より試行回数が増えています。"}
 """.trimIndent()
 
+private val SUMMARY_BODY_WITH_SUPPORTING_EVIDENCE = """
+    {"session": {"id": 1, "student_label": "test_user", "status": "active",
+     "created_at": "2026-09-02T00:00:00+00:00", "updated_at": "2026-09-02T00:00:00+00:00"},
+     "behavior_summary": {
+       "total_signals": 0, "action_type_counts": {}, "domain_counts": {},
+       "total_experiments": 2, "completed_experiments": 1, "skipped_experiments": 0,
+       "avg_enjoyment": 4.0, "avg_curiosity": 5.0, "avg_retry_intent": 3.0, "avg_confidence": 0.8,
+       "duration_ratio_high": [], "duration_ratio_very_high": [], "discrepancies": [],
+       "total_minutes_spent": 12,
+       "domain_experiment_counts": {"tech": 2},
+       "domain_completed_counts": {"tech": 1}
+     },
+     "latest_hypothesis": {
+       "id": 1, "session_id": 1, "summary": "コードを書くことに強い関心があります",
+       "confidence": 0.8, "supporting_evidence": [5, 6], "suggested_next_domains": [],
+       "created_at": "2026-09-02T00:00:00+00:00"
+     }}
+""".trimIndent()
+
+private val EVIDENCE_LIST_BODY = """
+    [{"id": 5, "session_id": 1, "domain": "tech", "signal_count": 3,
+      "summary_text": "techに関するシグナル3件: 分析ツールを比較した", "created_at": "2026-09-02T00:00:00+00:00"},
+     {"id": 6, "session_id": 1, "domain": "art", "signal_count": 2,
+      "summary_text": "artに関するシグナル2件: UIレイアウトを試作した", "created_at": "2026-09-02T00:00:00+00:00"},
+     {"id": 7, "session_id": 1, "domain": "music", "signal_count": 1,
+      "summary_text": "musicに関するシグナル1件", "created_at": "2026-09-02T00:00:00+00:00"}]
+""".trimIndent()
+
 private fun mockClient(handler: (path: String) -> Pair<HttpStatusCode, String>): Pair<HttpClient, MutableList<String>> {
     val requestedPaths = mutableListOf<String>()
     val engine = MockEngine { request ->
@@ -435,6 +463,117 @@ class RealDiscoveryRepositoryTest {
         val data = repo.getDiscovery()
 
         assertEquals(false, data.hypothesis.isBlank())
+    }
+
+    @Test
+    fun getDiscovery_withInProgressDomain_setsTestingFocusToThatDomain() = runTest {
+        val (client, _) = mockClient { path ->
+            when (path) {
+                "/sessions" -> HttpStatusCode.Created to SESSION_BODY
+                "/sessions/1/summary" -> HttpStatusCode.OK to SUMMARY_BODY_WITH_HYPOTHESIS
+                "/sessions/1/report/weekly-narrative" -> HttpStatusCode.OK to WEEKLY_NARRATIVE_BODY
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client)
+
+        val data = repo.getDiscovery()
+
+        // SUMMARY_BODY_WITH_HYPOTHESIS: tech は experiment 2件・完了 1件 → 進行中ドメイン
+        assertTrue(data.testingFocus.contains("テクノロジー・プログラミング"))
+    }
+
+    @Test
+    fun getDiscovery_withNoInProgressDomain_fallsBackToGenericTestingFocus() = runTest {
+        val (client, _) = mockClient { path ->
+            when (path) {
+                "/sessions" -> HttpStatusCode.Created to SESSION_BODY
+                "/sessions/1/summary" -> HttpStatusCode.OK to SUMMARY_BODY_WITH_DOMAIN_COUNTS
+                "/sessions/1/report/weekly-narrative" -> HttpStatusCode.OK to WEEKLY_NARRATIVE_BODY
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client)
+
+        val data = repo.getDiscovery()
+
+        // SUMMARY_BODY_WITH_DOMAIN_COUNTS: tech/art とも experiment数 == 完了数 → 進行中ドメインなし
+        assertEquals("次にどの分野を試すか、幅広く反応を観察中です。", data.testingFocus)
+    }
+
+    @Test
+    fun getDiscovery_withSupportingEvidence_buildsEvidenceReasonFromMatchedEvidence() = runTest {
+        val (client, _) = mockClient { path ->
+            when (path) {
+                "/sessions" -> HttpStatusCode.Created to SESSION_BODY
+                "/sessions/1/summary" -> HttpStatusCode.OK to SUMMARY_BODY_WITH_SUPPORTING_EVIDENCE
+                "/sessions/1/report/weekly-narrative" -> HttpStatusCode.OK to WEEKLY_NARRATIVE_BODY
+                "/sessions/1/evidence" -> HttpStatusCode.OK to EVIDENCE_LIST_BODY
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client)
+
+        val data = repo.getDiscovery()
+
+        // supporting_evidence = [5, 6] のみが根拠として使われ、id=7（未紐付け）は含まれない。
+        assertTrue(data.evidenceReason.contains("分析ツールを比較した"))
+        assertTrue(data.evidenceReason.contains("UIレイアウトを試作した"))
+        assertEquals(false, data.evidenceReason.contains("musicに関するシグナル"))
+    }
+
+    @Test
+    fun getDiscovery_whenNoSupportingEvidence_returnsFallbackEvidenceReasonWithoutCallingEvidenceEndpoint() = runTest {
+        val (client, paths) = mockClient { path ->
+            when (path) {
+                "/sessions" -> HttpStatusCode.Created to SESSION_BODY
+                "/sessions/1/summary" -> HttpStatusCode.OK to SUMMARY_BODY_WITH_HYPOTHESIS
+                "/sessions/1/report/weekly-narrative" -> HttpStatusCode.OK to WEEKLY_NARRATIVE_BODY
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client)
+
+        val data = repo.getDiscovery()
+
+        assertEquals("まだ十分な根拠がありません。実験を重ねると、ここに理由が表示されます。", data.evidenceReason)
+        assertEquals(false, paths.contains("/sessions/1/evidence"))
+    }
+
+    @Test
+    fun getDiscovery_withWeeklyNarrative_usesChangeFromPastAsRecentChanges() = runTest {
+        val (client, _) = mockClient { path ->
+            when (path) {
+                "/sessions" -> HttpStatusCode.Created to SESSION_BODY
+                "/sessions/1/summary" -> HttpStatusCode.OK to SUMMARY_BODY_WITH_HYPOTHESIS
+                "/sessions/1/report/weekly-narrative" -> HttpStatusCode.OK to WEEKLY_NARRATIVE_BODY
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client)
+
+        val data = repo.getDiscovery()
+
+        assertEquals("先週より試行回数が増えています。", data.recentChanges)
+    }
+
+    @Test
+    fun getDiscovery_whenWeeklyNarrativeFails_fallsBackForRecentChangesWithoutFailingWholeCall() = runTest {
+        val (client, _) = mockClient { path ->
+            when (path) {
+                "/sessions" -> HttpStatusCode.Created to SESSION_BODY
+                "/sessions/1/summary" -> HttpStatusCode.OK to SUMMARY_BODY_WITH_HYPOTHESIS
+                "/sessions/1/report/weekly-narrative" ->
+                    HttpStatusCode.ServiceUnavailable to """{"detail":"Gemini unavailable"}"""
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client)
+
+        val data = repo.getDiscovery()
+
+        assertEquals("変化を確認するには、もう少しデータが必要です。", data.recentChanges)
+        assertEquals("コードを書くことに強い関心があります", data.hypothesis)
     }
 
     @Test
@@ -1117,6 +1256,7 @@ class RealDiscoveryRepositoryTest {
         val (client, paths) = mockClient { path ->
             when (path) {
                 "/sessions/42/summary" -> HttpStatusCode.OK to SUMMARY_BODY_NO_HYPOTHESIS
+                "/sessions/42/report/weekly-narrative" -> HttpStatusCode.OK to WEEKLY_NARRATIVE_BODY
                 else -> error("unexpected path: $path")
             }
         }
@@ -1124,8 +1264,11 @@ class RealDiscoveryRepositoryTest {
 
         repo.getDiscovery()
 
-        // ensureSession() で存在確認の GET、fetchSummary() で取得の GET の 2 回呼ばれる。
-        assertEquals(listOf("/sessions/42/summary", "/sessions/42/summary"), paths)
+        // ensureSession() で存在確認の GET、fetchSummary() で取得の GET、recentChanges 用の weekly-narrative GET が呼ばれる。
+        assertEquals(
+            listOf("/sessions/42/summary", "/sessions/42/summary", "/sessions/42/report/weekly-narrative"),
+            paths
+        )
         assertEquals(42, storage.getLastSessionId())
     }
 
@@ -1138,6 +1281,7 @@ class RealDiscoveryRepositoryTest {
                 "/sessions/99/summary" -> HttpStatusCode.NotFound to """{"detail":"not found"}"""
                 "/sessions" -> HttpStatusCode.Created to SESSION_BODY
                 "/sessions/1/summary" -> HttpStatusCode.OK to SUMMARY_BODY_NO_HYPOTHESIS
+                "/sessions/1/report/weekly-narrative" -> HttpStatusCode.OK to WEEKLY_NARRATIVE_BODY
                 else -> error("unexpected path: $path")
             }
         }
@@ -1145,7 +1289,10 @@ class RealDiscoveryRepositoryTest {
 
         repo.getDiscovery()
 
-        assertEquals(listOf("/sessions/99/summary", "/sessions", "/sessions/1/summary"), paths)
+        assertEquals(
+            listOf("/sessions/99/summary", "/sessions", "/sessions/1/summary", "/sessions/1/report/weekly-narrative"),
+            paths
+        )
         assertEquals(1, storage.getLastSessionId())
     }
 
