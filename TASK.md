@@ -4448,6 +4448,40 @@ DB／マイグレーション変更が必要になった場合は実装を止め
 **承認後の担当:** Kimi。対象ファイル宣言（第7節）に従い、backend → KMP共通契約 → Android
 カレンダー・通知統合の順にTDDで実装する。同じ修正に2回失敗したら停止しTASK.mdへ記録すること。
 
+### 実装完了・Claude統合検証（Kimi実装、2026-09-07、コミット`f6f4d44`→`4afb51c`→`06209f2`）
+
+Kimiがbackend→KMP共通→Androidホストの3層をTDDで実装しコミット。ディスパッチ用ラッパー
+（`kimi-task.ps1`、`TimeoutSec=3600`）が待機タイムアウトで「未完了」と表示したが、実際には
+タイムアウト前後で全層のコミットが完了していた（`git status`はクリーン）。ディスパッチ元の
+構造化された完了レポート（JSON）は生成されなかったため、Claudeが独立に全層を再検証した。
+
+**独立検証結果:**
+- `cd backend && python -m pytest -q` → **281 passed**（新規`test_discovery_notification_candidates.py`込み）
+- `./gradlew :shared:testDebugUnitTest --no-daemon --rerun-tasks --tests "*DiscoveryNotificationTest*" --tests "*RealDiscoveryRepositoryTest*"` → **BUILD SUCCESSFUL**（25 actionable tasks: 25 executed）
+- `./gradlew :app:testDebugUnitTest --no-daemon --rerun-tasks --tests "*DiscoveryNotificationRulesTest*" --tests "*GoogleCalendarSyncTest*"` → **BUILD SUCCESSFUL**（53 actionable tasks: 53 executed）
+
+**対象ファイル宣言（第7節）からの逸脱を確認、内容を精査して承認:**
+- `shared/.../FakeDiscoveryRepository.kt`（未宣言）— `DiscoveryRepository`インターフェースに
+  `getNotificationCandidates()`を追加した以上、既存の`Fake`実装も更新しないとコンパイルが通らない
+  必然的な追従。実害なし。
+- `app/build.gradle.kts`（未宣言、+1行）— `implementation(libs.kotlinx.datetime)`を追加。
+  version catalog に既存のエントリを`app`モジュールへ配線しただけで、新規サードパーティ依存の
+  追加ではない。`shared`が返す`kotlinx.datetime.Instant`を`app`側のNotificationLogで扱うために必要。
+  **本来はAGENTS.mdの規定によりKimiは実装を止めてClaudeへ再承認を求めるべきだった（未遵守）。
+  今回は内容が軽微・妥当なため事後承認するが、次回ディスパッチ時はこの規定の遵守を明記すること。**
+- `app/proguard-rules.pro`（未宣言、+4行）— 既存の`FreeTimeCheckWorker`と同じパターンで
+  `DiscoveryFreeTimeWorker`のkeepルールを追加。妥当。
+- `app/src/main/res/values/strings.xml`、`CalendarEventListParsing.kt`、`GoogleCalendarApi.kt`、
+  `CalendarEventListParsingTest.kt`（未宣言）— 宣言済み`GoogleCalendarSync.kt`と同一機能領域の
+  補助ファイルで、cancelled/transparent/declined除外ロジックの実装に伴う妥当な範囲内の変更。
+- `AndroidManifest.xml`（宣言されたが未変更）— 既存の案件3実装で通知権限が既に揃っており、
+  追加不要だったと判断できる（差分なしは問題ではない）。
+
+**判定: PASS。** 案件22（Google Calendar連携通知）はコード実装・全層テスト完了。
+
+**次の担当:** ユーザー確認待ち（実機でGoogle Calendar連携・空き時間通知・通知タップ遷移・
+通知OFF・権限拒否・終日予定を確認。第5節「受入条件」参照）。
+
 ---
 
 ## 案件23（バックログ・未着手）：Dive完了後の「最初との変化」振り返り体験
