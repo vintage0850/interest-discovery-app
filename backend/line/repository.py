@@ -21,12 +21,20 @@ class LineRepository:
 
     def upsert_line_account(self, line_user_id: str) -> LineAccount:
         with Session(self._engine) as db:
-            existing = db.exec(
-                select(LineAccount).where(LineAccount.line_user_id == line_user_id)
-            ).first()
-            if existing is not None:
-                return existing
-            account = LineAccount(line_user_id=line_user_id)
+            accounts = list(db.exec(select(LineAccount).order_by(LineAccount.id)).all())
+            now = datetime.datetime.now(datetime.timezone.utc)
+            if accounts:
+                primary = accounts[0]
+                primary.line_user_id = line_user_id
+                primary.linked_at = now
+                db.add(primary)
+                for extra in accounts[1:]:
+                    db.delete(extra)
+                db.commit()
+                db.refresh(primary)
+                return primary
+
+            account = LineAccount(line_user_id=line_user_id, linked_at=now)
             db.add(account)
             db.commit()
             db.refresh(account)
@@ -94,6 +102,12 @@ class LineRepository:
     def mark_sent(self, reminder_id: int, sent_at: datetime.datetime) -> None:
         with Session(self._engine) as db:
             reminder = db.get(Reminder, reminder_id)
+            if reminder is None:
+                raise ValueError(f"Reminder not found: {reminder_id}")
+            if reminder.status != ReminderStatus.PROCESSING.value:
+                raise StateTransitionError(
+                    f"Cannot mark as sent reminder in status {reminder.status}"
+                )
             reminder.status = ReminderStatus.SENT.value
             reminder.sent_at = sent_at
             db.add(reminder)
@@ -102,6 +116,12 @@ class LineRepository:
     def mark_failed(self, reminder_id: int) -> None:
         with Session(self._engine) as db:
             reminder = db.get(Reminder, reminder_id)
+            if reminder is None:
+                raise ValueError(f"Reminder not found: {reminder_id}")
+            if reminder.status != ReminderStatus.PROCESSING.value:
+                raise StateTransitionError(
+                    f"Cannot mark as failed reminder in status {reminder.status}"
+                )
             reminder.status = ReminderStatus.FAILED.value
             db.add(reminder)
             db.commit()

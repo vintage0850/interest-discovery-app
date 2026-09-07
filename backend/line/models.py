@@ -2,10 +2,30 @@ from __future__ import annotations
 
 import datetime
 import enum
-from typing import Optional
+from typing import Any, Optional
 
-from sqlmodel import Field as SQLField, SQLModel
+from pydantic import field_validator
 from sqlalchemy import String
+from sqlalchemy.orm import validates
+from sqlmodel import Field as SQLField, SQLModel
+
+
+def _validate_utc_datetime(value: Any) -> datetime.datetime:
+    if isinstance(value, str):
+        try:
+            dt = datetime.datetime.fromisoformat(value)
+        except ValueError as e:
+            raise ValueError(f"Invalid ISO datetime format: {value}") from e
+    elif isinstance(value, datetime.datetime):
+        dt = value
+    else:
+        raise ValueError(f"Invalid type for scheduled_at: {type(value).__name__}")
+
+    if dt.tzinfo is None or dt.utcoffset() is None:
+        raise ValueError("scheduled_at must include timezone information (UTC with 'Z' suffix)")
+    if dt.utcoffset() != datetime.timedelta(0):
+        raise ValueError(f"scheduled_at must be in UTC timezone (got offset {dt.utcoffset()})")
+    return dt
 
 
 class ReminderStatus(str, enum.Enum):
@@ -42,10 +62,24 @@ class Reminder(SQLModel, table=True):
         default_factory=lambda: datetime.datetime.now(datetime.timezone.utc)
     )
 
+    @validates("scheduled_at")
+    def _validate_scheduled_at_sqla(self, key: str, value: Any) -> datetime.datetime:
+        return _validate_utc_datetime(value)
+
+    @field_validator("scheduled_at", mode="before")
+    @classmethod
+    def _validate_scheduled_at_pydantic(cls, value: Any) -> datetime.datetime:
+        return _validate_utc_datetime(value)
+
 
 class ReminderCreate(SQLModel):
     message: str = SQLField(min_length=1, max_length=500)
     scheduled_at: datetime.datetime
+
+    @field_validator("scheduled_at", mode="before")
+    @classmethod
+    def _validate_scheduled_at(cls, value: Any) -> datetime.datetime:
+        return _validate_utc_datetime(value)
 
 
 class ReminderResponse(SQLModel):
