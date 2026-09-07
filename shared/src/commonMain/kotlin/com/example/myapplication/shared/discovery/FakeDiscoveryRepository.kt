@@ -140,6 +140,7 @@ class FakeDiscoveryRepository(
     private var currentExperimentIndex = 0
     private var completedCount = 2
     private val completedExperimentIds = mutableSetOf<String>()
+    private var lastCompletedExperimentId: String? = null
 
     private var signalsList = mutableListOf(
         SignalUiModel(BehaviorSignal.ANALYZE, SignalTrend.GROWING, count = 2),
@@ -277,6 +278,7 @@ class FakeDiscoveryRepository(
 
         completedCount++
         completedExperimentIds.add(experimentId)
+        lastCompletedExperimentId = experimentId
 
         val exp = allExperiments.firstOrNull { it.id == experimentId }
         if (exp != null) {
@@ -293,15 +295,25 @@ class FakeDiscoveryRepository(
                 signalsList.add(SignalUiModel(exp.actionType, newTrend, count = 1))
             }
 
-            // 仮説と観察の更新
+            // 観察内容の更新は維持（仮説本文の更新責務は [updateHypothesis] へ分離）。
             currentObservation = "「${exp.actionType.japaneseLabel}」アクティビティにおいて、高い集中や意欲が見られました。"
-            currentHypothesis = "「${exp.actionType.japaneseLabel}」ことや、構造を工夫することに自然と惹かれる傾向があります。"
         }
     }
 
     override suspend fun skipExperiment(experimentId: String) {
         simulateLatency()
         cycleNextExperiment()
+    }
+
+    override suspend fun updateHypothesis() {
+        simulateLatency()
+        checkErrorState()
+
+        val expId = lastCompletedExperimentId
+        val exp = expId?.let { id -> allExperiments.firstOrNull { it.id == id } }
+        if (exp != null) {
+            currentHypothesis = "「${exp.actionType.japaneseLabel}」ことや、構造を工夫することに自然と惹かれる傾向があります。"
+        }
     }
 
     override suspend fun getDiscovery(): DiscoveryData {
@@ -419,6 +431,8 @@ class FakeDiscoveryRepository(
         currentExperimentIndex = 0
         currentHypothesis = "まだ実験データがありません。"
         currentObservation = "最初の実験をやってみましょう。"
+        completedExperimentIds.clear()
+        lastCompletedExperimentId = null
         lastCompletedOnboardingNickname = null
         lastCompletedOnboardingAgeRange = null
         lastCompletedOnboardingSchoolStage = null

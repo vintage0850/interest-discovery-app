@@ -4155,3 +4155,474 @@ Kimiの成果物をClaudeが独立に再検証。
 
 **次の担当:** ユーザー確認待ち（実機で複数ドメインの行動実験を高評価・長時間で完了させ、Explore タブでDive候補🔥が実データで表示されるか確認）。
 
+---
+
+## 案件22：Discovery（Mikke）向けGoogle Calendar連携通知機能（新規）
+
+**状態:** 仕様確定・実装未着手
+
+### 依頼内容（ユーザー原文の要約）
+
+Discovery（Mikke）機能に、Google Calendarと連携した新規通知機能を追加したい。
+通知の設計（いつ・何を・どうトリガーするか）を含めて、標準開発フロー
+（Codexが仕様確定 → Kimiが実装）で進める。
+
+### 参考（別アプリの既存実装。流用可否はCodexが判断）
+
+同一リポジトリ内の猫タスク管理アプリ（`app/`）に、Google Calendar連携の
+先行実装が2件ある。実装パターンの参考にはできるが、Discoveryとは別ドメイン・
+別データモデルのため、そのまま流用せずゼロから設計する。
+
+- 案件3「空き時間検知による「始めさせる」通知機能」（本ファイル251行目）:
+  `FreeTimeCheckWorker`によるカレンダー空き時間検知→通知。終日予定のパース、
+  通知権限チェック、`PendingIntent.FLAG_IMMUTABLE`等の実装上の注意点あり。
+- 案件5「サブタスク表示改善・カレンダー手動登録・通知時間手動設定」（本ファイル477行目）:
+  カレンダーへの手動登録・通知時間の手動設定。
+
+### Discovery側の既存文脈（Codexが仕様確定時に参照）
+
+- Discovery機能一式は`discovery-backend`ブランチ、backendは`backend/discovery/`配下
+- 直近の関連案件: 案件9〜21（本ファイル1282行目以降）。特に案件12「実データ化—中核ループ」、
+  案件21「DIVE_CANDIDATE判定ロジック」がドメイン・実験・状態遷移の前提を持つ
+- Android/KMP側は`shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/`
+- 猫タスク管理アプリの`GoogleAuthManager.kt`・`GoogleCalendarSync.kt`（OAuth・REST API v3連携）が
+  存在するため、OAuth基盤の再利用可否もCodexが判断する
+
+### 次の担当
+
+**Codex。** 以下をCodexに定義してもらう。
+- 目的・対象ユーザー・対象外の明確化（通知で何を達成したいか、案件3/5との違い）
+- 通知トリガー条件（いつ・何を根拠に発火するか。Discoveryの実験・ドメイン状態と
+  Google Calendarの予定をどう組み合わせるか）
+- 通知文言・遷移先画面
+- DB・認証・外部API変更の要否（該当する場合はClaudeへ設計判断を依頼）
+- 受入条件・対象外・担当ファイル
+
+Codex確定後、Kimiが担当ファイル宣言に従って実装する。
+
+### 仕様確定（2026-09-07、CTO・品質保証責任者）
+
+#### 1. 目的・対象ユーザー・この機能が行わないこと
+
+**目的:** ユーザーが自分で選んだまま未着手になっているMikkeの行動実験を、Google Calendar上で
+「今から実施できる空き時間」が確認できたときに1件だけ提案し、選択から実行への移行を助ける。
+過去の実験結果から`DIVE_CANDIDATE`になったドメインを優先し、単なる空き時間通知ではなく、
+本人の行動・評価に基づく次の一歩を提示する。
+
+**対象ユーザー:** Android版Mikkeで有効なDiscoveryセッションを持ち、Google Calendar連携と
+Mikke通知の両方を明示的に有効化したユーザー。Android 13以降では通知権限を許可したユーザーに限る。
+
+**この機能が行わないこと:** 猫タスク管理アプリの未完了タスクは候補に混ぜず、カレンダーへの
+予定作成・更新・削除も行わない。カレンダーは空き時間判定のために読み取るだけとする。
+
+#### 2. 通知トリガー条件の具体ルール
+
+判定はAndroidのWorkManagerによる15分間隔の定期実行を入口とする。WorkManagerの実行時刻はOSにより
+遅延し得るため「15分ちょうど」は保証しない。端末のローカル時刻で`08:00 <= now < 21:00`のときだけ
+判定し、将来の空き枠を先回りして通知せず、**実行時点から始まる空き時間**に対して即時通知する。
+
+通知には次の全条件を必要とする。
+
+1. Discoveryの通知設定がON、Google Calendarが認可済み、OS通知権限が許可済みで、有効な
+   Discoveryセッションがある。
+2. backendの新規読取API `GET /sessions/{session_id}/notification-candidates` が候補を返す。
+   候補は`Experiment.status == selected`の未着手実験だけとし、`generated`（ユーザー未選択）、
+   `started`、`completed`、`skipped`は除外する。
+3. backendは既存`build_behavior_summary()`のセッション全期間集計を正本として各ドメイン状態を決め、
+   候補を`DIVE_CANDIDATE`、`TRIED`、`EXPLORED`の順に並べる。`UNEXPLORED`は候補外とする。
+   同順位では`selected_at`昇順、さらに実験ID昇順とする。レスポンスはこの順序の候補リストとし、
+   各要素に実験本体、確定したドメイン状態、通知理由を含める。
+4. `DIVE_CANDIDATE`は案件21の確定条件、すなわち同一ドメインの評価付き完了実験2件以上、
+   `enjoyment`・`curiosity`・`retry_intent`各平均4.0以上、`confidence`平均0.70以上、かつ
+   `actual_minutes / planned_minutes >= 1.5`が1件以上、をすべて満たす場合だけとする。
+   Androidは実験結果や平均を再計算せず、backendの判定を使用する。結果不足や閾値未達なら
+   `DIVE_CANDIDATE`として優先しないが、選択済み実験が`TRIED`または`EXPLORED`なら通常候補にはできる。
+5. AndroidはGoogle Calendar REST API v3の`primary`カレンダーから、`now`から当日21:00までの予定を
+   取得する。`cancelled`、`transparency=transparent`、本人が辞退済みの予定は空き時間を塞がない。
+   それ以外の時刻付き予定は重なる区間を塞ぎ、終日予定は当日の通知判定時間帯全体を塞ぐ。
+   日時は端末タイムゾーンへ正規化し、境界が接するだけの予定は重複扱いにしない。
+6. `now`から次のbusy予定の開始または21:00までの連続空き時間が
+   `planned_minutes + 5分（準備バッファ）`以上ある候補のうち、backend順で最初の1件だけを通知する。
+   例えば10分実験は15分以上で可、14分以下では不可とする。現在が予定中、該当候補なし、
+   カレンダー・backend・認証の取得失敗時は通知せず、キャッシュ済みの古い候補では代替しない。
+7. 通知成功後に限り端末内へ送信記録を保存し、同一実験はローカル日付ごとに1回まで、かつ全体で
+   6時間に1回までとする。通知権限なし・通知生成失敗は送信済みにしない。実験完了・スキップ・
+   セッション切替後は毎回APIを再取得するため、古い状態では通知しない。
+
+#### 3. 通知文言方針・タップ時遷移先
+
+- `DIVE_CANDIDATE`のタイトル: `🔥 深掘りする時間ができました`
+- `DIVE_CANDIDATE`の本文: `「{実験タイトル}」なら今から{planned_minutes}分で試せそうです`
+- `TRIED`／`EXPLORED`のタイトル: `✨ ちょっと試せる時間です`
+- `TRIED`／`EXPLORED`の本文: `選んだ「{実験タイトル}」を{planned_minutes}分だけ試してみませんか？`
+
+文言は実験結果の点数、confidence、Google Calendarの予定名、連携アカウント情報をロック画面へ
+出さない。1通知につき1実験とし、煽り・失敗扱い・連続催促の表現を使わない。
+
+通知タップ時は明示的`PendingIntent`でMikkeを開き、通知に保持した`experiment_id`を使ってbackendから
+実験を再取得した後、既存の`ExperimentDetailScreen`へ遷移する。そこでユーザーが既存CTA
+「実験をスタートする」を押した時だけ`selected -> started`へ遷移させ、通知タップだけでは開始しない。
+実験が存在しない、選択済みでない、またはセッションが変わっていた場合はDiscovery Homeへ遷移し、
+「この実験は現在開始できません」をSnackbar表示する。`PendingIntent.FLAG_IMMUTABLE`と一意なrequestCodeを使う。
+
+#### 4. DB・認証・外部API変更の要否
+
+- **DB:** backendのDBテーブル・カラム・マイグレーション追加は不要。通知設定、同一実験の当日送信済み、
+  最終通知時刻はAndroid端末内の既存Discovery用`SharedPreferences`へ保存する。Googleのアクセストークン、
+  カレンダー予定、busy区間、通知履歴をbackend DBへ保存しない。
+- **Discovery API:** 読取専用の`GET /sessions/{session_id}/notification-candidates`を追加する。
+  既存の実験・結果・案件21の集計値だけから決定論的に返し、呼出しによる状態変更は行わない。
+  既存エンドポイントのレスポンス互換性は維持する。
+- **認証:** `app/`の既存`GoogleAuthManager`とOAuth同意フローを再利用し、既存の
+  `https://www.googleapis.com/auth/calendar.events`スコープを追加・拡大しない。トークンはAndroid側の
+  短期メモリキャッシュだけで扱い、KMP common・backendへ渡さない。未連携・失効・401時は通知を止め、
+  設定画面から再認可できるようにする。
+- **Google Calendar API:** 既存のCalendar REST API v3 `events.list`を読み取り用途で再利用する。
+  新しいGoogle API、Webhook、push通知、CalendarProvider権限は追加しない。401のトークン破棄・1回再試行、
+  RFC3339、終日予定、タイムゾーンの既存対策を維持する。
+
+ただし、`app`モジュールにあるOAuth／Calendar実装を、`app -> shared`の依存方向を壊さずKMP共通UIへ
+注入する境界、新規Discovery API契約、バックグラウンドWorkerからのセッション・接続先取得は
+アーキテクチャと認証ライフサイクルに関わる。**Claudeへの設計判断依頼が必要**。Claudeは実装前に、
+「認証とWorkerはAndroidホストの`app/`に残し、`shared`はインターフェースとUI状態だけを持つ」方針を
+第一案としてレビューし、変更が必要ならTASK.mdへ理由と対象ファイル差分を追記する。
+
+#### 5. 受入条件
+
+- TDD必須。backendで候補抽出・順位付けの失敗テスト、KMPでDTO／画面遷移契約の失敗テスト、Androidで
+  カレンダー空き時間・権限・重複抑止・通知タップの失敗テストを先に追加してから実装する。
+- backendで`selected`のみが候補となり、`DIVE_CANDIDATE > TRIED > EXPLORED`、同順位では
+  `selected_at > id`の昇順となる。候補なしは`[]`、存在しないセッションは404となる。
+- 案件21の全境界値を維持し、評価結果不足、3評価平均のいずれか4.0未満、confidence平均0.70未満、
+  時間比率1.5未満のドメインをDIVE優先しない。Android側で結果再計算がない。
+- 時刻付き予定の重複・隣接境界、終日予定、複数予定、`cancelled`、透明予定、辞退予定、日付跨ぎ、
+  端末タイムゾーンをテストし、10分実験は空き15分で通知、14分では通知しない。
+- 通知OFF、Google未認可、OS権限なし、時間帯外、現在予定中、候補なし、API/通信/401失敗では通知しない。
+  失敗時に送信済み記録を付けず、WorkManager自体は安全に正常終了して次回判定へ委ねる。
+- 同一実験は同日1回、全体は6時間に1回を守り、別日・クールダウン後は再通知可能である。
+- 通知文言が確定テンプレート通りで、結果の点数・Google予定名・アカウント情報を含まない。
+- 通知タップで対象の`selected`実験詳細へ到達し、タップだけでは開始しない。無効ID・状態変更・
+  セッション切替時はHome＋Snackbarへ安全にフォールバックする。
+- backend DBスキーマ、`discovery.db`、マイグレーションに差分がなく、アクセストークンや予定内容を
+  DB・ログ・通知本文へ保存／出力しない。
+- `cd backend && python -m pytest -q`、`./gradlew :shared:testDebugUnitTest --no-daemon`、
+  `./gradlew :app:testDebugUnitTest --no-daemon`が全件PASSする。実機ではGoogle連携、空き時間通知、
+  タップ遷移、通知OFF、権限拒否、終日予定を確認する。
+
+#### 6. 対象外
+
+- iOS版のGoogle Calendar連携・通知、Web版、複数端末間の通知同期
+- 猫タスク管理アプリの通知候補との統合、案件3の`FreeTimeCheckWorker`へのDiscovery候補混在
+- Google Calendarへの実験予定の自動／手動登録、予定更新・削除、双方向同期
+- `primary`以外のカレンダー選択、Google以外のカレンダー、学校管理アカウント固有対応
+- 将来の空き枠予約、正確な時刻アラーム、位置情報・天気・学習履歴による通知、複数候補通知
+- ML/Geminiによる通知時刻・候補最適化、DIVE_CANDIDATE閾値変更、通知効果のA/Bテスト
+- backendでのOAuthトークン・カレンダー予定・通知履歴保存、push基盤（FCM）・Webhookの導入
+- 通知時間帯・6時間クールダウン・準備バッファを変更する設定UI（今回値は固定）
+
+#### 7. 対象ファイル（担当宣言）
+
+**設計担当:** Claude（下記モジュール境界とAPI／認証判断のみ）。
+**実装担当:** Kimi。担当解除まで、以下の実装・テストファイルは他のAIが編集しない。
+
+backend / Discovery:
+- `backend/discovery/aggregation.py` — 通知候補抽出、ドメイン状態・安定ソート
+- `backend/discovery/models.py` — 通知候補レスポンスモデル
+- `backend/discovery/router.py` — `GET /sessions/{session_id}/notification-candidates`
+- `backend/tests/test_discovery_notification_candidates.py`（新規）— 候補条件・DIVE境界・順位・404
+
+Android/KMP shared:
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/DiscoveryModels.kt` — 候補・認証・通知設定モデル
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/DiscoveryRepository.kt` — 候補取得契約
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/RealDiscoveryRepository.kt` — 新規APIのDTOと取得
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/DiscoveryState.kt` — 設定状態と通知遷移の共通契約
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/App.kt` — experiment ID付き詳細遷移と無効時フォールバック
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/discovery/SettingsTabScreen.kt` — Google連携状態・通知ON/OFF表示
+- `shared/src/commonTest/kotlin/com/example/myapplication/shared/discovery/RealDiscoveryRepositoryTest.kt` — 候補API DTO
+- `shared/src/commonTest/kotlin/com/example/myapplication/shared/discovery/DiscoveryNotificationTest.kt`（新規）— 共通判定・遷移契約
+- `shared/src/androidMain/kotlin/com/example/myapplication/shared/discovery/DiscoverySettingsStorage.android.kt` — 通知・重複抑止情報の端末保存
+
+Androidホスト（既存OAuthを安全に注入し、バックグラウンド実行するため必須）:
+- `app/src/main/java/com/example/myapplication/MainActivity.kt` — 認可結果と通知タップをKMP UIへ受け渡す
+- `app/src/main/java/com/example/myapplication/data/calendar/GoogleAuthManager.kt` — Discoveryからの既存認証利用（スコープ変更なし）
+- `app/src/main/java/com/example/myapplication/data/calendar/GoogleCalendarSync.kt` — 指定時間範囲の予定取得とbusy変換
+- `app/src/main/java/com/example/myapplication/work/DiscoveryFreeTimeWorker.kt`（新規）— 全トリガー条件の統合
+- `app/src/main/java/com/example/myapplication/work/DiscoveryNotificationScheduler.kt`（新規）— 定期実行の登録・解除
+- `app/src/main/java/com/example/myapplication/work/DiscoveryNotifier.kt`（新規）— 文言、Channel、明示的PendingIntent
+- `app/src/main/AndroidManifest.xml` — 通知権限とタップ起動要件
+- `app/src/test/java/com/example/myapplication/data/calendar/GoogleCalendarSyncTest.kt` — busy区間の境界値
+- `app/src/test/java/com/example/myapplication/work/DiscoveryNotificationRulesTest.kt`（新規）— 空き時間・抑止・文言
+- `app/src/androidTest/java/com/example/myapplication/work/DiscoveryFreeTimeWorkerTest.kt`（新規）— Worker統合
+
+原則として上記以外は変更しない。依存追加、`app/build.gradle.kts`、`shared/build.gradle.kts`、version catalog、
+DB／マイグレーション変更が必要になった場合は実装を止め、Claudeが理由・代替案・追加対象をTASK.mdへ
+記録してCTO・品質保証責任者の再承認を受ける。
+
+#### 8. 次の担当
+
+**次の担当はClaude。** 第4節のモジュール境界、新規API契約、OAuthライフサイクル、Workerからの
+セッション／接続先取得をレビューし、設計判断をTASK.mdへ追記する。承認後はKimiがbackendからTDDで
+実装し、続いてKMP共通契約、Androidカレンダー・通知統合をTDDで実装する。実装完了後、CTO・
+品質保証責任者が3テストスイート、DB無変更、権限拒否・終日予定・通知タップの実機動作を独立検証する。
+
+---
+
+## 案件23（バックログ・未着手）：Dive完了後の「最初との変化」振り返り体験
+
+**状態:** バックログ（2026-09-07、ユーザーとClaudeのブレスト途中で一時中断。次回続きから）
+
+### 経緯・アイデア（ブレスト途中メモ）
+
+ユーザー発案:「Dive体験の後、1番はじめとどう変わったかに気づかせるような導線を置きたい」。
+
+- 起点データ: 案件16オンボーディングStep3で保存される`initial_self_understanding_score`
+  （5件法5問の平均、1.0〜5.0）が「最初」の基準値として既にDBにある。
+- 測定方法についてユーザーに質問したところ、「再質問して、こちらから問いかけて気付かせるような
+  もの」という回答。単に数値を再測定して見せるだけでなく、Mikke側から問いかける対話的な体験を
+  想定している様子（詳細は次回セッションで深掘りが必要）。
+- 案件18「ユーザー主導Reflection」（本ファイル3668行目）との関係が未整理。別機能として独立させるか、
+  Reflection機能を拡張する形にするか、次回検討する。
+- ブレストは「Architectural（新規サブシステム）」に分類したところで、案件18の実装詳細確認中に
+  ユーザーから中断・別件優先の指示が入った。
+
+### 次回再開時にやること
+
+1. このメモとユーザーの回答（再質問＋問いかけ形式）を起点に、ブレストの続き（クラリファイング質問
+   →アプローチ提示→設計提示）から再開する
+2. 案件18のReflection機能・心理軸アンケートとの重複/統合可否を確認する
+3. superpowers:brainstorming skillのArchitecturalパスに従い、最終的にdocs/superpowers/specs/への
+   spec化を目指す
+
+---
+
+## 案件24：発見タブ「今わかってきたこと」が更新されないバグ
+
+**状態:** 仕様確定・実装未着手（2026-09-07、CTO・品質保証責任者による裁定）。実装担当はKimi。
+
+### 症状（ユーザー報告）
+
+発見（Discover）タブの「💡 今わかってきたこと」セクションが、実験を完了しても更新されない。
+
+### 根本原因（Claude調査済み）
+
+backendには興味仮説をGeminiで再生成するエンドポイント
+`POST /sessions/{session_id}/hypothesis/update`（`backend/discovery/router.py:332-376`）が
+既に存在するが、**Android/KMPクライアントのどこからもこのエンドポイントを呼び出していない**
+（`shared/`配下を`hypothesis/update`で検索してもヒットなし）。
+
+`DiscoverTabScreen.kt`が表示する`data.hypothesis`は`RealDiscoveryRepository.getDiscovery()`
+（`RealDiscoveryRepository.kt:190-209`）が`GET /sessions/{id}/summary`で読む
+`summary.latestHypothesis`が元であり、これはDB上の最新レコードを読むだけで新規生成はしない。
+実験完了時のフロー（`DiscoveryState.kt:354-379`の`submitReflection()` →
+`repository.completeExperiment()` → `loadDiscovery()`）にも、新しい仮説を生成する呼び出しが
+どこにも配線されていない。そのため`latestHypothesis`は初回生成時（またはnull）のまま更新されない。
+
+この欠落は2026-09-04の品質レビュー（`docs/quality-review/2026-09-04-mikke-p0-gap-closure.md`
+13-14行目、82-84行目）で「リポジトリ内Androidはこの更新エンドポイントを呼んでいない」として
+一度指摘されていたが、API後方互換性の論点として扱われ、実際に呼び出しを配線する対応はされないまま
+残っていた。
+
+### ユーザー承認済みの修正方針
+
+実験完了後に自動で`hypothesis/update`を呼ぶ。ユーザー操作は不要（手動更新ボタンは今回追加しない）。
+
+### 次の担当
+
+**Codex。** 以下を仕様として確定し、Kimiへ引き継ぐこと。
+- `DiscoveryState.submitReflection()`内、`repository.completeExperiment()`成功後・`loadDiscovery()`
+  呼び出しの前後どちらで`updateHypothesis`を呼ぶか（`loadDiscovery()`が`summary`を再取得する前に
+  新しい仮説がDBへ保存されている必要がある点に注意）
+- `DiscoveryRepository`インターフェースへの新規メソッド追加（例:
+  `suspend fun updateHypothesis(): Unit`または`HypothesisUiModel?`を返す形。バックエンドの
+  `HypothesisUpdateRequest`は空ボディ、レスポンスは`HypothesisResponse`または`null`（confidence不足時）
+- confidence不足で`null`が返った場合の挙動（現状の「まだはっきりした傾向は見えていません」文言を
+  維持するのか、既存仮説を残すのか）
+- 503（Gemini呼び出し失敗）時に実験完了自体を失敗扱いにしない（`completeExperiment`は既に成功して
+  いるため、仮説更新の失敗はUIへの軽微な通知に留め、実験完了フロー全体を失敗させない）
+- `FakeDiscoveryRepository.kt`への対応するダミー実装
+- 対象ファイル・受入条件・対象外（案件21/22のような詳細度で）
+- Kimiへ実装を引き継ぐ
+
+### 仕様確定
+
+#### 1. 根本原因と修正目的
+
+表示側の`DiscoverTabScreen.kt`は`DiscoveryState.loadDiscovery()`から渡される`DiscoveryData.hypothesis`を
+表示しており、その値は`RealDiscoveryRepository.getDiscovery()`が
+`GET /sessions/{session_id}/summary`から取得する`latestHypothesis`である。summary APIはDB上の最新仮説を
+読み取るだけで、新しい仮説を生成しない。
+
+backendには`POST /sessions/{session_id}/hypothesis/update`が既にあり、シグナル・実験・結果をGeminiへ渡して
+仮説を生成し、confidenceが`MIN_HYPOTHESIS_CONFIDENCE`以上の場合だけDBへ保存する。しかしKMPの
+`DiscoveryRepository`にこの操作の契約がなく、実機実装・ダミー実装・`submitReflection()`のいずれにも
+呼び出しがない。現在の実験完了フローは`completeExperiment()`の直後に`loadDiscovery()`を行うため、
+更新前の`latestHypothesis`を再取得し続ける。これを本件の根本原因として確定する。
+
+修正目的は、ユーザーが振り返りを正常送信して実験が完了した直後に仮説更新を自動実行し、その処理が
+完了してからDiscoverデータを再取得することで、「💡 今わかってきたこと」へ保存済みの最新仮説を
+反映することである。仮説更新のための追加操作や手動更新ボタンは設けない。
+
+#### 2. リポジトリ契約と実装
+
+- `DiscoveryRepository`へ`suspend fun updateHypothesis()`を追加する。戻り値は持たせず、画面状態の正本は
+  引き続きsummary APIとする。仮説本文・confidenceをKMP側で計算または合成しない。
+- `RealDiscoveryRepository.updateHypothesis()`は現在のDiscoveryセッションIDを使い、
+  `POST /sessions/{session_id}/hypothesis/update`へ空JSONオブジェクト`{}`を1回送信する。
+  backendの既存`HypothesisUpdateRequest`、201レスポンス、`HypothesisResponse | null`という契約を変更しない。
+  レスポンスが仮説オブジェクトでもJSONの`null`でも正常終了とし、画面データは後続の`getDiscovery()`で取得する。
+- 4xx・5xx、通信失敗、レスポンス処理失敗は`RealDiscoveryRepository`から例外として呼び出し元へ伝える。
+  リポジトリ内で自動再試行せず、アクセストークン、Gemini入力、レスポンス本文を追加でログへ出さない。
+- `FakeDiscoveryRepository`にも同じメソッドを追加する。実験完了だけで`currentHypothesis`を更新して配線漏れを
+  隠さないよう、仮説本文の更新責務を`completeExperiment()`から`updateHypothesis()`へ分離する。
+  `completeExperiment()`による完了件数・シグナル・観察内容の既存更新は維持する。
+
+#### 3. 実験完了時の呼び出し順序と失敗時挙動
+
+`DiscoveryState.submitReflection()`の同一コルーチン内で、処理順序を次の通り固定する。
+
+1. 既存どおり`repository.completeExperiment(...)`を呼ぶ。
+2. 1が成功した場合だけ、`repository.updateHypothesis()`の完了を待つ。
+3. 2の成功、confidence不足による正常な`null`、または後述する非致命的失敗の処理後に、既存の
+   `loadHomeData()`、`loadDiscovery()`、`loadReportData()`と`onComplete()`を実行する。
+4. 特に`loadDiscovery()`の呼び出しは必ず`updateHypothesis()`の完了後とする。これによりsummaryの再取得時点で、
+   新しい仮説が生成された場合はDBへの保存が完了していることを保証する。
+
+`completeExperiment()`自体が失敗した場合は現行どおり実験完了失敗とし、`updateHypothesis()`、各再読込、
+`onComplete()`を呼ばない。二重タップを`isSubmitting`で抑止する既存挙動も維持する。
+
+`updateHypothesis()`だけが503、その他のHTTPエラー、通信エラー等で失敗した場合、実験完了は既に確定しているため
+完了フロー全体を失敗扱いにしない。更新例外を`completeExperiment()`用の外側catchへ流さず、
+「実験は完了しましたが、気づきの更新に失敗しました。」を軽微なメッセージとして1回通知したうえで、
+`isSubmitting = false`、`isCompleted = true`、3つの再読込、`onComplete()`まで継続する。自動再試行は行わない。
+ただし`CancellationException`は既存方針どおり再throwし、通常エラーとして握りつぶさない。
+
+backendがconfidence不足で201かつ`null`を返す場合は正常系とする。backendは新規仮説を保存しないため、
+既存仮説があるセッションでは後続summaryの既存`latestHypothesis`をそのまま表示し、既存仮説を削除・空文字で
+上書きしない。既存仮説がないセッションでは、現行の「まだはっきりした傾向は見えていません」という
+フォールバック文言を維持する。この場合、失敗メッセージは表示しない。
+
+#### 4. 対象ファイル（担当宣言）
+
+**実装担当:** Kimi。担当解除まで、以下の実装・テストファイルは他のAIが編集しない。
+
+実装:
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/DiscoveryRepository.kt` —
+  `updateHypothesis()`契約の追加
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/RealDiscoveryRepository.kt` —
+  空ボディPOST、オブジェクト／`null`レスポンスの正常処理
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/FakeDiscoveryRepository.kt` —
+  ダミー仮説更新と`completeExperiment()`からの責務分離
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/DiscoveryState.kt` —
+  完了後の逐次呼び出し、非致命的エラー通知、再読込
+
+テスト:
+- `shared/src/commonTest/kotlin/com/example/myapplication/shared/discovery/RealDiscoveryRepositoryTest.kt` —
+  APIパス、空ボディ、オブジェクト／`null`、HTTP失敗の契約テスト
+- `shared/src/commonTest/kotlin/com/example/myapplication/shared/discovery/DiscoveryStateTest.kt` —
+  呼び出し順序、成功・`null`・503相当・完了失敗・二重送信の状態テスト
+- `shared/src/commonTest/kotlin/com/example/myapplication/shared/discovery/FakeDiscoveryRepositoryTest.kt` —
+  仮説更新責務が`updateHypothesis()`に分離されていることのテスト
+
+原則として上記7ファイル以外は変更しない。既存インターフェース実装のコンパイル追従が上記テストファイル内で
+必要な場合は同じ担当範囲に含む。別ファイル、依存関係、API、DBの変更が必要になった場合は実装を止め、
+理由と代替案をTASK.mdへ記録してCTO・品質保証責任者の再承認を受ける。
+
+#### 5. 受入条件
+
+- TDD必須。下記の失敗テストを先に追加し、REDを確認してから実装する。
+- `RealDiscoveryRepository.updateHypothesis()`が現在のセッションIDに対する
+  `/sessions/{session_id}/hypothesis/update`へ空JSON`{}`を1回だけPOSTし、別エンドポイントを呼ばない。
+- backendが201と`HypothesisResponse`を返す場合、および201とJSON `null`を返す場合の両方で正常終了する。
+  4xx・503等では例外を返し、リポジトリ内で再試行しない。
+- `submitReflection()`が`completeExperiment -> updateHypothesis -> loadDiscovery`の順で実行し、
+  `updateHypothesis()`完了前には`loadDiscovery()`を開始しない。更新成功後の再取得データに新しい仮説があれば、
+  `discoveryState.data.hypothesis`へ反映される。
+- confidence不足の`null`ではエラー通知を出さず、既存仮説がある場合はその表示を維持し、ない場合は現行の
+  「まだはっきりした傾向は見えていません」を表示する。
+- 仮説更新が503相当で失敗しても、実験完了は成功のまま、`isSubmitting == false`、
+  `isCompleted == true`となり、`loadHomeData()`、`loadDiscovery()`、`loadReportData()`、`onComplete()`が実行される。
+  軽微な失敗メッセージは確定文言で1回だけ通知される。
+- `completeExperiment()`が失敗した場合は`updateHypothesis()`を呼ばず、実験完了失敗の既存状態・メッセージを維持する。
+  `CancellationException`の再throwと、送信中の連続操作による二重POST防止も維持する。
+- `FakeDiscoveryRepository`では`completeExperiment()`だけでは仮説が変わらず、`updateHypothesis()`後にだけ
+  `getDiscovery()`の仮説が更新される。これによりFakeを使うテストでも自動更新の配線漏れを検出できる。
+- 実験完了後のHome・Report再読込、仮説フィードバック、Discoverタブの既存表示に回帰がない。
+- `./gradlew :shared:testDebugUnitTest --no-daemon`が全件PASSし、`git diff --check`が成功する。
+- backend、DBスキーマ、`discovery.db`、マイグレーション、Web、Androidホスト`app/`に差分がない。
+
+#### 6. 対象外
+
+- backendの`hypothesis/update`実装、`HypothesisUpdateRequest`／`HypothesisResponse`、
+  `MIN_HYPOTHESIS_CONFIDENCE`、Geminiプロンプト・モデル・再試行方針の変更
+- 仮説テーブルその他のDBスキーマ変更、マイグレーション、既存仮説の削除・上書きルール変更
+- 手動更新ボタン、進捗表示、バックグラウンド更新、永続リトライキュー、オフライン再送、定期更新
+- 仮説更新失敗を理由にした実験完了のロールバック、`completeExperiment()`のAPI契約・評価保存方式の変更
+- confidence不足時の新しい案内文、Toast／Snackbarのデザイン変更、Discoverタブのレイアウト・ラベル変更
+- 仮説フィードバック、Evidence、DIVE_CANDIDATE、次の実験生成、Home／Report集計ロジックの変更
+- Androidホスト`app/`、Web版、iOS固有UIへの追加実装
+
+#### 7. 引き継ぎ
+
+**次の担当はKimi。** 第4節の7ファイルだけを対象に、第5節のテストを先に追加してTDDで実装する。
+完了後、変更ファイル一覧、RED／GREENの結果、`./gradlew :shared:testDebugUnitTest --no-daemon`と
+`git diff --check`の結果を本節直後へ追記し、CTO・品質保証責任者へ独立検証を依頼する。
+
+**ファイル競合の注意（AGENTS.md「1つのファイルを複数のAIが同時に編集しない」）:** 案件22も
+`RealDiscoveryRepository.kt`・`DiscoveryRepository.kt`・`DiscoveryState.kt`をKimi担当として宣言しているが、
+案件22はまだClaudeの設計判断待ちでKimi実装は未着手のため、現時点では衝突しない。**案件24のKimi実装が
+完了・コミットされるまで、案件22のKimi実装には着手しないこと。**
+
+### 実装完了報告（2026-09-07 / Kimi）
+
+**変更ファイル一覧**
+
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/DiscoveryRepository.kt` —
+  `suspend fun updateHypothesis()` の契約追加
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/RealDiscoveryRepository.kt` —
+  現在のセッション ID に対し `POST /sessions/{session_id}/hypothesis/update` へ空 JSON `{}` を送信。
+  201 + `HypothesisResponse`、201 + JSON `null` の両方を正常終了とし、4xx/5xx/通信失敗は例外で呼び出し元へ伝える。
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/FakeDiscoveryRepository.kt` —
+  仮説更新責務を `completeExperiment()` から `updateHypothesis()` へ分離。
+  `completeExperiment()` では完了件数・シグナル・観察内容の更新を維持し、`updateHypothesis()` だけが `currentHypothesis` を更新する。
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/DiscoveryState.kt` —
+  `submitReflection()` で `completeExperiment -> updateHypothesis -> loadDiscovery` の順序を保証。
+  `updateHypothesis()` のみ失敗した場合は「実験は完了しましたが、気づきの更新に失敗しました。」を通知し、
+  実験完了状態は成功のまま `isSubmitting = false`、`isCompleted = true`、Home/Discover/Report 再読込と `onComplete()` を継続。
+  `CancellationException` は再 throw、二重送信防止も維持。
+- `shared/src/commonTest/kotlin/com/example/myapplication/shared/discovery/RealDiscoveryRepositoryTest.kt` —
+  空ボディ POST、オブジェクト/`null` レスポンス、503/4xx 失敗の契約テスト
+- `shared/src/commonTest/kotlin/com/example/myapplication/shared/discovery/FakeDiscoveryRepositoryTest.kt` —
+  `completeExperiment()` 単独では仮説が変わらず、`updateHypothesis()` 後に変化することを検証
+- `shared/src/commonTest/kotlin/com/example/myapplication/shared/discovery/DiscoveryStateTest.kt` —
+  呼び出し順序、成功、`null`、503 相当、完了失敗、二重送信防止の状態テスト
+
+**RED / GREEN 結果**
+
+- RED: `RealDiscoveryRepositoryTest.updateHypothesis_postsEmptyBodyToUpdateEndpoint` が
+  `kotlin.NotImplementedError` で失敗することを確認。
+- GREEN: 上記テストおよび以下の関連テストが PASS。
+  - `RealDiscoveryRepositoryTest.updateHypothesis_*`（4 件）
+  - `FakeDiscoveryRepositoryTest.completeExperiment_doesNotUpdateHypothesis`
+  - `FakeDiscoveryRepositoryTest.updateHypothesis_updatesHypothesis`
+  - `DiscoveryStateTest.submitReflection_*`（4 件）
+
+**全件テスト結果**
+
+```
+$ ./gradlew :shared:testDebugUnitTest --no-daemon
+...
+BUILD SUCCESSFUL
+```
+
+**git diff --check 結果**
+
+```
+$ git diff --check
+（LF/CRLF 変換に関する警告のみ、ホワイトスペース違反なし）
+```
+
+**備考**
+
+- backend、DBスキーマ、`discovery.db`、マイグレーション、Web、Android ホスト `app/` に差分はない。
+- コミット時に案件22の仕様追加（本ファイル 4158 行目以降）も同じ `TASK.md` に含まれる。
+

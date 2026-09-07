@@ -22,6 +22,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNamingStrategy
+import kotlinx.serialization.json.JsonObject
 import kotlin.math.round
 
 /**
@@ -206,6 +207,20 @@ class RealDiscoveryRepository(
             hypothesisId = summary.latestHypothesis?.id,
             criteria = summary.criteria.map { it.toUiModel() }
         )
+    }
+
+    override suspend fun updateHypothesis() {
+        val id = ensureSession()
+        val response = client.post("/sessions/$id/hypothesis/update") {
+            contentType(ContentType.Application.Json)
+            setBody(JsonObject(emptyMap()))
+        }
+        if (!response.status.isSuccess()) {
+            throw DiscoveryApiException("気づきの更新に失敗しました (HTTP ${response.status.value})")
+        }
+        // レスポンスは HypothesisResponseDto? だが、画面状態は後続の [getDiscovery] で再取得する。
+        // null（confidence 不足）も正常終了とみなす。
+        response.body<HypothesisResponseDto?>()
     }
 
     override suspend fun sendHypothesisFeedback(

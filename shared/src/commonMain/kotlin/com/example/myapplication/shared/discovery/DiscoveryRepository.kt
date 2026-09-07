@@ -20,6 +20,10 @@ interface DiscoveryRepository {
     )
     suspend fun skipExperiment(experimentId: String)
     suspend fun getDiscovery(): DiscoveryData
+
+    /** 興味仮説を再生成する。成否は呼び出し元で通知し、画面状態は後続の [getDiscovery] で再取得する。 */
+    suspend fun updateHypothesis()
+
     suspend fun sendHypothesisFeedback(hypothesisId: Int, reaction: HypothesisReaction): HypothesisFeedbackOutcome
     suspend fun getNextExperiment(): Experiment
     suspend fun getDomainFields(): List<DomainField>

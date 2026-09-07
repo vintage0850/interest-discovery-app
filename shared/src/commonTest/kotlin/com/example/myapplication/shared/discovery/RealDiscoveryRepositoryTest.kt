@@ -903,6 +903,96 @@ class RealDiscoveryRepositoryTest {
     }
 
     @Test
+    fun updateHypothesis_postsEmptyBodyToUpdateEndpoint() = runTest {
+        var capturedBody: String? = null
+        val engine = MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/sessions" -> respond(
+                    content = SESSION_BODY,
+                    status = HttpStatusCode.Created,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json")
+                )
+                "/sessions/1/hypothesis/update" -> {
+                    capturedBody = (request.body as io.ktor.http.content.TextContent).text
+                    respond(
+                        content = """
+                            {"id": 2, "session_id": 1, "summary": "更新後の仮説",
+                             "confidence": 0.8, "supporting_evidence": [], "suggested_next_domains": [],
+                             "created_at": "2026-09-02T00:00:00+00:00"}
+                        """.trimIndent(),
+                        status = HttpStatusCode.Created,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json")
+                    )
+                }
+                else -> error("unexpected path: ${request.url.encodedPath}")
+            }
+        }
+        val customClient = HttpClient(engine) {
+            install(ContentNegotiation) {
+                json(Json {
+                    ignoreUnknownKeys = true
+                    namingStrategy = JsonNamingStrategy.SnakeCase
+                })
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = customClient)
+
+        repo.updateHypothesis()
+
+        assertEquals("{}", capturedBody)
+    }
+
+    @Test
+    fun updateHypothesis_succeedsWhenResponseIsNull() = runTest {
+        val (client, paths) = mockClient { path ->
+            when (path) {
+                "/sessions" -> HttpStatusCode.Created to SESSION_BODY
+                "/sessions/1/hypothesis/update" -> HttpStatusCode.Created to "null"
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client)
+
+        repo.updateHypothesis()
+
+        assertTrue(paths.contains("/sessions/1/hypothesis/update"))
+    }
+
+    @Test
+    fun updateHypothesis_throwsWhenServerReturns503() = runTest {
+        val (client, _) = mockClient { path ->
+            when (path) {
+                "/sessions" -> HttpStatusCode.Created to SESSION_BODY
+                "/sessions/1/hypothesis/update" -> HttpStatusCode.ServiceUnavailable to """{"detail":"Gemini unavailable"}"""
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client)
+
+        val exception = runCatching { repo.updateHypothesis() }.exceptionOrNull()
+
+        assertTrue(exception is DiscoveryApiException)
+        assertTrue(exception.message?.contains("503") == true)
+    }
+
+    @Test
+    fun updateHypothesis_throwsWhenServerReturns4xx() = runTest {
+        val (client, _) = mockClient { path ->
+            when (path) {
+                "/sessions" -> HttpStatusCode.Created to SESSION_BODY
+                "/sessions/1/hypothesis/update" -> HttpStatusCode.BadRequest to """{"detail":"invalid"}"""
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client)
+
+        val exception = runCatching { repo.updateHypothesis() }.exceptionOrNull()
+
+        assertTrue(exception is DiscoveryApiException)
+        assertTrue(exception.message?.contains("400") == true)
+    }
+
+    @Test
     fun completeOnboarding_patchesToOnboardingEndpoint() = runTest {
         var capturedMethod: io.ktor.http.HttpMethod? = null
         var capturedBody: String? = null

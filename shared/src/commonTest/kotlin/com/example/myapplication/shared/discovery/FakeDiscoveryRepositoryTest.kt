@@ -4,6 +4,7 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
@@ -82,5 +83,28 @@ class FakeDiscoveryRepositoryTest {
         val home = repo.getHomeState()
         assertEquals(0, home.completedThisWeek)
         assertTrue(home.signals.isEmpty())
+    }
+
+    @Test
+    fun completeExperiment_doesNotUpdateHypothesis() = runTest {
+        val repo = FakeDiscoveryRepository(FakeScenario.NORMAL, enableArtificialDelay = false)
+        val before = repo.getDiscovery().hypothesis
+
+        repo.completeExperiment("exp-1", enjoyment = 5, curiosity = 5, retryIntent = 5)
+
+        val after = repo.getDiscovery().hypothesis
+        assertEquals(before, after)
+    }
+
+    @Test
+    fun updateHypothesis_updatesHypothesis() = runTest {
+        val repo = FakeDiscoveryRepository(FakeScenario.NORMAL, enableArtificialDelay = false)
+        val before = repo.getDiscovery().hypothesis
+
+        repo.completeExperiment("exp-1", enjoyment = 5, curiosity = 5, retryIntent = 5)
+        repo.updateHypothesis()
+
+        val after = repo.getDiscovery().hypothesis
+        assertNotEquals(before, after)
     }
 }

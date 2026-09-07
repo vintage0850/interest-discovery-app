@@ -492,6 +492,171 @@ class DiscoveryStateTest {
             state.close()
         }
     }
+
+    @Test
+    fun submitReflection_callsUpdateHypothesisBeforeLoadDiscovery() = runTest {
+        val repo = FakeDiscoveryRepository(FakeScenario.NORMAL, enableArtificialDelay = false)
+        val recording = RecordingReflectionRepository(repo)
+        val state = createState(recording)
+        try {
+            state.loadHomeData()
+            advanceUntilIdle()
+            state.finishExperiment()
+            state.setReflectionEnjoyment(5)
+            state.setReflectionCuriosity(4)
+            state.setReflectionRetryIntent(5)
+
+            state.submitReflection { }
+            advanceUntilIdle()
+
+            val completeIndex = recording.callLog.indexOf("completeExperiment")
+            val updateIndex = recording.callLog.indexOf("updateHypothesis")
+            val discoveryIndex = recording.callLog.indexOf("getDiscovery")
+            assertTrue(completeIndex in 0 until updateIndex)
+            assertTrue(updateIndex in 0 until discoveryIndex)
+        } finally {
+            state.close()
+        }
+    }
+
+    @Test
+    fun submitReflection_continuesFlowWhenUpdateHypothesisFails() = runTest {
+        val repo = FakeDiscoveryRepository(FakeScenario.NORMAL, enableArtificialDelay = false)
+        val failingRepo = FailingOnUpdateHypothesisRepository(repo)
+        val state = createState(failingRepo)
+        try {
+            state.loadHomeData()
+            advanceUntilIdle()
+            state.finishExperiment()
+            state.setReflectionEnjoyment(5)
+            state.setReflectionCuriosity(4)
+            state.setReflectionRetryIntent(5)
+
+            var message: String? = null
+            val collectJob = launch { state.messages.collect { message = it } }
+
+            var completedCalled = false
+            state.submitReflection { completedCalled = true }
+            advanceUntilIdle()
+
+            assertFalse(state.reflectionState.value.isSubmitting)
+            assertTrue(state.reflectionState.value.isCompleted)
+            assertTrue(completedCalled)
+            assertEquals("実験は完了しましたが、気づきの更新に失敗しました。", message)
+            assertNotNull(state.discoveryState.value.discoveryData)
+            collectJob.cancel()
+        } finally {
+            state.close()
+        }
+    }
+
+    @Test
+    fun submitReflection_doesNotCallUpdateHypothesisWhenCompleteExperimentFails() = runTest {
+        val repo = FakeDiscoveryRepository(FakeScenario.NORMAL, enableArtificialDelay = false)
+        val recording = RecordingReflectionRepository(FailingOnCompleteExperimentRepository(repo))
+        val state = createState(recording)
+        try {
+            state.finishExperiment()
+            state.setReflectionEnjoyment(5)
+            state.setReflectionCuriosity(4)
+            state.setReflectionRetryIntent(5)
+
+            state.submitReflection { }
+            advanceUntilIdle()
+
+            assertTrue("updateHypothesis" !in recording.callLog)
+            assertFalse(state.reflectionState.value.isCompleted)
+        } finally {
+            state.close()
+        }
+    }
+
+    @Test
+    fun submitReflection_ignoresSecondCallWhileFirstIsInFlight() = runTest {
+        val repo = FakeDiscoveryRepository(FakeScenario.NORMAL, enableArtificialDelay = false)
+        val recording = RecordingReflectionRepository(repo, completeDelayMillis = 1_000)
+        val state = createState(recording)
+        try {
+            state.finishExperiment()
+            state.setReflectionEnjoyment(5)
+            state.setReflectionCuriosity(4)
+            state.setReflectionRetryIntent(5)
+
+            state.submitReflection { }
+            runCurrent()
+
+            state.submitReflection { }
+            advanceUntilIdle()
+
+            assertEquals(1, recording.callLog.count { it == "completeExperiment" })
+        } finally {
+            state.close()
+        }
+    }
+}
+
+private class FailingOnCompleteExperimentRepository(delegate: DiscoveryRepository) : DiscoveryRepository by delegate {
+    override suspend fun completeExperiment(
+        experimentId: String,
+        enjoyment: Int,
+        curiosity: Int,
+        retryIntent: Int
+    ) {
+        throw DiscoveryApiException("complete failed")
+    }
+}
+
+private class FailingOnUpdateHypothesisRepository(
+    delegate: DiscoveryRepository,
+    private val message: String = "hypothesis update failed"
+) : DiscoveryRepository by delegate {
+    override suspend fun updateHypothesis() {
+        throw DiscoveryApiException(message)
+    }
+}
+
+/**
+ * Records the order of reflection-related repository calls so tests can assert
+ * completeExperiment → updateHypothesis → getDiscovery ordering.
+ */
+private class RecordingReflectionRepository(
+    private val delegate: DiscoveryRepository,
+    private val completeDelayMillis: Long = 0L
+) : DiscoveryRepository by delegate {
+    val callLog = mutableListOf<String>()
+
+    override suspend fun completeExperiment(
+        experimentId: String,
+        enjoyment: Int,
+        curiosity: Int,
+        retryIntent: Int
+    ) {
+        if (completeDelayMillis > 0) {
+            delay(completeDelayMillis)
+        }
+        callLog.add("completeExperiment")
+        delegate.completeExperiment(experimentId, enjoyment, curiosity, retryIntent)
+    }
+
+    override suspend fun updateHypothesis() {
+        callLog.add("updateHypothesis")
+        delegate.updateHypothesis()
+    }
+
+    override suspend fun getDiscovery(): DiscoveryData {
+        callLog.add("getDiscovery")
+        return delegate.getDiscovery()
+    }
+
+    override suspend fun getHomeState(): HomeData {
+        callLog.add("getHomeState")
+        return delegate.getHomeState()
+    }
+
+    override suspend fun getReportData(): ReportData {
+        callLog.add("getReportData")
+        return delegate.getReportData()
+    }
 }
 
 private class FailingOnCompleteOnboardingRepository(

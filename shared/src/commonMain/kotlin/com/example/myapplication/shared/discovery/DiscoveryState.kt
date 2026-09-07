@@ -364,6 +364,13 @@ class DiscoveryState(
                     curiosity = current.curiosityRating,
                     retryIntent = current.retryIntentRating
                 )
+                try {
+                    repository.updateHypothesis()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    _messages.tryEmit("実験は完了しましたが、気づきの更新に失敗しました。")
+                }
                 _reflectionState.update { it.copy(isSubmitting = false, isCompleted = true) }
                 loadHomeData()
                 loadDiscovery()
