@@ -484,9 +484,22 @@ def get_weekly_narrative(
     repo: Annotated[DiscoveryRepository, Depends(get_repository)],
     client: Annotated[DiscoveryGeminiClient, Depends(get_gemini_client)],
 ) -> dict[str, str]:
-    """直近7日とその前7日を比較した週次AIナラティブを取得する。"""
+    """直近7日とその前7日を比較した週次AIナラティブを取得する。
+
+    Gemini呼び出しは数秒〜十数秒かかるため、同一UTC日付内はセッション単位で
+    キャッシュを再利用する（Discovery/Report両画面から呼ばれるたびの再生成を防ぐ）。
+    """
     _require_session(repo, session_id)
     now = datetime.datetime.now(datetime.timezone.utc)
+    cache_date = now.strftime("%Y-%m-%d")
+
+    cached = repo.get_weekly_narrative_cache(session_id, cache_date)
+    if cached is not None:
+        return {
+            "weekly_insights": cached.weekly_insights,
+            "change_from_past": cached.change_from_past,
+        }
+
     recent_start = now - datetime.timedelta(days=7)
     previous_start = now - datetime.timedelta(days=14)
 
@@ -510,7 +523,14 @@ def get_weekly_narrative(
             detail="Weekly narrative generation is currently unavailable",
         ) from exc
 
+    saved = repo.save_weekly_narrative_cache(
+        session_id,
+        cache_date,
+        narrative_data["weekly_insights"],
+        narrative_data["change_from_past"],
+    )
+
     return {
-        "weekly_insights": narrative_data["weekly_insights"],
-        "change_from_past": narrative_data["change_from_past"],
+        "weekly_insights": saved.weekly_insights,
+        "change_from_past": saved.change_from_past,
     }

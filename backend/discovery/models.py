@@ -377,6 +377,32 @@ class UserReflection(SQLModel, table=True):
         return value
 
 
+class WeeklyNarrativeCache(SQLModel, table=True):
+    """週次ナラティブ（Gemini生成）のセッション×日付単位のキャッシュ。
+
+    毎回のDiscovery/Report画面表示でGeminiを呼び出すと数秒〜十数秒かかるため、
+    同じUTC日付内は再生成せずキャッシュを返す。
+    """
+
+    __tablename__ = "weekly_narrative_cache"
+
+    id: Optional[int] = SQLField(default=None, primary_key=True)
+    session_id: int = SQLField(foreign_key="discovery_session.id", index=True)
+    cache_date: str = SQLField(sa_type=String(10), index=True)
+    weekly_insights: str = SQLField(sa_type=String(200))
+    change_from_past: str = SQLField(sa_type=String(200))
+    created_at: datetime.datetime = SQLField(
+        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc),
+        sa_type=UTCDateTime(),
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "session_id", "cache_date", name="uq_weekly_narrative_cache_session_date"
+        ),
+    )
+
+
 class Criterion(SQLModel, table=True):
     """生徒に同感された仮説から昇格した、意思決定の個人的な基準。"""
 

@@ -1106,6 +1106,52 @@ class TestWeeklyNarrativeEndpoints:
         assert call_args.args[0]["total_signals"] >= 1
         assert call_args.args[1]["total_signals"] == 0
 
+    def test_get_weekly_narrative_uses_cache_on_second_call(
+        self, test_client: TestClient
+    ) -> None:
+        session_id = self._create_full_session(test_client)
+
+        mock_client = MagicMock(spec=DiscoveryGeminiClient)
+        mock_client.generate_weekly_narrative.return_value = {
+            "weekly_insights": "技術分野への興味が強い",
+            "change_from_past": "前週より実験完了数が増えた",
+        }
+        app.dependency_overrides[get_gemini_client] = lambda: mock_client
+
+        response1 = test_client.get(f"/sessions/{session_id}/report/weekly-narrative")
+        assert response1.status_code == 200
+        data1 = response1.json()
+
+        response2 = test_client.get(f"/sessions/{session_id}/report/weekly-narrative")
+        assert response2.status_code == 200
+        data2 = response2.json()
+
+        assert mock_client.generate_weekly_narrative.call_count == 1
+        assert data1 == data2
+        assert data2["weekly_insights"] == "技術分野への興味が強い"
+        assert data2["change_from_past"] == "前週より実験完了数が増えた"
+
+    def test_get_weekly_narrative_cache_isolated_per_session(
+        self, test_client: TestClient
+    ) -> None:
+        session_id_a = self._create_full_session(test_client)
+        session_id_b = self._create_full_session(test_client)
+
+        mock_client = MagicMock(spec=DiscoveryGeminiClient)
+        mock_client.generate_weekly_narrative.return_value = {
+            "weekly_insights": "技術分野への興味が強い",
+            "change_from_past": "前週より実験完了数が増えた",
+        }
+        app.dependency_overrides[get_gemini_client] = lambda: mock_client
+
+        response_a = test_client.get(f"/sessions/{session_id_a}/report/weekly-narrative")
+        assert response_a.status_code == 200
+
+        response_b = test_client.get(f"/sessions/{session_id_b}/report/weekly-narrative")
+        assert response_b.status_code == 200
+
+        assert mock_client.generate_weekly_narrative.call_count == 2
+
 
 class TestPsychAxisSurveyEndpoints:
     def _valid_scores(self) -> dict[str, float]:

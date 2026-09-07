@@ -4824,3 +4824,111 @@ weekly-narrative取得を行っており、実績のあるコストレンジ）�
 **次の担当:** ユーザー確認待ち（実機で発見タブの「今確かめていること」「以前と変わってきたこと」
 「なぜそう表示されたか」が、ハードコードされた固定文言ではなく実データに応じて変化することを確認）。
 
+
+---
+
+## 案件26：週次ナラティブ（Gemini生成）のセッション×日付キャッシュ
+
+**状態:** 実装中（Claude設計判断→Kimiへテスト・検証を依頼）
+
+### 背景
+
+ユーザーから「アプリの読み込みが遅い」と報告。調査の結果、原因は特定の画面ではなく
+アプリ全体の共通経路にあった：
+
+- `backend/discovery/router.py` の `GET /sessions/{id}/report/weekly-narrative` が、
+  呼び出しのたびにGemini APIを**同期・キャッシュなし**で呼んでおり、数秒〜十数秒かかる。
+- 案件25（発見タブ実データ化）で、発見（Discover）タブの`getDiscovery()`が
+  `fetchSummary → buildRecentChanges(=このweekly-narrative呼び出し) → buildEvidenceReason`
+  を**直列**に実行するようになったため、発見タブを開くたびに最大4回のHTTP往復
+  （うち1回はGemini生成）が積み重なるようになった。これがReportタブだけでなく
+  アプリ全体の体感速度悪化の原因。
+
+### 設計判断（Claude、2026-09-08、DB構造変更のため設計裁定者として判断）
+
+同一セッション・同一UTC日付内は週次ナラティブが実質変化しないため
+（直近7日/前週7日の比較であり日次では動かない）、セッション×UTC日付単位で
+キャッシュする。DBスキーマにテーブルを1つ追加する変更のため、Claudeが設計判断として
+直接ドラフト実装した（既存の`SQLModel.metadata.create_all()`による自動スキーマ生成を
+使うため、マイグレーションスクリプトは不要）。
+
+**ドラフト実装内容（Claude、未コミット）：**
+
+- `backend/discovery/models.py`: `WeeklyNarrativeCache`テーブル追加
+  （`session_id` + `cache_date`(YYYY-MM-DD文字列、UTC) でユニーク制約）。
+- `backend/discovery/repository.py`: `get_weekly_narrative_cache()` /
+  `save_weekly_narrative_cache()` を追加（upsert、`IntegrityError`時は
+  同時書き込みの勝者を再取得して返す）。
+- `backend/discovery/router.py`: `get_weekly_narrative()` で、まずキャッシュを
+  チェックして存在すればGeminiを呼ばずに返す。なければ従来通りGemini生成し、
+  結果をキャッシュへ保存してから返す。
+
+### 対象ファイル
+
+- `backend/discovery/models.py`（Claude実装済み・変更禁止）
+- `backend/discovery/repository.py`（Claude実装済み・変更禁止）
+- `backend/discovery/router.py`（Claude実装済み・変更禁止）
+- `backend/tests/test_discovery_router.py`（**Kimi担当・新規テスト追加**）
+
+### Kimiへの依頼内容
+
+`TestWeeklyNarrativeEndpoints`（同ファイル1001行目付近）に以下のテストを追加し、
+`pytest`全件を実行して結果を本セクションに追記してください。上記3ファイル
+（models.py / repository.py / router.py）は変更しないでください（Claudeの設計判断済み）。
+
+1. `test_get_weekly_narrative_uses_cache_on_second_call`：同一セッションに対して
+   `GET /sessions/{id}/report/weekly-narrative`を2回呼び、
+   `mock_client.generate_weekly_narrative`が**1回しか呼ばれない**こと、
+   2回目のレスポンス内容が1回目と同じであることを確認する。
+2. `test_get_weekly_narrative_cache_isolated_per_session`：2つの異なるセッションで
+   それぞれ1回ずつ呼び、`generate_weekly_narrative`が**セッションごとに1回ずつ、
+   計2回**呼ばれること（キャッシュがセッション間で混ざらないこと）を確認する。
+
+既存テスト（`test_get_weekly_narrative`ほか）が引き続きPASSすることも確認してください。
+
+### 受入条件
+
+- 追加した2件のテストがPASS。
+- 既存の`TestWeeklyNarrativeEndpoints`配下の全テストがPASS（回帰なし）。
+- `pytest`全件実行結果（PASS件数）を本セクションに追記。
+
+**次の担当:** Kimi（テスト追加・pytest実行・結果記録）
+
+### Kimi実装（テスト追加、2026-09-08）
+
+`backend/tests/test_discovery_router.py` の `TestWeeklyNarrativeEndpoints` に以下2件を追加：
+
+- `test_get_weekly_narrative_uses_cache_on_second_call`
+- `test_get_weekly_narrative_cache_isolated_per_session`
+
+対象ファイル宣言通り、`models.py` / `repository.py` / `router.py` への変更なし。
+
+### Codexレビュー（2026-09-08、`codex exec -c model_reasoning_effort=low`）
+
+**判定: CHANGES REQUIRED**
+
+- 指摘: 同時キャッシュ生成時（レースコンディション）、`repository.save_weekly_narrative_cache()`が
+  `IntegrityError`により他リクエストの勝者レコードを返しても、`router.py`はそれを無視して
+  自分が生成した`narrative_data`をそのままレスポンスしていた。DBの永続化内容とAPIレスポンスが
+  不一致になり得る不具合。
+- 対応（Claude、`router.py`は自身の宣言ファイルのため直接修正）：
+  `save_weekly_narrative_cache()`の戻り値（実際にDBへ確定した内容）を`saved`として受け取り、
+  レスポンスを`saved.weekly_insights` / `saved.change_from_past`に変更。生成直後の
+  `narrative_data`をそのまま返す経路を廃止し、常に永続化された内容と一致させた。
+
+### 最終検証（Claude、2026-09-08）
+
+```
+$ cd backend && python -m pytest -k WeeklyNarrative -v
+7 passed
+
+$ python -m pytest backend/
+283 passed, 5 warnings in 46.93s
+```
+
+（既存281件 + 案件26で追加した2件 = 283件、回帰なし）
+
+**判定: PASS。** 案件26は完了。
+
+**次の担当:** ユーザー確認待ち（実機で発見タブ・レポートタブの読み込み体感速度が改善したか確認。
+初回読み込みはGemini生成のため従来通り時間がかかるが、同日中の2回目以降は即時応答になるはず）。

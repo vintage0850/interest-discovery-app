@@ -28,6 +28,7 @@ from discovery.models import (
     PsychAxis,
     PsychAxisResult,
     UserReflection,
+    WeeklyNarrativeCache,
 )
 
 # 仮説へのユーザー反応が確信度に与える増減。同感で強まり、違うで弱まる。
@@ -611,6 +612,64 @@ class DiscoveryRepository:
                 .order_by(desc(UserReflection.created_at))
             )
             return list(db.exec(statement).all())
+
+    def get_weekly_narrative_cache(
+        self, session_id: int, cache_date: str
+    ) -> WeeklyNarrativeCache | None:
+        """指定セッション・UTC日付のキャッシュ済み週次ナラティブを取得する。"""
+        with Session(self._engine) as db:
+            statement = select(WeeklyNarrativeCache).where(
+                WeeklyNarrativeCache.session_id == session_id,
+                WeeklyNarrativeCache.cache_date == cache_date,
+            )
+            return db.exec(statement).first()
+
+    def save_weekly_narrative_cache(
+        self,
+        session_id: int,
+        cache_date: str,
+        weekly_insights: str,
+        change_from_past: str,
+    ) -> WeeklyNarrativeCache:
+        """週次ナラティブをキャッシュとして保存する（同一日付なら上書き）。"""
+        with Session(self._engine) as db:
+            existing = db.exec(
+                select(WeeklyNarrativeCache).where(
+                    WeeklyNarrativeCache.session_id == session_id,
+                    WeeklyNarrativeCache.cache_date == cache_date,
+                )
+            ).first()
+            if existing is not None:
+                existing.weekly_insights = weekly_insights
+                existing.change_from_past = change_from_past
+                db.add(existing)
+                db.commit()
+                db.refresh(existing)
+                return existing
+
+            cache = WeeklyNarrativeCache(
+                session_id=session_id,
+                cache_date=cache_date,
+                weekly_insights=weekly_insights,
+                change_from_past=change_from_past,
+            )
+            db.add(cache)
+            try:
+                db.commit()
+            except IntegrityError:
+                # 同時リクエストで先に他方がINSERTした場合はそちらを正とする。
+                db.rollback()
+                winner = db.exec(
+                    select(WeeklyNarrativeCache).where(
+                        WeeklyNarrativeCache.session_id == session_id,
+                        WeeklyNarrativeCache.cache_date == cache_date,
+                    )
+                ).first()
+                if winner is not None:
+                    return winner
+                raise
+            db.refresh(cache)
+            return cache
 
     def get_summary_data(self, session_id: int) -> dict[str, Any]:
         with Session(self._engine) as db:
