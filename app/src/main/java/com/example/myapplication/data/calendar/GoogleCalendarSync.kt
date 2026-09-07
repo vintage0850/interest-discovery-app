@@ -163,7 +163,7 @@ open class GoogleCalendarSync(
                 timeMax = DateTimeFormatter.ISO_INSTANT.format(timeMax)
             )
         }.mapSuccess { body ->
-            val slots = body?.items.orEmpty().mapNotNull { it.toEventSlotOrNull(zoneId) }
+            val slots = body?.items.orEmpty().mapNotNull { it.toBlockingEventSlotOrNull(zoneId) }
             CalendarResult.Success(slots)
         }
     }

@@ -31,6 +31,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.myapplication.shared.discovery.SettingsUiState
+import com.example.myapplication.shared.ui.LocalGoogleCalendarLinkHandler
 
 /**
  * 設定（Settings）タブ画面。
@@ -94,12 +95,13 @@ fun SettingsTabScreen(
                     )
                     Spacer(modifier = Modifier.height(1.dp).fillMaxWidth().background(DiscoveryColors.BorderSubtle))
                     val calendarLinked = settingsState.googleCalendarLinked
+                    val onLinkGoogleCalendar = LocalGoogleCalendarLinkHandler.current
                     SettingsRow(
                         icon = "📅",
                         title = "Googleカレンダー連携",
                         badge = if (calendarLinked) "連携済み" else "未連携",
                         description = if (calendarLinked) "空き時間をもとに通知を届けます" else "空き時間通知に使うカレンダーを連携します",
-                        onClick = { activeModal = "google_calendar" }
+                        onClick = { onLinkGoogleCalendar?.invoke() }
                     )
                 }
             }

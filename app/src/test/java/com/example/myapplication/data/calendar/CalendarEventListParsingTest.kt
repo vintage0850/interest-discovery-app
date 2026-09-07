@@ -9,6 +9,7 @@ import java.time.ZoneId
 /**
  * Calendar API のイベント一覧レスポンス1件を [CalendarEventSlot] へ変換する処理の単体テスト。
  * 終日予定（date）と時刻指定予定（dateTime）の両方を扱えることを確認する。
+ * また、空き時間を塞がない予定（取消・透明・辞退）は null になることを確認する。
  */
 class CalendarEventListParsingTest {
 
@@ -21,7 +22,7 @@ class CalendarEventListParsingTest {
             end = CalendarEventDateTime(dateTime = "2026-08-23T11:00:00+09:00")
         )
 
-        val slot = item.toEventSlotOrNull(tokyo)
+        val slot = item.toBlockingEventSlotOrNull(tokyo)
 
         assertEquals(Instant.parse("2026-08-23T01:00:00Z"), slot?.start)
         assertEquals(Instant.parse("2026-08-23T02:00:00Z"), slot?.end)
@@ -35,7 +36,7 @@ class CalendarEventListParsingTest {
             end = CalendarEventDateTime(date = "2026-08-24")
         )
 
-        val slot = item.toEventSlotOrNull(tokyo)
+        val slot = item.toBlockingEventSlotOrNull(tokyo)
 
         // 2026-08-23 00:00 Asia/Tokyo == 2026-08-22 15:00 UTC
         assertEquals(Instant.parse("2026-08-22T15:00:00Z"), slot?.start)
@@ -54,7 +55,58 @@ class CalendarEventListParsingTest {
             end = CalendarEventDateTime(dateTime = "2026-08-23T11:00:00+09:00")
         )
 
-        assertNull(missingEnd.toEventSlotOrNull(tokyo))
-        assertNull(missingStart.toEventSlotOrNull(tokyo))
+        assertNull(missingEnd.toBlockingEventSlotOrNull(tokyo))
+        assertNull(missingStart.toBlockingEventSlotOrNull(tokyo))
+    }
+
+    @Test
+    fun `cancelledステータスは空きを塞がない`() {
+        val item = CalendarEventListItem(
+            start = CalendarEventDateTime(dateTime = "2026-08-23T10:00:00+09:00"),
+            end = CalendarEventDateTime(dateTime = "2026-08-23T11:00:00+09:00"),
+            status = "cancelled"
+        )
+
+        assertNull(item.toBlockingEventSlotOrNull(tokyo))
+    }
+
+    @Test
+    fun `transparentな予定は空きを塞がない`() {
+        val item = CalendarEventListItem(
+            start = CalendarEventDateTime(dateTime = "2026-08-23T10:00:00+09:00"),
+            end = CalendarEventDateTime(dateTime = "2026-08-23T11:00:00+00Z"),
+            transparency = "transparent"
+        )
+
+        assertNull(item.toBlockingEventSlotOrNull(tokyo))
+    }
+
+    @Test
+    fun `辞退済みのattendeeは空きを塞がない`() {
+        val item = CalendarEventListItem(
+            start = CalendarEventDateTime(dateTime = "2026-08-23T10:00:00+09:00"),
+            end = CalendarEventDateTime(dateTime = "2026-08-23T11:00:00+09:00"),
+            attendees = listOf(
+                CalendarEventAttendee(self = true, responseStatus = "declined"),
+                CalendarEventAttendee(self = false, responseStatus = "accepted")
+            )
+        )
+
+        assertNull(item.toBlockingEventSlotOrNull(tokyo))
+    }
+
+    @Test
+    fun `辞退していないattendeeは空きを塞ぐ`() {
+        val item = CalendarEventListItem(
+            start = CalendarEventDateTime(dateTime = "2026-08-23T10:00:00+09:00"),
+            end = CalendarEventDateTime(dateTime = "2026-08-23T11:00:00+09:00"),
+            attendees = listOf(
+                CalendarEventAttendee(self = true, responseStatus = "accepted")
+            )
+        )
+
+        val slot = item.toBlockingEventSlotOrNull(tokyo)
+        assertEquals(Instant.parse("2026-08-23T01:00:00Z"), slot?.start)
+        assertEquals(Instant.parse("2026-08-23T02:00:00Z"), slot?.end)
     }
 }

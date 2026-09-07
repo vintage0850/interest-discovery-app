@@ -99,7 +99,16 @@ data class CalendarEventListResponse(
 @Serializable
 data class CalendarEventListItem(
     val start: CalendarEventDateTime? = null,
-    val end: CalendarEventDateTime? = null
+    val end: CalendarEventDateTime? = null,
+    val status: String? = null,
+    val transparency: String? = null,
+    val attendees: List<CalendarEventAttendee>? = null
+)
+
+@Serializable
+data class CalendarEventAttendee(
+    val self: Boolean? = null,
+    val responseStatus: String? = null
 )
 
 /**

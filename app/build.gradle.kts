@@ -147,6 +147,8 @@ dependencies {
     // 参照できるよう implementation で入れる（BuildConfig.DEBUG で切り替えること）
     implementation(libs.okhttp.logging.interceptor)
     implementation(libs.kotlinx.serialization.json)
+    // Discovery の NotificationLog で使われる kotlinx.datetime.Instant を app モジュールでも参照する
+    implementation(libs.kotlinx.datetime)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

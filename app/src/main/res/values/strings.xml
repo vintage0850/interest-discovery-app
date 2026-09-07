@@ -6,4 +6,7 @@
     <string name="free_time_notification_title">空き時間です</string>
     <string name="free_time_notification_body">%1$s を始めませんか？</string>
     <string name="free_time_notification_start_action">始める</string>
+
+    <!-- Discovery 空き時間通知 -->
+    <string name="discovery_notification_channel_name">Discovery 通知</string>
 </resources>

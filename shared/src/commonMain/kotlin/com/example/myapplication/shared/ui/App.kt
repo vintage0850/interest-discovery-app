@@ -13,6 +13,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.navigation.compose.NavHost
@@ -62,6 +63,13 @@ import kotlinx.serialization.Serializable
 // 案件19：エビデンス一覧のルート
 @Serializable object EvidenceList
 
+/**
+ * Google Calendar 連携開始を Android ホスト側に委譲する CompositionLocal。
+ *
+ * OAuth 同意画面の起動は Android 専用 API なため、shared から直接呼ばず、
+ * MainActivity 経由で [GoogleAuthManager] を操作する。
+ */
+val LocalGoogleCalendarLinkHandler = staticCompositionLocalOf<(() -> Unit)?> { null }
 
 @Composable
 fun App(

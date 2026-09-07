@@ -42,3 +42,7 @@
 -keep class com.example.myapplication.work.FreeTimeCheckWorker {
     public <init>(android.content.Context, androidx.work.WorkerParameters);
 }
+
+-keep class com.example.myapplication.work.DiscoveryFreeTimeWorker {
+    public <init>(android.content.Context, androidx.work.WorkerParameters);
+}
