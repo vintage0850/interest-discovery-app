@@ -4711,16 +4711,31 @@ bounded タスクとして brainstorming スキルの短い設計合意（チャ
 - `shared/src/commonTest/kotlin/com/example/myapplication/shared/discovery/RealDiscoveryRepositoryTest.kt`
   （新規テスト6件追加、既存2件を新規APIコール分のパス期待値更新）
 
-### 次の担当
+### Gate 3/4検証（2026-09-07）
 
-**Codex。** Gate 3/4相当のレビューを依頼する：
-- `./gradlew :shared:testDebugUnitTest --no-daemon --tests "*RealDiscoveryRepositoryTest*"`が
-  PASSすることの確認（ClaudeはBashでのビルド実行を`/company`フロー開始時に中断したため未実施）。
-- Discover画面ロード時にAPIコール数が増える点（evidence取得・weekly-narrative取得が追加）の
-  パフォーマンス影響が許容範囲か。
-- フォールバック文言のカバレッジ漏れがないか（例外系の網羅性）。
-- コミット`8074672`の差分が対象ファイル宣言の範囲内に収まっているか。
+**Codexへの委譲を2回試行 → 2回とも`codex exec`が非対話実行で応答途中に無応答終了（工程0で停止、
+実際のコマンド実行に到達せず）。** AGENTS.mdの「同じ修正に2回失敗したら3回目を試さず停止」に
+準じてCodexへの再委譲は中止し、Claudeが直接ビルド確認のみ実施した（コード編集ではなく検証のため
+「Claudeは原則コード編集をしない」には抵触しない）。原因はこのWindows環境での`codex exec`の
+ツール呼び出し安定性の問題と推測されるが未確定。次回`/company`実行時、Codexへ非対話タスクを
+投げる前に単純なpingタスクで疎通確認することを推奨（Obsidian Vaultへの知見書き戻し候補）。
 
-判定後、`PASS`ならこのまま完了とする。`CHANGES REQUIRED`ならKimiへ実装を戻す
-（Claudeは原則コード編集をしないため、以降の修正はKimi/Antigravityへ）。
+検証はKimiの案件22実装（同一作業ツリーで並行進行中）と衝突しないよう、独立git worktree
+（`../MyApplication-codex-review-case25`、コミット238cf0d固定）で実施した。
+
+- `git show 8074672 --stat`: 変更ファイルは`RealDiscoveryRepository.kt`・
+  `RealDiscoveryRepositoryTest.kt`の2件のみ。対象ファイル宣言の範囲内。
+- `./gradlew :shared:testDebugUnitTest --no-daemon --tests "*RealDiscoveryRepositoryTest*"`
+  → **BUILD SUCCESSFUL**（25 actionable tasks: 25 executed、失敗0件）。
+- `buildTestingFocus`/`buildRecentChanges`/`buildEvidenceReason`の3関数を確認: いずれも
+  `CancellationException`のみ再throwし、それ以外の例外（weekly-narrative取得失敗、evidence取得
+  失敗、仮説なし・supporting_evidence空）はフォールバック文言を返す設計になっており、
+  Discover画面全体のロード失敗を招かない。
+
+**判定: PASS。** 案件25は完了。Discover画面ロード時のAPIコール増加（evidence取得・
+weekly-narrative取得が追加）は許容範囲と判断する（既存のReportタブが既に同じ
+weekly-narrative取得を行っており、実績のあるコストレンジ）。
+
+**次の担当:** ユーザー確認待ち（実機で発見タブの「今確かめていること」「以前と変わってきたこと」
+「なぜそう表示されたか」が、ハードコードされた固定文言ではなく実データに応じて変化することを確認）。
 
