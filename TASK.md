@@ -3074,6 +3074,26 @@ Kimiが案件12のGate4修正作業中のため、並列レーンとしてAntigr
 `backend/line/repository.py`・`backend/line/models.py`・`backend/tests/test_line_repository.py`のみ。
 `backend/discovery/`・`shared/`・`app/`には一切触れない（案件22でKimiが並行編集中のため）。
 
+### 修正完了・Claude検証（Antigravity実装、2026-09-07、コミット`7727195`）
+
+Antigravityが4点をTDD（Red→Green）で修正。
+
+1. `upsert_line_account`: 既存の1行があればその`line_user_id`・`linked_at`を更新し、余剰行は削除。常に単一行を維持。
+2. `Reminder`/`ReminderCreate`の`scheduled_at`: timezoneなし・非UTCオフセットを拒否するバリデーションを追加（UTC＝ZサフィックスまたはUTCオフセット`+00:00`のみ受理）。
+3. `mark_sent`/`mark_failed`: 対象なしは`ValueError`、`PROCESSING`以外からの呼び出しは`StateTransitionError`を送出するガードを追加。
+4. `test_line_repository.py`に、単一行維持・SENT取消時の`StateTransitionError`（API層で409相当）・SENT再クレーム不可・
+   `PROCESSING`以外からのmark_sent/mark_failed拒否・`scheduled_at`のnaive/非UTC拒否とUTC受理、の回帰テストを追加。
+
+Antigravity報告のテスト結果（`cd backend && python -m pytest -v`）: 281 passed, 0 failed。
+**Claudeが独立に同一コマンドを再実行し確認: 281 passed, 5 warnings, 0 failed。**
+`git show 7727195 --stat`で差分が対象宣言の3ファイルのみであることも確認済み（TASK.md・`backend/discovery/`・
+`shared/`・`app/`への逸脱なし。同時進行中の案件22（Kimi）とのファイル競合なし）。
+
+**判定: PASS。** 案件13（LINEリマインダー連携）は完了。
+
+**次の担当:** ユーザー確認待ち（任意。実機でのLINE動作は`案件13`本文の「Push配信の実地確認」で既に
+2026-09-03に確認済みのため、今回の4点修正は内部品質の是正でありユーザー再確認は必須ではない）。
+
 ## 案件14：Discoveryアプリ実機動作確認 → ホーム画面キャッシュ未破棄バグ修正
 
 **状態:** `完了`
