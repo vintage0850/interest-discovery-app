@@ -3059,6 +3059,21 @@ Kimiが案件12のGate4修正作業中のため、並列レーンとしてAntigr
 
 **次の担当: Antigravity。** 修正後、`cd backend && python -m pytest -v`を実行し成功を確認した上で、本節に作業履歴を追記し、次の担当をCodex（Gate4再レビュー）として引き継ぐこと。
 
+### 再着手（Claude、2026-09-07）— 未完了のまま放置されていたことが判明、ユーザー指示により再開
+
+案件14以降のDiscovery機能開発に注意が移り、上記4点のAntigravity依頼は着手されないまま放置されていた
+（`git log --oneline -- backend/line/`は`5674be7`が最新でその後の修正コミットなし。コードを直接確認し、
+4点とも未修正のままであることを再確認した：
+`upsert_line_account`は新規`line_user_id`ごとに新規行を作成するだけで単一アカウント保証なし、
+`models.py`に`scheduled_at`のUTC/Zサフィックス強制バリデーションなし、
+`mark_sent`/`mark_failed`はPROCESSING以外からも無条件に上書き可能）。
+ユーザーへ状況を報告し、「修正お願い」と明示指示を受けたため、案件22（Kimiが並行実装中、
+`shared/`・`backend/discovery/`配下）とファイル競合しないAntigravityの並列レーンとして再ディスパッチする。
+
+**次の担当: Antigravity（再ディスパッチ、非対話実行）。** 対象ファイルは上記4点と同じ
+`backend/line/repository.py`・`backend/line/models.py`・`backend/tests/test_line_repository.py`のみ。
+`backend/discovery/`・`shared/`・`app/`には一切触れない（案件22でKimiが並行編集中のため）。
+
 ## 案件14：Discoveryアプリ実機動作確認 → ホーム画面キャッシュ未破棄バグ修正
 
 **状態:** `完了`
