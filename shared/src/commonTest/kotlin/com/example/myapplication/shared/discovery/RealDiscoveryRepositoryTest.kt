@@ -1247,6 +1247,53 @@ class RealDiscoveryRepositoryTest {
         client.close()
     }
 
+    @Test
+    fun getNotificationCandidates_fetchesFromEndpointAndMapsDomainStatus() = runTest {
+        val candidateBody = """
+            [{"experiment": {"id": 10, "session_id": 1, "title": "Hello Python", "description": "desc",
+              "domain": "tech", "planned_minutes": 10, "status": "selected",
+              "selected_at": "2026-09-07T10:00:00+00:00", "started_at": null, "completed_at": null,
+              "skipped_at": null, "selection_note": null, "skip_reason": null,
+              "actual_minutes": null, "created_at": "2026-09-07T10:00:00+00:00"},
+              "domain_status": "DIVE_CANDIDATE",
+              "reason": "過去の実験結果から深掘りに値する分野です"}]
+        """.trimIndent()
+        val (client, paths) = mockClient { path ->
+            when (path) {
+                "/sessions" -> HttpStatusCode.Created to SESSION_BODY
+                "/sessions/1/notification-candidates" -> HttpStatusCode.OK to candidateBody
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client)
+
+        val candidates = repo.getNotificationCandidates()
+
+        assertTrue(paths.contains("/sessions/1/notification-candidates"))
+        assertEquals(1, candidates.size)
+        assertEquals("10", candidates[0].experiment.id)
+        assertEquals("Hello Python", candidates[0].experiment.title)
+        assertEquals(NotificationCandidateDomainStatus.DIVE_CANDIDATE, candidates[0].domainStatus)
+        assertTrue(candidates[0].reason.isNotBlank())
+    }
+
+    @Test
+    fun getNotificationCandidates_throwsWhenServerReturnsError() = runTest {
+        val (client, _) = mockClient { path ->
+            when (path) {
+                "/sessions" -> HttpStatusCode.Created to SESSION_BODY
+                "/sessions/1/notification-candidates" -> HttpStatusCode.NotFound to """{"detail":"not found"}"""
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client)
+
+        val exception = runCatching { repo.getNotificationCandidates() }.exceptionOrNull()
+
+        assertTrue(exception is DiscoveryApiException)
+        assertTrue(exception.message?.contains("404") == true)
+    }
+
     // ---- 案件18：セッション復帰・一覧・心理軸・Reflection ----
 
     @Test

@@ -501,6 +501,25 @@ class RealDiscoveryRepository(
         return response.body<List<EvidenceResponseDto>>().map { it.toUiModel() }
     }
 
+    // ---- 案件22：Google Calendar 連携通知 ----
+
+    override suspend fun getNotificationCandidates(): List<NotificationCandidate> {
+        val id = ensureSession()
+        val response = client.get("/sessions/$id/notification-candidates")
+        if (!response.status.isSuccess()) {
+            throw DiscoveryApiException("通知候補の取得に失敗しました (HTTP ${response.status.value})")
+        }
+        return response.body<List<NotificationCandidateResponseDto>>().map { it.toUiModel() }
+    }
+
+    private fun NotificationCandidateResponseDto.toUiModel(): NotificationCandidate = NotificationCandidate(
+        experiment = experiment.toExperiment(),
+        domainStatus = NotificationCandidateDomainStatus.entries
+            .firstOrNull { it.name.equals(domainStatus, ignoreCase = true) }
+            ?: NotificationCandidateDomainStatus.UNEXPLORED,
+        reason = reason
+    )
+
     companion object {
         /** エミュレータから開発機 localhost を参照するための標準 URL。実機では呼び出し元でLAN IPを渡す。 */
         const val DEFAULT_BASE_URL = "http://10.0.2.2:8000"
@@ -540,6 +559,13 @@ private data class ExperimentResponseDto(
     val description: String,
     val domain: String,
     val plannedMinutes: Int
+)
+
+@Serializable
+private data class NotificationCandidateResponseDto(
+    val experiment: ExperimentResponseDto,
+    val domainStatus: String,
+    val reason: String
 )
 
 private const val DEFAULT_SELECTION_NOTE = "アプリから選択"
@@ -696,18 +722,25 @@ private val DOMAIN_FIELD_META = listOf(
     DomainFieldMeta("other", "その他", "分類にとらわれず、興味のおもむくままに試します。", "✨")
 )
 
-/** [MyDataSettings] の永続化先。プラットフォームごとに差し替え可能。 */
+/** [MyDataSettings] / [NotificationLog] の永続化先。プラットフォームごとに差し替え可能。 */
 interface DiscoverySettingsStorage {
     fun load(): MyDataSettings
     fun save(settings: MyDataSettings)
+    fun loadNotificationLog(): NotificationLog
+    fun saveNotificationLog(log: NotificationLog)
 }
 
 /** 永続化しない既定実装。テストや未対応プラットフォームで使用する。 */
 class InMemoryDiscoverySettingsStorage : DiscoverySettingsStorage {
     private var current = MyDataSettings()
+    private var notificationLog = NotificationLog()
     override fun load(): MyDataSettings = current
     override fun save(settings: MyDataSettings) {
         current = settings
+    }
+    override fun loadNotificationLog(): NotificationLog = notificationLog
+    override fun saveNotificationLog(log: NotificationLog) {
+        notificationLog = log
     }
 }
 

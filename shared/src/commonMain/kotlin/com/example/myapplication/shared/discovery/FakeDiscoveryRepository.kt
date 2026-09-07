@@ -585,4 +585,40 @@ class FakeDiscoveryRepository(
             fakeEvidences.toList()
         }
     }
+
+    // ---- 案件22：Google Calendar 連携通知（ダミー実装） ----
+
+    override suspend fun getNotificationCandidates(): List<NotificationCandidate> {
+        simulateLatency()
+        checkErrorState()
+        val priority = mapOf(
+            NotificationCandidateDomainStatus.DIVE_CANDIDATE to 0,
+            NotificationCandidateDomainStatus.TRIED to 1,
+            NotificationCandidateDomainStatus.EXPLORED to 2,
+            NotificationCandidateDomainStatus.UNEXPLORED to 3
+        )
+        return domainFields.map { field ->
+            val experiment = allExperiments.firstOrNull { it.domainFieldId == field.id } ?: Experiment(
+                id = "fake-${field.id}",
+                title = "${field.title}の実験",
+                description = field.description,
+                plannedMinutes = 10,
+                actionType = BehaviorSignal.ANALYZE,
+                domainFieldId = field.id
+            )
+            val domainStatus = when (field.status) {
+                ExploreStatus.DIVE_CANDIDATE -> NotificationCandidateDomainStatus.DIVE_CANDIDATE
+                ExploreStatus.TRIED -> NotificationCandidateDomainStatus.TRIED
+                ExploreStatus.EXPLORED -> NotificationCandidateDomainStatus.EXPLORED
+                ExploreStatus.UNEXPLORED -> NotificationCandidateDomainStatus.UNEXPLORED
+            }
+            val reason = when (domainStatus) {
+                NotificationCandidateDomainStatus.DIVE_CANDIDATE -> "過去の実験結果から深掘りに値する分野です"
+                NotificationCandidateDomainStatus.TRIED -> "すでに試したことのある分野です"
+                NotificationCandidateDomainStatus.EXPLORED -> "興味の傾向が見られる分野です"
+                NotificationCandidateDomainStatus.UNEXPLORED -> "まだ試していない分野です"
+            }
+            NotificationCandidate(experiment, domainStatus, reason)
+        }.sortedBy { priority[it.domainStatus] }
+    }
 }

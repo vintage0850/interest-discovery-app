@@ -84,13 +84,24 @@ fun SettingsTabScreen(
             // 2. 連携
             SectionHeader(title = "連携")
             SettingsCard {
-                SettingsRow(
-                    icon = "💬",
-                    title = "LINE連携",
-                    badge = "未連携",
-                    description = "公式LINEから今日の実験やリマインドを受け取れます",
-                    onClick = { activeModal = "line" }
-                )
+                Column {
+                    SettingsRow(
+                        icon = "💬",
+                        title = "LINE連携",
+                        badge = "未連携",
+                        description = "公式LINEから今日の実験やリマインドを受け取れます",
+                        onClick = { activeModal = "line" }
+                    )
+                    Spacer(modifier = Modifier.height(1.dp).fillMaxWidth().background(DiscoveryColors.BorderSubtle))
+                    val calendarLinked = settingsState.googleCalendarLinked
+                    SettingsRow(
+                        icon = "📅",
+                        title = "Googleカレンダー連携",
+                        badge = if (calendarLinked) "連携済み" else "未連携",
+                        description = if (calendarLinked) "空き時間をもとに通知を届けます" else "空き時間通知に使うカレンダーを連携します",
+                        onClick = { activeModal = "google_calendar" }
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(DiscoverySpacing.lg))

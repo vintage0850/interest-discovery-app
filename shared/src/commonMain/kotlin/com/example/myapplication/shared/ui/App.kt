@@ -71,6 +71,8 @@ fun App(
     onboardingStorage: OnboardingStorage = InMemoryOnboardingStorage(),
     enableDiscoveryHttpLogging: Boolean = false,
     discoveryBaseUrl: String = "http://localhost:8000",
+    notificationExperimentId: String? = null,
+    isGoogleCalendarLinked: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     MaterialTheme {
@@ -96,6 +98,20 @@ fun App(
                 snackbarHostState.currentSnackbarData?.dismiss()
                 snackbarHostState.showSnackbar(message)
             }
+        }
+
+        // 案件22：通知タップ時に experiment_id を受け取り、詳細画面へ遷移する。
+        // 無効な ID や状態変更時は [DiscoveryState.onNotificationTapped] がフォールバックメッセージを流す。
+        LaunchedEffect(notificationExperimentId) {
+            notificationExperimentId?.let { id ->
+                discoveryState.onNotificationTapped(id) {
+                    navController.navigate(DiscoveryDetail) { launchSingleTop = true }
+                }
+            }
+        }
+
+        LaunchedEffect(isGoogleCalendarLinked) {
+            discoveryState.setGoogleCalendarLinked(isGoogleCalendarLinked)
         }
 
         val startDestination = if (onboardingStorage.hasCompletedOnboarding()) {

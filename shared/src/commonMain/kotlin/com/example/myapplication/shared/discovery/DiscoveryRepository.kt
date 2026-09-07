@@ -65,6 +65,11 @@ interface DiscoveryRepository {
 
     /** 指定したセッションの Evidence 一覧を取得する（created_at 降順）。 */
     suspend fun getEvidenceList(sessionId: Int): List<EvidenceUiModel>
+
+    // ---- 案件22：Google Calendar 連携通知 ----
+
+    /** 通知候補となる選択済み実験を、ドメイン状態付きで取得する。 */
+    suspend fun getNotificationCandidates(): List<NotificationCandidate>
 }
 
 /** 直近7日とその前7日の比較から生成された週次レポート文。 */

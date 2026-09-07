@@ -88,7 +88,8 @@ data class ReportUiState(
 data class SettingsUiState(
     val isLoading: Boolean = false,
     val settings: MyDataSettings = MyDataSettings(),
-    val isResetting: Boolean = false
+    val isResetting: Boolean = false,
+    val googleCalendarLinked: Boolean = false
 )
 
 /** Reflection 一覧画面の UI ステート。 */
@@ -516,6 +517,34 @@ class DiscoveryState(
         val updated = _settingsState.value.settings.copy(notificationsEnabled = enabled)
         _settingsState.update { it.copy(settings = updated) }
         scope.launch { repository.updateSettings(updated) }
+    }
+
+    /**
+     * 設定画面に表示する Google Calendar 連携状態を更新する。
+     * 認証自体は Android ホスト側で行い、[shared] は UI 表示用の状態だけを持つ。
+     */
+    fun setGoogleCalendarLinked(linked: Boolean) {
+        _settingsState.update { it.copy(googleCalendarLinked = linked) }
+    }
+
+    /**
+     * 通知タップ時に対象実験を再取得し、詳細画面へ遷移できる状態にする。
+     * 無効な ID や取得失敗時はフォールバックメッセージを流す。
+     */
+    fun onNotificationTapped(experimentId: String, onNavigate: () -> Unit) {
+        scope.launch {
+            actionMutex.withLock {
+                try {
+                    val experiment = repository.getExperiment(experimentId)
+                    _selectedExperiment.value = experiment
+                    onNavigate()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    _messages.tryEmit("この実験は現在開始できません。")
+                }
+            }
+        }
     }
 
     fun resetAllData(onComplete: () -> Unit) {

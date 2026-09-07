@@ -54,6 +54,38 @@ enum class ExploreStatus(val label: String) {
 }
 
 /**
+ * 通知候補のドメイン状態。
+ * backend の [NotificationCandidateDomainStatus] と整合させる。
+ */
+@Serializable
+enum class NotificationCandidateDomainStatus(val label: String) {
+    DIVE_CANDIDATE("深掘り候補"),
+    TRIED("Try済み"),
+    EXPLORED("Explore済み"),
+    UNEXPLORED("未探索")
+}
+
+/**
+ * Google Calendar 空き時間通知の候補。
+ */
+@Serializable
+data class NotificationCandidate(
+    val experiment: Experiment,
+    val domainStatus: NotificationCandidateDomainStatus,
+    val reason: String
+)
+
+/**
+ * 通知の重複抑止情報。
+ * Android 端末内 [DiscoverySettingsStorage] へ永続化する。
+ */
+@Serializable
+data class NotificationLog(
+    val lastNotifiedAt: Instant? = null,
+    val notifiedExperimentDates: Map<String, String> = emptyMap()
+)
+
+/**
  * 探索分野カテゴリー
  */
 @Serializable
