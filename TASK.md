@@ -4159,7 +4159,7 @@ Kimiの成果物をClaudeが独立に再検証。
 
 ## 案件22：Discovery（Mikke）向けGoogle Calendar連携通知機能（新規）
 
-**状態:** 仕様確定・実装未着手
+**状態:** 設計承認済み・Kimi実装中
 
 ### 依頼内容（ユーザー原文の要約）
 
@@ -4364,6 +4364,38 @@ DB／マイグレーション変更が必要になった場合は実装を止め
 セッション／接続先取得をレビューし、設計判断をTASK.mdへ追記する。承認後はKimiがbackendからTDDで
 実装し、続いてKMP共通契約、Androidカレンダー・通知統合をTDDで実装する。実装完了後、CTO・
 品質保証責任者が3テストスイート、DB無変更、権限拒否・終日予定・通知タップの実機動作を独立検証する。
+
+### 設計判断（Claude、2026-09-07）— モジュール境界・OAuth・Worker/セッション取得を承認
+
+**判定: 第4節の第一案を承認する。** 「認証とWorkerはAndroidホストの`app/`に残し、`shared`は
+インターフェースとUI状態だけを持つ」方針のまま実装してよい。理由と1点の追記事項は以下の通り。
+
+1. **依存方向は壊れない。** `GoogleAuthManager`・`GoogleCalendarSync`・`WorkManager`はいずれも
+   Android専用API（`androidx.work`、Android `AccountManager`/Play Services系）であり、KMPの
+   `commonMain`からそもそも参照できない。したがって「Worker・OAuthは`app/`に留め、`shared`は
+   候補取得インターフェース（`DiscoveryRepository.getNotificationCandidates()`相当）とUI状態
+   （設定画面のトグル、通知タップ時の遷移契約）だけを持つ」という第一案は、既存の`app -> shared`
+   依存方向を壊さない唯一自然な境界であり、承認する。`shared`側が`app`のクラスを一切importしない
+   ことをGate 4で確認すること。
+
+2. **Workerからのセッション取得は、既存の`SessionStorage`永続化をそのまま使う（追記事項）。**
+   `DiscoveryFreeTimeWorker`はActivity/ViewModelのライフサイクルと無関係にOSがプロセスを起こして
+   実行するため、実行中の`DiscoveryState`インスタンスを共有できる保証がない。Workerは
+   `RealDiscoveryRepository`を**Worker内で新規インスタンス化**し、既存の`InMemorySessionStorage`
+   ではなく永続化された`SessionStorage`実装（案件18で導入済みの、プロセス再起動をまたいで
+   `sessionId`を復元する仕組み。`RealDiscoveryRepository.ensureSession()`が
+   `sessionStorage.getLastSessionId()`から復帰する既存パスをそのまま使う）経由でセッションIDを
+   復元すること。新しいシングルトンや静的な状態共有を`shared`や`app`に追加しない。
+   接続先（backend base URL）も、UI層が使っているものと同じ設定源（既存の`DEFAULT_BASE_URL`or
+   実機で使っているLAN IP設定）から取得し、Worker専用の設定を新設しない。
+
+3. **Google Calendar側の失敗は`app/`内で完結させる。** `GoogleCalendarSync`の401再試行・
+   トークン破棄は既存実装のロジックをそのまま再利用し、`shared`側のDiscoveryRepositoryには
+   一切伝播させない（第4節の方針通り、アクセストークンやカレンダー内容を`shared`・backendへ
+   渡さない）。
+
+**承認後の担当:** Kimi。対象ファイル宣言（第7節）に従い、backend → KMP共通契約 → Android
+カレンダー・通知統合の順にTDDで実装する。同じ修正に2回失敗したら停止しTASK.mdへ記録すること。
 
 ---
 
@@ -4643,4 +4675,52 @@ $ git diff --check
 **次の担当:** ユーザー確認待ち（実機で実験を1件完了させ、発見タブ「💡 今わかってきたこと」が
 更新される、または「まだはっきりした傾向は見えていません」のフォールバック文言のままなら
 confidence不足として正常、を確認）。
+
+---
+
+## 案件25：発見タブ「今確かめていること／以前との変化／なぜそう表示されたか」の実データ化
+
+**状態:** 実装完了・Codexレビュー待ち
+
+### 背景
+
+`DiscoveryData`には`testingFocus`（今確かめていること）・`recentChanges`（以前との変化）・
+`evidenceReason`（なぜそう表示されたか）の3フィールドが既に存在していたが、
+`RealDiscoveryRepository.getDiscovery()`がこれらを一切設定していなかったため、
+実機では常に`DiscoveryModels.kt`のハードコードされたデフォルト文言が表示されていた
+（実際のユーザーデータを反映していない）。ユーザーからこの3項目を実データ化する依頼があり、
+bounded タスクとして brainstorming スキルの短い設計合意（チャット内）を経て、
+標準開発フロー外（ユーザーが直接Claudeへ「実装して」と指示）でClaudeが直接実装した。
+
+### 実装内容（Claude、2026-09-07、コミット`8074672`）
+
+- `testingFocus`: `behaviorSummary.domainExperimentCounts`と`domainCompletedCounts`を比較し、
+  実験数 > 完了数のドメイン（進行中）を検出、`DOMAIN_FIELD_META`からタイトルを引いて文を生成。
+  該当なしは汎用フォールバック文。
+- `recentChanges`: 既存の`GET /sessions/{id}/report/weekly-narrative`（Reportタブで既に使用中の
+  Gemini生成週次比較エンドポイント）の`changeFromPast`を流用。取得失敗（Gemini側の一時障害等）は
+  `CancellationException`以外を全て捕捉しフォールバック文にし、Discover画面全体のロード失敗を防ぐ。
+- `evidenceReason`: 仮説の`supporting_evidence`（エビデンスIDのリスト）に一致する
+  既存`GET /sessions/{id}/evidence`のエビデンスの`summaryText`を結合して理由文を生成。
+  仮説なし・根拠IDなし・取得失敗はフォールバック文。
+- `FakeDiscoveryRepository`は変更なし（シナリオ別に既に妥当な値を返している）。
+
+### 対象ファイル（担当宣言：Claude、実装済み）
+
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/RealDiscoveryRepository.kt`
+- `shared/src/commonTest/kotlin/com/example/myapplication/shared/discovery/RealDiscoveryRepositoryTest.kt`
+  （新規テスト6件追加、既存2件を新規APIコール分のパス期待値更新）
+
+### 次の担当
+
+**Codex。** Gate 3/4相当のレビューを依頼する：
+- `./gradlew :shared:testDebugUnitTest --no-daemon --tests "*RealDiscoveryRepositoryTest*"`が
+  PASSすることの確認（ClaudeはBashでのビルド実行を`/company`フロー開始時に中断したため未実施）。
+- Discover画面ロード時にAPIコール数が増える点（evidence取得・weekly-narrative取得が追加）の
+  パフォーマンス影響が許容範囲か。
+- フォールバック文言のカバレッジ漏れがないか（例外系の網羅性）。
+- コミット`8074672`の差分が対象ファイル宣言の範囲内に収まっているか。
+
+判定後、`PASS`ならこのまま完了とする。`CHANGES REQUIRED`ならKimiへ実装を戻す
+（Claudeは原則コード編集をしないため、以降の修正はKimi/Antigravityへ）。
 
