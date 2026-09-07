@@ -615,6 +615,19 @@ class WeeklyNarrativeResponse(SQLModel):
     change_from_past: str = Field(..., min_length=1, max_length=200)
 
 
+class NotificationCandidateDomainStatus(str, enum.Enum):
+    DIVE_CANDIDATE = "DIVE_CANDIDATE"
+    TRIED = "TRIED"
+    EXPLORED = "EXPLORED"
+    UNEXPLORED = "UNEXPLORED"
+
+
+class NotificationCandidateResponse(SQLModel):
+    experiment: ExperimentResponse
+    domain_status: str
+    reason: str
+
+
 class PsychAxisSurveySubmitRequest(SQLModel):
     scores: dict[str, float]
 

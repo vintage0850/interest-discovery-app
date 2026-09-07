@@ -5,7 +5,15 @@ from collections import defaultdict
 from statistics import mean
 from typing import Any
 
-from discovery.models import BehaviorSummary, Experiment, ExperimentResult, ExperimentStatus, InterestSignal
+from discovery.models import (
+    BehaviorSummary,
+    Experiment,
+    ExperimentResult,
+    ExperimentStatus,
+    InterestSignal,
+    NotificationCandidateDomainStatus,
+    NotificationCandidateResponse,
+)
 
 
 _DURATION_RATIO_HIGH = 1.5
@@ -252,4 +260,69 @@ def summarize_domain_signals(domain: str, signals: list[InterestSignal]) -> str:
     if len(text) > 1000:
         text = text[:997] + "..."
     return text
+
+
+def build_notification_candidates(
+    experiments: list[Experiment],
+    results: list[ExperimentResult] | None = None,
+) -> list[NotificationCandidateResponse]:
+    """通知候補となる選択済み実験を抽出し、ドメイン状態付きで安定ソートして返す。
+
+    各ドメインの状態は ``build_behavior_summary`` によるセッション全期間集計を正本とする。
+    優先順位は ``DIVE_CANDIDATE > TRIED > EXPLORED`` であり、``UNEXPLORED`` は候補外とする。
+    同順位では ``selected_at`` 昇順、さらに実験ID昇順とする。
+    """
+    results = results or []
+    summary = build_behavior_summary([], experiments, results)
+    dive_domains = set(summary.dive_candidate_domains)
+
+    def _domain_status(domain: str) -> NotificationCandidateDomainStatus:
+        if domain in dive_domains:
+            return NotificationCandidateDomainStatus.DIVE_CANDIDATE
+        if summary.domain_completed_counts.get(domain, 0) > 0:
+            return NotificationCandidateDomainStatus.TRIED
+        if summary.domain_experiment_counts.get(domain, 0) > 0:
+            return NotificationCandidateDomainStatus.EXPLORED
+        return NotificationCandidateDomainStatus.UNEXPLORED
+
+    def _reason(status: NotificationCandidateDomainStatus) -> str:
+        if status == NotificationCandidateDomainStatus.DIVE_CANDIDATE:
+            return "過去の実験結果から深掘りに値する分野です"
+        if status == NotificationCandidateDomainStatus.TRIED:
+            return "すでに試したことのある分野です"
+        if status == NotificationCandidateDomainStatus.EXPLORED:
+            return "興味の傾向が見られる分野です"
+        return ""
+
+    priority = {
+        NotificationCandidateDomainStatus.DIVE_CANDIDATE.value: 0,
+        NotificationCandidateDomainStatus.TRIED.value: 1,
+        NotificationCandidateDomainStatus.EXPLORED.value: 2,
+        NotificationCandidateDomainStatus.UNEXPLORED.value: 3,
+    }
+    min_selected_at = datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)
+
+    candidates: list[NotificationCandidateResponse] = []
+    for experiment in experiments:
+        if experiment.status != ExperimentStatus.SELECTED.value:
+            continue
+        status = _domain_status(experiment.domain)
+        if status == NotificationCandidateDomainStatus.UNEXPLORED:
+            continue
+        candidates.append(
+            NotificationCandidateResponse(
+                experiment=experiment,
+                domain_status=status.value,
+                reason=_reason(status),
+            )
+        )
+
+    candidates.sort(
+        key=lambda c: (
+            priority[c.domain_status],
+            (c.experiment.selected_at or min_selected_at),
+            c.experiment.id,
+        )
+    )
+    return candidates
 

@@ -7,7 +7,11 @@ from typing import Annotated, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlmodel import SQLModel, create_engine
 
-from discovery.aggregation import build_behavior_summary, build_behavior_summary_for_period
+from discovery.aggregation import (
+    build_behavior_summary,
+    build_behavior_summary_for_period,
+    build_notification_candidates,
+)
 from discovery.gemini_prompts import DiscoveryGeminiClient
 from discovery.models import (
     CriterionResponse,
@@ -30,6 +34,7 @@ from discovery.models import (
     InterestSignal,
     InterestSignalCreate,
     InterestSignalResponse,
+    NotificationCandidateResponse,
     OnboardingUpdateRequest,
     PsychAxisResult,
     PsychAxisResultResponse,
@@ -444,6 +449,22 @@ def get_summary(
         "criteria": criteria,
         "psych_axis_scores": psych_axis_scores,
     }
+
+
+@router.get(
+    "/sessions/{session_id}/notification-candidates",
+    response_model=list[NotificationCandidateResponse],
+)
+def get_notification_candidates(
+    session_id: int,
+    repo: Annotated[DiscoveryRepository, Depends(get_repository)],
+) -> list[NotificationCandidateResponse]:
+    """通知候補となる選択済み実験を、ドメイン状態と共に取得する。"""
+    _require_session(repo, session_id)
+    data = repo.get_summary_data(session_id)
+    return build_notification_candidates(
+        data["experiments"], data["results"]
+    )
 
 
 def _compute_top_domain(summary: dict[str, Any]) -> str:
