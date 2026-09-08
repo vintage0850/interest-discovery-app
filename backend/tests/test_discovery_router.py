@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 from unittest.mock import MagicMock
 
 import pytest
@@ -1151,6 +1152,240 @@ class TestWeeklyNarrativeEndpoints:
         assert response_b.status_code == 200
 
         assert mock_client.generate_weekly_narrative.call_count == 2
+
+
+class TestMonthlyNarrativeEndpoints:
+    def _create_full_session(self, test_client: TestClient) -> int:
+        session = test_client.post("/sessions", json={"student_label": "student-a"}).json()
+        session_id = session["id"]
+        test_client.post(
+            f"/sessions/{session_id}/signals",
+            json={
+                "action_type": "search",
+                "domain": "tech",
+                "content_summary": "Python tutorial",
+                "source": "search_history",
+                "occurred_at": "2026-09-01T10:00:00Z",
+            },
+        )
+
+        mock_client = MagicMock(spec=DiscoveryGeminiClient)
+        mock_client.generate_experiments.return_value = [
+            MagicMock(
+                title="Hello Python",
+                description="Write a one-line print script",
+                domain="tech",
+                planned_minutes=10,
+            ),
+        ]
+        app.dependency_overrides[get_gemini_client] = lambda: mock_client
+        generated = test_client.post(
+            f"/sessions/{session_id}/experiments/generate",
+            json={"n_candidates": 1},
+        ).json()
+        experiment_id = generated[0]["id"]
+        test_client.post(
+            f"/experiments/{experiment_id}/select",
+            json={"selection_note": "note"},
+        )
+        test_client.post(f"/experiments/{experiment_id}/start")
+        test_client.post(
+            f"/experiments/{experiment_id}/complete",
+            json={
+                "enjoyment": 4,
+                "curiosity": 5,
+                "retry_intent": 3,
+                "confidence": 0.8,
+            },
+        )
+        return session_id
+
+    def _freeze_at(self, monkeypatch: pytest.MonkeyPatch, dt: datetime.datetime) -> None:
+        fixed_now = dt
+
+        class _FixedDatetime(datetime.datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return fixed_now
+
+        monkeypatch.setattr("discovery.router.datetime.datetime", _FixedDatetime)
+
+    def test_get_monthly_narrative(
+        self, test_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        session_id = self._create_full_session(test_client)
+        self._freeze_at(
+            monkeypatch,
+            datetime.datetime(2026, 9, 15, 12, 0, 0, tzinfo=datetime.timezone.utc),
+        )
+
+        mock_client = MagicMock(spec=DiscoveryGeminiClient)
+        mock_client.generate_monthly_narrative.return_value = {
+            "monthly_insights": "技術分野への興味が強い",
+            "progress_wave": "後半に活動が集中した",
+            "continuity_insight": "継続的に取り組めている",
+        }
+        app.dependency_overrides[get_gemini_client] = lambda: mock_client
+
+        response = test_client.get(f"/sessions/{session_id}/report/monthly-narrative")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["monthly_insights"] == "技術分野への興味が強い"
+        assert data["progress_wave"] == "後半に活動が集中した"
+        assert data["continuity_insight"] == "継続的に取り組めている"
+        assert data["period_start"] == "2026-08-02"
+        assert data["period_end_exclusive"] == "2026-09-01"
+
+    def test_get_monthly_narrative_session_not_found(
+        self, test_client: TestClient
+    ) -> None:
+        response = test_client.get("/sessions/999/report/monthly-narrative")
+        assert response.status_code == 404
+
+    def test_get_monthly_narrative_gemini_error(
+        self, test_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        session_id = self._create_full_session(test_client)
+        self._freeze_at(
+            monkeypatch,
+            datetime.datetime(2026, 9, 15, 12, 0, 0, tzinfo=datetime.timezone.utc),
+        )
+
+        mock_client = MagicMock(spec=DiscoveryGeminiClient)
+        mock_client.generate_monthly_narrative.side_effect = ValueError("malformed json")
+        app.dependency_overrides[get_gemini_client] = lambda: mock_client
+
+        response = test_client.get(f"/sessions/{session_id}/report/monthly-narrative")
+        assert response.status_code == 503
+        assert "Monthly narrative generation is currently unavailable" in response.json()["detail"]
+
+    def test_get_monthly_narrative_returns_503_when_api_key_missing(
+        self,
+        test_client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        session_id = self._create_full_session(test_client)
+        self._freeze_at(
+            monkeypatch,
+            datetime.datetime(2026, 9, 15, 12, 0, 0, tzinfo=datetime.timezone.utc),
+        )
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+        app.dependency_overrides[get_gemini_client] = lambda: DiscoveryGeminiClient(api_key=None)
+
+        response = test_client.get(f"/sessions/{session_id}/report/monthly-narrative")
+        assert response.status_code == 503
+        assert "GEMINI_API_KEY" not in response.text
+
+    def test_get_monthly_narrative_calls_client_with_metrics(
+        self, test_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        session_id = self._create_full_session(test_client)
+        self._freeze_at(
+            monkeypatch,
+            datetime.datetime(2026, 9, 15, 12, 0, 0, tzinfo=datetime.timezone.utc),
+        )
+
+        mock_client = MagicMock(spec=DiscoveryGeminiClient)
+        mock_client.generate_monthly_narrative.return_value = {
+            "monthly_insights": "技術分野への興味が強い",
+            "progress_wave": "後半に活動が集中した",
+            "continuity_insight": "継続的に取り組めている",
+        }
+        app.dependency_overrides[get_gemini_client] = lambda: mock_client
+
+        test_client.get(f"/sessions/{session_id}/report/monthly-narrative")
+
+        call_args = mock_client.generate_monthly_narrative.call_args
+        recent = call_args.args[0]
+        previous = call_args.args[1]
+        assert "completion_rate" in recent
+        assert "active_days" in recent
+        assert "progress_segments" in recent
+        assert "completion_rate" in previous
+        assert "active_days" in previous
+
+    def test_get_monthly_narrative_uses_cache_on_second_call(
+        self, test_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        session_id = self._create_full_session(test_client)
+        self._freeze_at(
+            monkeypatch,
+            datetime.datetime(2026, 9, 15, 12, 0, 0, tzinfo=datetime.timezone.utc),
+        )
+
+        mock_client = MagicMock(spec=DiscoveryGeminiClient)
+        mock_client.generate_monthly_narrative.return_value = {
+            "monthly_insights": "技術分野への興味が強い",
+            "progress_wave": "後半に活動が集中した",
+            "continuity_insight": "継続的に取り組めている",
+        }
+        app.dependency_overrides[get_gemini_client] = lambda: mock_client
+
+        response1 = test_client.get(f"/sessions/{session_id}/report/monthly-narrative")
+        assert response1.status_code == 200
+        data1 = response1.json()
+
+        response2 = test_client.get(f"/sessions/{session_id}/report/monthly-narrative")
+        assert response2.status_code == 200
+        data2 = response2.json()
+
+        assert mock_client.generate_monthly_narrative.call_count == 1
+        assert data1 == data2
+
+    def test_get_monthly_narrative_cache_isolated_per_session(
+        self, test_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        session_id_a = self._create_full_session(test_client)
+        session_id_b = self._create_full_session(test_client)
+        self._freeze_at(
+            monkeypatch,
+            datetime.datetime(2026, 9, 15, 12, 0, 0, tzinfo=datetime.timezone.utc),
+        )
+
+        mock_client = MagicMock(spec=DiscoveryGeminiClient)
+        mock_client.generate_monthly_narrative.return_value = {
+            "monthly_insights": "技術分野への興味が強い",
+            "progress_wave": "後半に活動が集中した",
+            "continuity_insight": "継続的に取り組めている",
+        }
+        app.dependency_overrides[get_gemini_client] = lambda: mock_client
+
+        response_a = test_client.get(f"/sessions/{session_id_a}/report/monthly-narrative")
+        assert response_a.status_code == 200
+
+        response_b = test_client.get(f"/sessions/{session_id_b}/report/monthly-narrative")
+        assert response_b.status_code == 200
+
+        assert mock_client.generate_monthly_narrative.call_count == 2
+
+    def test_get_monthly_narrative_cache_isolated_per_month(
+        self, test_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        session_id = self._create_full_session(test_client)
+
+        mock_client = MagicMock(spec=DiscoveryGeminiClient)
+        mock_client.generate_monthly_narrative.return_value = {
+            "monthly_insights": "技術分野への興味が強い",
+            "progress_wave": "後半に活動が集中した",
+            "continuity_insight": "継続的に取り組めている",
+        }
+        app.dependency_overrides[get_gemini_client] = lambda: mock_client
+
+        self._freeze_at(
+            monkeypatch,
+            datetime.datetime(2026, 9, 15, 12, 0, 0, tzinfo=datetime.timezone.utc),
+        )
+        response_sep = test_client.get(f"/sessions/{session_id}/report/monthly-narrative")
+        assert response_sep.status_code == 200
+
+        self._freeze_at(
+            monkeypatch,
+            datetime.datetime(2026, 10, 15, 12, 0, 0, tzinfo=datetime.timezone.utc),
+        )
+        response_oct = test_client.get(f"/sessions/{session_id}/report/monthly-narrative")
+        assert response_oct.status_code == 200
+
+        assert mock_client.generate_monthly_narrative.call_count == 2
 
 
 class TestPsychAxisSurveyEndpoints:

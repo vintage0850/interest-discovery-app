@@ -10,6 +10,7 @@ from sqlmodel import SQLModel, create_engine
 from discovery.aggregation import (
     build_behavior_summary,
     build_behavior_summary_for_period,
+    build_monthly_metrics,
     build_notification_candidates,
 )
 from discovery.gemini_prompts import DiscoveryGeminiClient
@@ -34,6 +35,7 @@ from discovery.models import (
     InterestSignal,
     InterestSignalCreate,
     InterestSignalResponse,
+    MonthlyNarrativeResponse,
     NotificationCandidateResponse,
     OnboardingUpdateRequest,
     PsychAxisResult,
@@ -533,4 +535,89 @@ def get_weekly_narrative(
     return {
         "weekly_insights": saved.weekly_insights,
         "change_from_past": saved.change_from_past,
+    }
+
+
+@router.get(
+    "/sessions/{session_id}/report/monthly-narrative",
+    response_model=MonthlyNarrativeResponse,
+)
+def get_monthly_narrative(
+    session_id: int,
+    repo: Annotated[DiscoveryRepository, Depends(get_repository)],
+    client: Annotated[DiscoveryGeminiClient, Depends(get_gemini_client)],
+) -> dict[str, str]:
+    """直近30日とその前30日を比較した月次AIナラティブを取得する。
+
+    Gemini呼び出しは数秒〜十数秒かかるため、同一UTC月内はセッション単位で
+    キャッシュを再利用する。
+    """
+    _require_session(repo, session_id)
+    now = datetime.datetime.now(datetime.timezone.utc)
+    period_end = datetime.datetime(
+        now.year, now.month, 1, 0, 0, 0, tzinfo=datetime.timezone.utc
+    )
+    cache_month = period_end.strftime("%Y-%m")
+
+    cached = repo.get_monthly_narrative_cache(session_id, cache_month)
+    if cached is not None:
+        return {
+            "period_start": (
+                period_end - datetime.timedelta(days=30)
+            ).strftime("%Y-%m-%d"),
+            "period_end_exclusive": period_end.strftime("%Y-%m-%d"),
+            "monthly_insights": cached.monthly_insights,
+            "progress_wave": cached.progress_wave,
+            "continuity_insight": cached.continuity_insight,
+        }
+
+    recent_start = period_end - datetime.timedelta(days=30)
+    previous_start = period_end - datetime.timedelta(days=60)
+
+    data = repo.get_summary_data(session_id)
+    recent_metrics = build_monthly_metrics(
+        data["signals"], data["experiments"], recent_start, period_end
+    )
+    previous_metrics = build_monthly_metrics(
+        data["signals"], data["experiments"], previous_start, recent_start
+    )
+
+    recent_behavior = build_behavior_summary_for_period(
+        data["signals"], data["experiments"], data["results"], recent_start, period_end
+    ).model_dump()
+    previous_behavior = build_behavior_summary_for_period(
+        data["signals"],
+        data["experiments"],
+        data["results"],
+        previous_start,
+        recent_start,
+    ).model_dump()
+
+    recent_metrics["behavior_summary"] = recent_behavior
+    previous_metrics["behavior_summary"] = previous_behavior
+
+    try:
+        narrative_data = client.generate_monthly_narrative(
+            recent_metrics, previous_metrics
+        )
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Monthly narrative generation is currently unavailable",
+        ) from exc
+
+    saved = repo.save_monthly_narrative_cache(
+        session_id,
+        cache_month,
+        narrative_data["monthly_insights"],
+        narrative_data["progress_wave"],
+        narrative_data["continuity_insight"],
+    )
+
+    return {
+        "period_start": recent_start.strftime("%Y-%m-%d"),
+        "period_end_exclusive": period_end.strftime("%Y-%m-%d"),
+        "monthly_insights": saved.monthly_insights,
+        "progress_wave": saved.progress_wave,
+        "continuity_insight": saved.continuity_insight,
     }
