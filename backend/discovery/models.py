@@ -403,6 +403,34 @@ class WeeklyNarrativeCache(SQLModel, table=True):
     )
 
 
+class MonthlyNarrativeCache(SQLModel, table=True):
+    """月次ナラティブ（Gemini生成）のセッション×月単位のキャッシュ。
+
+    同一セッション・同一UTC月(YYYY-MM)では初回に確定したナラティブを再利用する。
+    """
+
+    __tablename__ = "monthly_narrative_cache"
+
+    id: Optional[int] = SQLField(default=None, primary_key=True)
+    session_id: int = SQLField(foreign_key="discovery_session.id", index=True)
+    cache_month: str = SQLField(sa_type=String(7), index=True)
+    monthly_insights: str = SQLField(sa_type=String(200))
+    progress_wave: str = SQLField(sa_type=String(200))
+    continuity_insight: str = SQLField(sa_type=String(200))
+    created_at: datetime.datetime = SQLField(
+        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc),
+        sa_type=UTCDateTime(),
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "session_id",
+            "cache_month",
+            name="uq_monthly_narrative_cache_session_month",
+        ),
+    )
+
+
 class Criterion(SQLModel, table=True):
     """生徒に同感された仮説から昇格した、意思決定の個人的な基準。"""
 
@@ -639,6 +667,24 @@ class SessionSummary(SQLModel):
 class WeeklyNarrativeResponse(SQLModel):
     weekly_insights: str = Field(..., min_length=1, max_length=200)
     change_from_past: str = Field(..., min_length=1, max_length=200)
+
+
+class MonthlyNarrativeResponse(SQLModel):
+    period_start: str = Field(..., min_length=10, max_length=10)
+    period_end_exclusive: str = Field(..., min_length=10, max_length=10)
+    monthly_insights: str = Field(..., min_length=1, max_length=200)
+    progress_wave: str = Field(..., min_length=1, max_length=200)
+    continuity_insight: str = Field(..., min_length=1, max_length=200)
+
+    @field_validator("monthly_insights", "progress_wave", "continuity_insight")
+    @classmethod
+    def _validate_trimmed_text(cls, value: str) -> str:
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("field must not be empty or whitespace only")
+        if len(trimmed) > 200:
+            raise ValueError("field must be 200 characters or less after trimming")
+        return trimmed
 
 
 class NotificationCandidateDomainStatus(str, enum.Enum):
