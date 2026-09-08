@@ -5370,3 +5370,144 @@ Geminiには、上記2レーンそれぞれについて対象ファイルを最�
 **次の担当:**
 1. **Lane A (backend):** Kimiが Work Unit A-1 〜 A-4 に従い TDD で順次実装（`models.py`・`repository.py` の実装テストから開始）。
 2. **Lane B (Android/KMP＋ホスト):** Antigravityが Work Unit B-1 〜 B-8 に従い TDD で順次実装（`DiscoveryModels.kt`・`FakeDiscoveryRepository.kt` の定義テストから開始）。
+
+---
+
+### 2026-09-08 22:2x 両レーン実行結果とエスカレーション
+
+- **Lane A (Kimi / backend): 完了。** `_ai-routing\kimi-task.ps1` のラッパーはタイムアウト(2400秒)判定で「未完了」と報告したが、実際には直後(22:19)に完了していた。worktree `.worktrees/monthly-narrative-report`(ブランチ `feature/monthly-narrative-report`)に以下6コミットがクリーンな状態で存在:
+  - `61cfe41` 設計判断記録 / `5b1b54d` ディスパッチ方針変更 / `e85d1aa` work unit分割記録
+  - `d04f96c` MonthlyNarrativeCache/Response追加
+  - `caf3ab2` 月次指標集計追加
+  - `27592f6` 月次ナラティブGeminiプロンプト追加
+  - `3bf164f` 月次ナラティブキャッシュリポジトリ追加
+  - `8c7fe9d` 月次ナラティブendpoint追加
+  - `8e1a11f` レビュー指摘の修正(active_days境界・rate丸め・改行拒否・`_as_utc`抽出・並行INSERT/閏年/aware-datetimeテスト追加)
+  - **未対応:** 完了報告ファイル(`docs/quality-review/2026-09-08-案件27-laneA-backend-report.md`)が作成されていない。第3ゲートレビュー前にCodexが直接worktreeのdiffを確認する必要あり。
+
+- **Lane B (Antigravity / Android・KMP): タイムアウトで異常終了(exit 1)。** `compileDebugAndroidTestSources` のコンパイル完了待ちで `agy.exe: Error: timeout waiting for response` が発生し、40分でタイムアウト。ワークツリーではなく本体作業ディレクトリを直接編集しており、**未コミットの変更が残存**:
+  - 変更(M): `app/proguard-rules.pro`, `MainActivityLaunchTest.kt`, `MainActivity.kt`, `strings.xml`, `DiscoverySettingsStorage.android.kt`, `DiscoveryModels.kt`, `DiscoveryRepository.kt`, `DiscoveryState.kt`, `FakeDiscoveryRepository.kt`, `RealDiscoveryRepository.kt`, `App.kt`, `DiscoveryMainScaffold.kt`, `ReportTabScreen.kt`, `FakeDiscoveryRepositoryTest.kt`, `RealDiscoveryRepositoryTest.kt`
+  - 新規(??): `DiscoveryPeriodicReportWorkerTest.kt`, `DiscoveryPeriodicReportScheduler.kt`, `DiscoveryPeriodicReportWorker.kt`, `DiscoveryReportNotifier.kt`, `DiscoveryPeriodicReportRulesTest.kt`, `PeriodicReportNotificationTest.kt`
+  - Work Unit B-1〜B-8に対応するファイルは全て存在するが、TDDのRed/Green確認が最後まで回り切ったか(特にB-6〜B-8のWorkManager/Notifier/統合テスト)は未検証。ビルド・テストが通るか不明な状態でコミットもされていない。
+  - ユーザー判断: 両レーンを一旦中断し、Codexにエスカレーションする方針。
+
+**次のアクション:** Codexに本状況(Lane A完了・要レビュー、Lane B未完了・ビルド未確認)を渡し、(1) Lane Aの第3/4ゲートレビュー可否、(2) Lane Bの残作業をどう引き継ぐか(Kimi単独で再開/Antigravity再挑戦/Codex自身が巻き取る)の判断を仰ぐ。
+
+**Codexの判断(2026-09-08 22:3x):**
+1. Lane A: 完了報告ファイルを待たず、今すぐ第3/4ゲートレビュー対象にしてよい。クリーンな6コミットとdiffが一次証跡。報告書はレビュー結果を含めて事後補完でよい。
+2. Lane B: **Codex自身が現状を保全したまま、ビルド・テスト確認から巻き取る。** Antigravity再挑戦は同じタイムアウト再発の懸念、Kimiへの即時移管は未検証コードの理解コストが高いため非推奨。まず未コミット差分を棚卸しし、失敗を再現して残作業を確定する。
+
+**ユーザー承認: Codexがそのまま巻き取り、Lane Bのビルド・テスト確認〜残作業完了まで担当する(2026-09-08)。**
+
+---
+
+## 案件28: 設計仕様書との差分是正(Action Taxonomy / AI Safety)
+
+Gemini製の設計仕様書「Mikke — Mobile Application Design Specification.md」とコードベースを突き合わせた結果、優先度「高」の2件についてユーザーが実装を希望(2026-09-08)。ClaudeがgeminI_prompts.py / models.py / router.py / aggregation.pyを確認し、以下の設計判断を記録する。
+
+### 28-A. AI Safety強化(仕様書§33)
+
+**現状:** `backend/discovery/gemini_prompts.py` の3つのsystem instruction(`_EXPERIMENT_SYSTEM_INSTRUCTION` / `_HYPOTHESIS_SYSTEM_INSTRUCTION` / `_WEEKLY_NARRATIVE_SYSTEM_INSTRUCTION`)には「データに基づかない断定はしない」「生徒の能力や将来を決めつけない」という汎用的な禁止事項はあるが、仕様書§33が列挙する具体的な推論禁止対象(精神疾患・発達障害・IQ・性的指向・政治思想・宗教・医療状態)は明記されていない。
+
+**設計判断:** 3つのsystem instructionすべてに、仕様書§33の列挙項目を明示した「絶対にやらないこと」を追記する。文言は日本語で以下相当:
+```
+- 精神疾患、発達障害、IQ、性的指向、政治思想、宗教、医療状態について、推論・言及・示唆をしない
+```
+既存の「データに基づかない断定はしない」等はそのまま維持し、追加行として挿入する。
+
+**確認済みの良い点:** §34(確信度不足時は非生成)は`backend/discovery/router.py`の`MIN_HYPOTHESIS_CONFIDENCE`ゲート(367行目付近、docstringに「§34」の参照コメントあり)で既に実装済み。ここは変更不要。ただし週次/月次ナラティブ生成には同様の確信度ゲートが無い(ナラティブはconfidenceフィールドを持たない設計のため)。これは仕様上「人格診断」ではなく「活動要約」なので必須ではないと判断し、今回のスコープ外とする。
+
+**影響ファイル(想定):** `backend/discovery/gemini_prompts.py`(system instruction 3箇所)、`backend/tests/test_discovery_gemini_prompts.py`(system instructionの禁止事項が含まれることを検証するテストを追加)。
+
+### 28-B. Action Taxonomy追加(仕様書§11・§13)
+
+**現状:** 仕様書§11は行動を EXPLORE/COMPARE/ANALYZE/CREATE/IMPROVE/ORGANIZE/PRACTICE/COMMUNICATE/DECIDE/REFLECT の10分類(複数ラベル・強度付き、例: `COMPARE=0.7, DECIDE=0.3`)に分類することを要求している。現在の実装の`ActionType`(`backend/discovery/models.py`)は`search/view/save/share/create/like/comment/EXPERIMENT_*`という「生のUI操作種別」であり、仕様書の10分類とは別物。また`DomainType`(tech/art/music等)は仕様書§20の「探索ドメイン」に相当し、こちらは仕様と一致している。現状、Evidence生成(`aggregation.py`)は決定的な統計処理(signal_count・avg_confidence等)のみで、仕様書§11の行動タクソノミーに相当する分類ロジックは存在しない。
+
+**設計判断:** 既存の`ActionType`(UI操作記録)は変更しない(過去データ・フロントエンドとの互換性を壊すため)。代わりに、仕様書§11のタクソノミーを**Evidence構築時の新しい分類軸**として追加する:
+
+1. `Evidence`モデルに `behavior_categories: dict[str, float]`(JSON、例: `{"COMPARE": 0.7, "DECIDE": 0.3}`)フィールドを追加する。
+2. `DiscoveryGeminiClient`に新しいメソッド `classify_behavior_categories(evidences, experiments, results)` を追加し、仕様書§11の10分類のみを許可値とする新しいsystem instructionで分類させる(§27の「単一メガプロンプト禁止」に従い、既存の`update_hypothesis`とは別のGemini呼び出しにする)。
+3. `update_hypothesis`のフロー内(router.py `refresh_hypothesis`相当)で、Evidence構築後にこの分類を呼び出し、`Evidence.behavior_categories`を更新してから保存する。
+4. **今回のスコープ:** バックエンドのみ。UI表示(Discovery Profileへの反映等)は仕様書§18のフォーマット変更を伴うため次フェーズとし、今回は含めない。
+
+**スコープを絞った理由:** フル実装(UI反映・DB全体のcategory再集計バッチ等)は影響範囲が大きく、Codexの判断を仰がず一気に実装すると仕様書側の記述とも乖離するリスクがある。まずバックエンドでデータを蓄積し始める最小実装とし、UI反映は別案件として後日判断する。
+
+**影響ファイル(想定):** `backend/discovery/models.py`(Evidence拡張・マイグレーション要否確認)、`backend/discovery/gemini_prompts.py`(新system instruction・新メソッド)、`backend/discovery/router.py`(呼び出し追加)、`backend/tests/`配下に新規テスト。
+
+### ディスパッチ方針
+
+Lane B(Codex)が本体作業ディレクトリを編集中のため、案件28は新規worktree `.worktrees/action-taxonomy-safety`(ブランチ`feature/action-taxonomy-safety`、`discovery-backend`から分岐)でKimiに実装させる。バックエンドのみのため単一レーン。TDD必須。完了後、報告ファイルを`docs/quality-review/2026-09-08-案件28-taxonomy-safety-report.md`に作成させる。
+
+**結果(2026-09-08 22:44完了):** Kimiが2コミット(`a3532ee` feat、`4c0db41` docs)でクリーンに完了。300テスト全てPASS。TASK.md統合とCodexレビューは未実施(次のアクション)。
+
+---
+
+## 案件29: 「LINE連携」ボタンが無反応(バグ修正)
+
+**報告:** ユーザーから「設定画面のLINE連携ボタンを押しても何も起きない」と報告(2026-09-08)。
+
+**根本原因(Claudeが`superpowers:systematic-debugging`で特定):** `shared/src/commonMain/kotlin/.../ui/discovery/SettingsTabScreen.kt` の「LINE連携」行は `onClick = { activeModal = "line" }` でローカルstate `activeModal` を更新するだけで、この値を読み取って何かを表示する処理がファイル内に一切存在しない(`Dialog`/`Modal`/`Sheet`/`Popup`いずれも0件)。**同じ理由で「アカウントを作成」「通知設定」「プライバシー」「利用規約」「プライバシーポリシー」の各行も同様に無反応**(未消費のstateへの書き込みのみで実装が止まっている)。すぐ下の「Googleカレンダー連携」行だけは`LocalGoogleCalendarLinkHandler`という別の仕組み(`App.kt`で`staticCompositionLocalOf`定義、`MainActivity.kt`でAndroid実装を注入)で実際に機能している。
+
+**設計判断:** LINE公式アカウントの友だち追加URL(`https://lin.ee/utP8awy`、ユーザー提供)を開く。既存のGoogleカレンダー連携と同じ「`staticCompositionLocalOf`をApp.ktに定義し、MainActivity.ktでAndroid実装(Intent等)を注入する」パターンをそのまま踏襲する:
+
+1. `shared/.../ui/App.kt` に `LocalLineLinkHandler = staticCompositionLocalOf<(() -> Unit)?> { null }` を追加。
+2. `app/.../MainActivity.kt` の `CompositionLocalProvider` に `LocalLineLinkHandler provides { /* Intent.ACTION_VIEW で https://lin.ee/utP8awy を開く */ }` を追加(URLは定数化し、`BuildConfig`等に埋め込むかコード内定数かはKimiの判断に委ねる)。
+3. `SettingsTabScreen.kt` のLINE連携行の `onClick` を `activeModal = "line"` から `LocalLineLinkHandler.current?.invoke()` に変更。
+
+**今回のスコープ:** LINE連携ボタンの修正のみ。「アカウントを作成」等、他の無反応ボタンは同根の問題だが影響範囲・仕様(各ボタンで本来何を表示すべきか)が未確定のため、別案件として扱う(スコープ外)。
+
+**影響ファイル(想定):** `shared/src/commonMain/kotlin/.../ui/App.kt`、`app/src/main/java/.../MainActivity.kt`、`shared/.../ui/discovery/SettingsTabScreen.kt`、対応するテスト。
+
+**ディスパッチ方針:** 本体作業ディレクトリ(Codex Lane B完了済みでクリーン)でKimiに実装させる。TDD必須。完了後、報告ファイルを`docs/quality-review/2026-09-08-案件29-line-link-button-report.md`に作成させる。
+
+---
+
+## 案件30: プライバシー機能 — セッション(アカウント)削除(仕様書§32、優先度「中」)
+
+**現状(Claude調査済み):** `backend/discovery/router.py`にDELETE系エンドポイントが一つも存在しない。設定画面の「リセット」ボタン(`onResetData`)は`RealDiscoveryRepository.resetAllData()`(407行目)を呼ぶが、実装は`sessionId = null; sessionStorage.clear()`という**端末ローカルのセッション参照クリアのみ**で、サーバー側の`DiscoverySession`とその配下データ(InterestSignal/Evidence/Experiment/ExperimentResult/InterestHypothesis/HypothesisFeedback/PsychAxisResult/UserReflection/WeeklyNarrativeCache/Criterion、計11テーブル)は一切削除されない。ユーザーは「リセットした」つもりでも、サーバーにデータが残り続ける。ティーン対象プロダクトとしてこれは仕様不足というより**実質的なプライバシー上の不整合**と判断する。
+
+なお、Googleカレンダー連携の解除(`GoogleAuthManager.signOut()` + `revokeAccess`)は既に実装済みで対応不要。
+
+**設計判断:**
+1. `backend/discovery/router.py`に `DELETE /sessions/{session_id}` を追加し、上記11テーブルのうちsession_idに紐づく行(または経由参照で辿れる行)をカスケード削除する。
+2. `RealDiscoveryRepository.resetAllData()`が、ローカルクリアの**前に**このDELETE APIを呼ぶよう変更する(API呼び出し失敗時もローカルクリアは実行し、ユーザー体験を壊さない。ただしエラーはログに残す)。
+3. 「データの閲覧」「個別アクティビティ/Insight削除」は今回のスコープ外とする(影響範囲が大きいため別案件で判断)。
+4. 案件27(月次レポート、`feature/monthly-narrative-report`ブランチ)がマージされると`MonthlyNarrativeCache`テーブルも追加されるが、そちらのカスケード削除対応はマージ後の別対応とする(現時点のworktreeには存在しないため)。
+
+**影響ファイル(想定):** `backend/discovery/router.py`、`backend/discovery/repository.py`(カスケード削除ロジック)、`shared/.../discovery/RealDiscoveryRepository.kt`、対応するテスト(backend・KMP双方)。
+
+**ディスパッチ方針:** 新規worktree `.worktrees/privacy-deletion`(ブランチ`feature/privacy-deletion`、`discovery-backend`から分岐)でKimiに実装させる。TDD必須。完了後、報告ファイルを`docs/quality-review/2026-09-08-案件30-privacy-deletion-report.md`に作成させる。
+
+---
+
+## 案件31: Contradiction Handling — 矛盾検出の可視化(仕様書§26、優先度「中」)
+
+**現状(Claude調査済み):** `backend/discovery/aggregation.py`の`_detect_discrepancies()`(216行目)は既に「高評価だが対応する興味シグナルが無いドメイン」という1種類の矛盾を検出し、`BehaviorSummary.discrepancies`フィールドに格納している。しかしこのフィールドはAPIレスポンスのJSON上は存在する(KMP側テストのモックにも`"discrepancies": []`として登場)ものの、**実際にこれを表示するUI画面がどこにも存在しない**。つまり検出ロジックはあるが完全に死んだデータになっている。仕様書§26が要求する「矛盾から探索質問を生成する」ロジックも存在しない。
+
+**設計判断(スコープを絞った最小実装):**
+1. Discovery Profile相当の画面(`DiscoverTabScreen.kt`)に、`discrepancies`が1件以上ある場合のみ表示する「気になる発見」カードを追加する。表示文言は既存の`message`フィールド(バックエンドで生成済み)をそのまま使う。
+2. 仕様書§26の「探索質問生成」は、AIによる動的生成ではなく**固定テンプレート文言**で対応する(コスト・複雑性を抑えるため。例: 「もう一度試してみますか？」的な固定CTA)。動的な問いかけ文生成は将来のAI強化案件とし、今回はスコープ外。
+3. `generate_experiments`(実験候補生成)への矛盾情報の受け渡し(§21優先度2「矛盾のあるエビデンス」)は今回のスコープ外とする(既存のプロンプト構造への影響が大きいため)。
+
+**影響ファイル(想定):** `shared/.../ui/discovery/DiscoverTabScreen.kt`(または該当するDiscovery Profile画面)、対応するUIテスト。バックエンドの`_detect_discrepancies`自体は変更不要(既に動いている)。
+
+**ディスパッチ方針:** 新規worktree `.worktrees/contradiction-handling`(ブランチ`feature/contradiction-handling`、`discovery-backend`から分岐)でKimiに実装させる。TDD必須。完了後、報告ファイルを`docs/quality-review/2026-09-08-案件31-contradiction-handling-report.md`に作成させる。
+
+**結果(2026-09-08 23:3x完了):** Kimiが2コミット(`cf126bf` feat、`74dc0fd` docs)でクリーンに完了。「気になる発見」カードを`DiscoverTabScreen.kt`に追加。TDD Red→Green確認済み(タイトル絵文字・スクロール問題を修正)。195テストPASS、AAR生成成功。
+
+---
+
+## 2026-09-08 23:4x 案件27〜31 統合まとめ
+
+本日実施した5案件すべてがクリーンなコミットで完了。ブランチ整理・マージをClaudeが実施する。
+
+| 案件 | 内容 | ブランチ/場所 | 状態 |
+|---|---|---|---|
+| 27 Lane A | 月次レポートbackend | `feature/monthly-narrative-report` | 完了・未マージ |
+| 27 Lane B | 月次レポートAndroid/KMP+ホスト | `discovery-backend`直接(Codexが直接コミット) | 完了・マージ済み |
+| 28 | Action Taxonomy + AI Safety | `feature/action-taxonomy-safety` | 完了・未マージ |
+| 29 | LINE連携ボタン修正 | `discovery-backend`直接(本体ディレクトリで実装) | 完了・マージ済み |
+| 30 | プライバシー削除API | `feature/privacy-deletion` | 完了・未マージ |
+| 31 | 矛盾検出のUI可視化 | `feature/contradiction-handling` | 完了・未マージ |
+
+**次のアクション:** `feature/monthly-narrative-report` → `feature/action-taxonomy-safety` → `feature/privacy-deletion` → `feature/contradiction-handling` の順に`discovery-backend`へマージし、各マージ後にバックエンド/KMPテストを実行して健全性を確認する。コンフリクトが発生した場合、機械的に解決できない内容判断が必要なものはCodexに判断を仰ぐ。全マージ後、Codexに最終ゲートレビュー(ビルド・テスト・仕様照合)を依頼する。
