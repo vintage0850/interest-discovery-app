@@ -73,6 +73,116 @@ def build_behavior_summary_for_period(
     return build_behavior_summary(filtered_signals, filtered_experiments, filtered_results)
 
 
+def build_monthly_metrics(
+    signals: list[InterestSignal],
+    experiments: list[Experiment],
+    start: datetime.datetime,
+    end: datetime.datetime,
+) -> dict[str, Any]:
+    """指定した期間の月次レポート用メトリクスを決定論的に計算する。
+
+    期間は ``[start, end)`` で半開区間として扱う。
+    月次専用メトリクス（完了率・アクティブ日数・進捗の波）を返す。
+    """
+
+    def _as_utc(dt: datetime.datetime) -> datetime.datetime:
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=datetime.timezone.utc)
+        return dt.astimezone(datetime.timezone.utc)
+
+    utc_start = _as_utc(start)
+    utc_end = _as_utc(end)
+
+    started_experiments: list[Experiment] = []
+    for experiment in experiments:
+        if experiment.started_at is None:
+            continue
+        started_at = _as_utc(experiment.started_at)
+        if utc_start <= started_at < utc_end:
+            started_experiments.append(experiment)
+
+    started_experiment_count = len(started_experiments)
+    completed_started_experiment_count = 0
+    for experiment in started_experiments:
+        if experiment.completed_at is not None:
+            completed_at = _as_utc(experiment.completed_at)
+            if utc_start <= completed_at < utc_end:
+                completed_started_experiment_count += 1
+
+    completion_rate: float | None = None
+    if started_experiment_count > 0:
+        completion_rate = (
+            completed_started_experiment_count / started_experiment_count
+        )
+
+    completed_experiments_in_period: list[Experiment] = []
+    for experiment in experiments:
+        if (
+            experiment.status == ExperimentStatus.COMPLETED.value
+            and experiment.completed_at is not None
+        ):
+            completed_at = _as_utc(experiment.completed_at)
+            if utc_start <= completed_at < utc_end:
+                completed_experiments_in_period.append(experiment)
+
+    active_dates: set[datetime.date] = set()
+    for signal in signals:
+        if signal.created_at is not None:
+            created_at = _as_utc(signal.created_at)
+            if utc_start <= created_at < utc_end:
+                active_dates.add(created_at.date())
+    for experiment in started_experiments:
+        started_at = _as_utc(experiment.started_at)
+        active_dates.add(started_at.date())
+        if experiment.completed_at is not None:
+            completed_at = _as_utc(experiment.completed_at)
+            if utc_start <= completed_at < utc_end:
+                active_dates.add(completed_at.date())
+
+    active_days = len(active_dates)
+    active_day_rate = active_days / 30.0
+
+    segment_starts = [
+        utc_start,
+        utc_start + datetime.timedelta(days=10),
+        utc_start + datetime.timedelta(days=20),
+    ]
+    progress_segments: list[dict[str, int]] = []
+    for i, seg_start in enumerate(segment_starts):
+        seg_end = utc_end if i == len(segment_starts) - 1 else segment_starts[i + 1]
+        seg_active_dates: set[datetime.date] = set()
+        seg_completed_count = 0
+        for experiment in completed_experiments_in_period:
+            completed_at = _as_utc(experiment.completed_at)
+            if seg_start <= completed_at < seg_end:
+                seg_completed_count += 1
+                seg_active_dates.add(completed_at.date())
+        for signal in signals:
+            if signal.created_at is not None:
+                created_at = _as_utc(signal.created_at)
+                if utc_start <= created_at < utc_end and seg_start <= created_at < seg_end:
+                    seg_active_dates.add(created_at.date())
+        for experiment in started_experiments:
+            started_at = _as_utc(experiment.started_at)
+            if seg_start <= started_at < seg_end:
+                seg_active_dates.add(started_at.date())
+        progress_segments.append(
+            {
+                "completed_experiment_count": seg_completed_count,
+                "active_days": len(seg_active_dates),
+            }
+        )
+
+    return {
+        "started_experiment_count": started_experiment_count,
+        "completed_started_experiment_count": completed_started_experiment_count,
+        "completion_rate": completion_rate,
+        "active_days": active_days,
+        "active_day_rate": active_day_rate,
+        "progress_segments": progress_segments,
+    }
+
+
 def build_behavior_summary(
     signals: list[InterestSignal],
     experiments: list[Experiment],
