@@ -49,6 +49,7 @@ fun DiscoveryMainScaffold(
     val exploreUiState by discoveryState.exploreState.collectAsState()
     val reportUiState by discoveryState.reportState.collectAsState()
     val settingsUiState by discoveryState.settingsState.collectAsState()
+    val focusedReportType by discoveryState.focusedReportType.collectAsState()
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -129,7 +130,8 @@ fun DiscoveryMainScaffold(
                 AppTab.REPORT -> ReportTabScreen(
                     reportState = reportUiState,
                     onRetry = { discoveryState.loadReportData() },
-                    onReflectionListClick = onReflectionListClick
+                    onReflectionListClick = onReflectionListClick,
+                    focusReportType = focusedReportType
                 )
                 AppTab.SETTINGS -> SettingsTabScreen(
                     settingsState = settingsUiState,

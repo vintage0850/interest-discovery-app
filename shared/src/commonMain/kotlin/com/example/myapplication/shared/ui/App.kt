@@ -80,6 +80,8 @@ fun App(
     enableDiscoveryHttpLogging: Boolean = false,
     discoveryBaseUrl: String = "http://localhost:8000",
     notificationExperimentId: String? = null,
+    notificationReportType: String? = null,
+    notificationSessionId: Int? = null,
     isGoogleCalendarLinked: Boolean = false,
     modifier: Modifier = Modifier
 ) {
@@ -115,6 +117,19 @@ fun App(
                 discoveryState.onNotificationTapped(id) {
                     navController.navigate(DiscoveryDetail) { launchSingleTop = true }
                 }
+            }
+        }
+
+        // 案件27：気付きレポート通知タップ時のハンドリング
+        LaunchedEffect(notificationReportType, notificationSessionId) {
+            if (notificationReportType != null || notificationSessionId != null) {
+                discoveryState.onReportNotificationTapped(
+                    reportTypeRaw = notificationReportType,
+                    sessionId = notificationSessionId,
+                    onNavigateToHome = {
+                        navController.popBackStack(DiscoveryHome, inclusive = false)
+                    }
+                )
             }
         }
 

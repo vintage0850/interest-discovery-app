@@ -178,6 +178,9 @@ class DiscoveryState(
     private val _selectedExperiment = MutableStateFlow<Experiment?>(null)
     val selectedExperiment: StateFlow<Experiment?> = _selectedExperiment.asStateFlow()
 
+    private val _focusedReportType = MutableStateFlow<ReportType?>(null)
+    val focusedReportType: StateFlow<ReportType?> = _focusedReportType.asStateFlow()
+
     private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val messages: SharedFlow<String> = _messages.asSharedFlow()
 
@@ -545,6 +548,45 @@ class DiscoveryState(
                 }
             }
         }
+    }
+
+    /**
+     * 週次／月次レポート通知タップ時の処理。
+     * 有効なレポート種別かつアクティブセッションと一致する場合のみ Report タブへ遷移し、対象カードへフォーカスする。
+     * 種別不正・セッション不一致・対象セッションなしの場合は Home へ戻り Snackbar で通知する。
+     */
+    fun onReportNotificationTapped(
+        reportTypeRaw: String?,
+        sessionId: Int?,
+        onNavigateToHome: () -> Unit
+    ) {
+        scope.launch {
+            val reportType = ReportType.fromValue(reportTypeRaw)
+            val activeSessionId = try {
+                repository.getActiveSessionId()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                null
+            }
+            if (reportType == null || sessionId == null || activeSessionId == null || sessionId != activeSessionId) {
+                onNavigateToHome()
+                selectTab(AppTab.HOME)
+                _focusedReportType.value = null
+                val sent = _messages.tryEmit("このレポートは現在表示できません")
+                if (!sent) {
+                    _messages.emit("このレポートは現在表示できません")
+                }
+                return@launch
+            }
+            onNavigateToHome()
+            _focusedReportType.value = reportType
+            selectTab(AppTab.REPORT)
+        }
+    }
+
+    fun clearFocusedReportType() {
+        _focusedReportType.value = null
     }
 
     fun resetAllData(onComplete: () -> Unit) {
