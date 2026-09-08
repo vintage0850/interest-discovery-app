@@ -5511,3 +5511,20 @@ Lane B(Codex)が本体作業ディレクトリを編集中のため、案件28�
 | 31 | 矛盾検出のUI可視化 | `feature/contradiction-handling` | 完了・未マージ |
 
 **次のアクション:** `feature/monthly-narrative-report` → `feature/action-taxonomy-safety` → `feature/privacy-deletion` → `feature/contradiction-handling` の順に`discovery-backend`へマージし、各マージ後にバックエンド/KMPテストを実行して健全性を確認する。コンフリクトが発生した場合、機械的に解決できない内容判断が必要なものはCodexに判断を仰ぐ。全マージ後、Codexに最終ゲートレビュー(ビルド・テスト・仕様照合)を依頼する。
+
+**マージ結果(2026-09-09、Claudeが実施):**
+
+1. `feature/monthly-narrative-report` → コンフリクトなし、自動マージ成功。
+2. `feature/action-taxonomy-safety` → `backend/discovery/gemini_prompts.py`と`backend/tests/test_discovery_gemini_prompts.py`で機械的コンフリクト(月次ナラティブ機能と行動分類機能が同じ挿入位置に追加されたため)。両方の追加を保持する形で解決し、月次ナラティブ・行動分類のsystem instructionにも安全性禁止事項を追加して一貫性を持たせた(コミット`7089d48`)。
+3. `feature/privacy-deletion` → `backend/discovery/repository.py`で同様に機械的コンフリクト(behavior_categories更新メソッドとカスケード削除メソッドが同じ挿入位置)。両方保持で解決、取り残しマーカーを追加修正(コミット`9ee131a`)。
+4. `feature/contradiction-handling` → コンフリクトなし、自動マージ成功。
+
+**マージ後に発覚した問題:** `gradle/libs.versions.toml`で`robolectric`キーが2重定義(案件29由来の4.14と案件31由来の4.14.1)。行ベースのgitマージでは検出されず、`git status`上はコンフリクト表示されなかったが、Gradleビルド時にTOMLパースエラーで発覚。4.14.1に統一して解消(コミット`063057d`)。
+
+**検証結果:**
+- バックエンド: 353テスト全PASS
+- Android/KMP: `:shared:testDebugUnitTest` `:app:testDebugUnitTest` ともに BUILD SUCCESSFUL
+
+**worktree整理:** `.worktrees/{monthly-narrative-report, action-taxonomy-safety, privacy-deletion, contradiction-handling}` は全てマージ済みのため削除済み(2026-09-09)。
+
+**残課題:** Codexによる最終ゲートレビュー(仕様照合含む)は未実施。次回実施すること。
