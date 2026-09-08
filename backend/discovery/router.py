@@ -355,6 +355,23 @@ def update_hypothesis(
     _require_session(repo, session_id)
     evidences = repo.build_evidence(session_id)
     data = repo.get_summary_data(session_id)
+
+    try:
+        category_map = client.classify_behavior_categories(
+            evidences, data["experiments"], data["results"]
+        )
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Behavior category classification is currently unavailable",
+        ) from exc
+
+    if isinstance(category_map, dict):
+        for evidence in evidences:
+            categories = category_map.get(evidence.id)
+            if isinstance(categories, dict):
+                repo.update_evidence_behavior_categories(evidence.id, categories)
+
     try:
         hypothesis_data = client.update_hypothesis(
             evidences, data["experiments"], data["results"]

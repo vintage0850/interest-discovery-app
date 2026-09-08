@@ -83,6 +83,21 @@ class PsychAxis(str, enum.Enum):
     COMMUNICATE = "COMMUNICATE"
 
 
+class BehaviorCategory(str, enum.Enum):
+    """行動分類（Action Taxonomy）の許可値。"""
+
+    EXPLORE = "EXPLORE"
+    COMPARE = "COMPARE"
+    ANALYZE = "ANALYZE"
+    CREATE = "CREATE"
+    IMPROVE = "IMPROVE"
+    ORGANIZE = "ORGANIZE"
+    PRACTICE = "PRACTICE"
+    COMMUNICATE = "COMMUNICATE"
+    DECIDE = "DECIDE"
+    REFLECT = "REFLECT"
+
+
 # ---------------------------------------------------------------------------
 # SQLModel tables
 # ---------------------------------------------------------------------------
@@ -165,6 +180,9 @@ class Evidence(SQLModel, table=True):
     domain: str = SQLField(sa_type=String(32), index=True)
     signal_count: int
     summary_text: str = SQLField(sa_type=String(1000))
+    behavior_categories: Optional[dict[str, float]] = SQLField(
+        default=None, sa_type=JSON
+    )
     created_at: datetime.datetime = SQLField(
         default_factory=lambda: datetime.datetime.now(datetime.timezone.utc),
         sa_type=UTCDateTime(),
@@ -176,6 +194,26 @@ class Evidence(SQLModel, table=True):
     def _validate_domain(self, key: str, value: str) -> str:
         if value not in {d.value for d in DomainType}:
             raise ValueError(f"invalid domain: {value}")
+        return value
+
+    @validates("behavior_categories")
+    def _validate_behavior_categories(
+        self, key: str, value: Optional[dict[str, float]]
+    ) -> Optional[dict[str, float]]:
+        if value is None:
+            return value
+        valid_categories = {c.value for c in BehaviorCategory}
+        for category, score in value.items():
+            if category not in valid_categories:
+                raise ValueError(f"invalid behavior category: {category}")
+            if not isinstance(score, (int, float)) or isinstance(score, bool):
+                raise ValueError(
+                    f"behavior category score must be numeric: {score}"
+                )
+            if score < 0.0 or score > 1.0:
+                raise ValueError(
+                    f"behavior category score must be between 0.0 and 1.0: {score}"
+                )
         return value
 
     @validates("signal_count")
@@ -541,6 +579,7 @@ class EvidenceResponse(SQLModel):
     domain: str
     signal_count: int
     summary_text: str
+    behavior_categories: Optional[dict[str, float]] = None
     created_at: datetime.datetime
 
 

@@ -4,10 +4,20 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from discovery.gemini_prompts import DiscoveryGeminiClient
+import json
+
+from discovery.gemini_prompts import (
+    DiscoveryGeminiClient,
+    _BEHAVIOR_CATEGORY_SYSTEM_INSTRUCTION,
+    _EXPERIMENT_SYSTEM_INSTRUCTION,
+    _HYPOTHESIS_SYSTEM_INSTRUCTION,
+    _MONTHLY_NARRATIVE_SYSTEM_INSTRUCTION,
+    _WEEKLY_NARRATIVE_SYSTEM_INSTRUCTION,
+)
 from discovery.models import (
     ActionType,
     DomainType,
+    Evidence,
     Experiment,
     ExperimentResult,
     ExperimentStatus,
@@ -439,3 +449,27 @@ class TestGenerateMonthlyNarrative:
         assert "progress_segments" in prompt
         assert "直近30日" in prompt
         assert "前の30日" in prompt
+
+
+class TestSystemInstructionsIncludeSafetyConstraints:
+    """28-A: 各 system instruction にセンシティブ属性に関する禁止事項が含まれることを検証する。"""
+
+    def test_experiment_system_instruction_includes_sensitive_attributes(self) -> None:
+        assert "精神疾患" in _EXPERIMENT_SYSTEM_INSTRUCTION
+        assert "医療状態" in _EXPERIMENT_SYSTEM_INSTRUCTION
+
+    def test_hypothesis_system_instruction_includes_sensitive_attributes(self) -> None:
+        assert "精神疾患" in _HYPOTHESIS_SYSTEM_INSTRUCTION
+        assert "医療状態" in _HYPOTHESIS_SYSTEM_INSTRUCTION
+
+    def test_weekly_narrative_system_instruction_includes_sensitive_attributes(self) -> None:
+        assert "精神疾患" in _WEEKLY_NARRATIVE_SYSTEM_INSTRUCTION
+        assert "医療状態" in _WEEKLY_NARRATIVE_SYSTEM_INSTRUCTION
+
+    def test_monthly_narrative_system_instruction_includes_sensitive_attributes(self) -> None:
+        assert "精神疾患" in _MONTHLY_NARRATIVE_SYSTEM_INSTRUCTION
+        assert "医療状態" in _MONTHLY_NARRATIVE_SYSTEM_INSTRUCTION
+
+    def test_behavior_category_system_instruction_includes_sensitive_attributes(self) -> None:
+        assert "精神疾患" in _BEHAVIOR_CATEGORY_SYSTEM_INSTRUCTION
+        assert "医療状態" in _BEHAVIOR_CATEGORY_SYSTEM_INSTRUCTION

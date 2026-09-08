@@ -8,7 +8,15 @@ from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field, field_validator
 
-from discovery.models import DomainType, Evidence, Experiment, ExperimentResult, ExperimentStatus, InterestSignal
+from discovery.models import (
+    BehaviorCategory,
+    DomainType,
+    Evidence,
+    Experiment,
+    ExperimentResult,
+    ExperimentStatus,
+    InterestSignal,
+)
 
 
 def _sanitize_gemini_error_message(exc: Exception) -> str:
@@ -79,6 +87,32 @@ class MonthlyNarrativeCandidate(BaseModel):
         if "\n" in trimmed or "\r" in trimmed:
             raise ValueError("field must not contain line breaks")
         return trimmed
+
+
+class BehaviorCategoryClassification(BaseModel):
+    """1件のエビデンスに対する行動分類（Action Taxonomy）結果。"""
+
+    evidence_id: int
+    categories: dict[str, float] = Field(
+        ..., description="許可された行動分類とその強度（0.0〜1.0）"
+    )
+
+    @field_validator("categories")
+    @classmethod
+    def _validate_categories(cls, value: dict[str, float]) -> dict[str, float]:
+        valid_categories = {c.value for c in BehaviorCategory}
+        for category, score in value.items():
+            if category not in valid_categories:
+                raise ValueError(f"invalid behavior category: {category}")
+            if not isinstance(score, (int, float)) or isinstance(score, bool):
+                raise ValueError(
+                    f"behavior category score must be numeric: {score}"
+                )
+            if score < 0.0 or score > 1.0:
+                raise ValueError(
+                    f"behavior category score must be between 0.0 and 1.0: {score}"
+                )
+        return value
 
 
 class DiscoveryGeminiClient:
@@ -158,6 +192,36 @@ class DiscoveryGeminiClient:
             raise RuntimeError(_sanitize_gemini_error_message(exc)) from exc
         candidate = self._parse_hypothesis_response(response.text or "")
         return candidate.model_dump()
+
+    def classify_behavior_categories(
+        self,
+        evidences: list[Evidence],
+        experiments: list[Experiment],
+        results: list[ExperimentResult],
+    ) -> dict[int, dict[str, float]]:
+        """エビデンスごとに行動分類（Action Taxonomy）を Gemini で判定する。
+
+        許可される分類は EXPLORE/COMPARE/ANALYZE/CREATE/IMPROVE/ORGANIZE/PRACTICE/
+        COMMUNICATE/DECIDE/REFLECT の10種類のみ。強度は 0.0〜1.0。
+        """
+        from google.genai.errors import APIError
+
+        client = self._ensure_client()
+        prompt = self._build_behavior_category_prompt(evidences, experiments, results)
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=_BEHAVIOR_CATEGORY_SYSTEM_INSTRUCTION,
+                    response_mime_type="application/json",
+                    response_schema=list[BehaviorCategoryClassification],
+                ),
+            )
+        except APIError as exc:
+            raise RuntimeError(_sanitize_gemini_error_message(exc)) from exc
+        classifications = self._parse_behavior_category_response(response.text or "")
+        return {c.evidence_id: c.categories for c in classifications}
 
     def generate_weekly_narrative(
         self,
@@ -314,6 +378,77 @@ class DiscoveryGeminiClient:
             raise ValueError("Gemini 応答がオブジェクトではありません")
         return HypothesisCandidate.model_validate(data)
 
+    def _build_behavior_category_prompt(
+        self,
+        evidences: list[Evidence],
+        experiments: list[Experiment],
+        results: list[ExperimentResult],
+    ) -> str:
+        evidence_text = json.dumps(
+            [
+                {
+                    "id": e.id,
+                    "domain": e.domain,
+                    "signal_count": e.signal_count,
+                    "summary_text": e.summary_text,
+                }
+                for e in evidences
+            ],
+            ensure_ascii=False,
+            indent=2,
+        )
+        experiment_text = json.dumps(
+            [
+                {
+                    "title": e.title,
+                    "domain": e.domain,
+                    "planned_minutes": e.planned_minutes,
+                    "actual_minutes": e.actual_minutes,
+                    "status": e.status,
+                    "result": (
+                        {
+                            "enjoyment": r.enjoyment,
+                            "curiosity": r.curiosity,
+                            "retry_intent": r.retry_intent,
+                            "confidence": r.confidence,
+                        }
+                        if (r := next((x for x in results if x.experiment_id == e.id), None))
+                        else None
+                    ),
+                }
+                for e in experiments
+            ],
+            ensure_ascii=False,
+            indent=2,
+        )
+        categories_text = ", ".join(c.value for c in BehaviorCategory)
+        return (
+            "以下は高校生のエビデンス（興味シグナルの集計・要約）と行動実験結果です。\n\n"
+            "【エビデンス】\n"
+            f"{evidence_text}\n\n"
+            "【実験結果】\n"
+            f"{experiment_text}\n\n"
+            "各エビデンスに対し、行動分類を 0.0〜1.0 の強度で付与してください。\n"
+            f"許可される分類は次の10種類のみです: {categories_text}\n"
+            "- 複数の分類を付与してよいですが、関連性の低い分類は 0.0 に近い小さな値にしてください。\n"
+            "- 分類名は上記の文字列をそのまま使用してください。\n"
+            "- 値は必ず 0.0 から 1.0 の範囲内にしてください。"
+        )
+
+    def _parse_behavior_category_response(
+        self, raw: str
+    ) -> list[BehaviorCategoryClassification]:
+        if not raw:
+            raise ValueError("Gemini から空の応答が返りました")
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Gemini 応答の JSON パースに失敗しました: {exc}") from exc
+
+        if not isinstance(data, list):
+            raise ValueError("Gemini 応答が配列ではありません")
+        return [BehaviorCategoryClassification.model_validate(item) for item in data]
+
     def _build_weekly_narrative_prompt(
         self,
         recent_summary: dict[str, Any],
@@ -384,6 +519,11 @@ _EXPERIMENT_SYSTEM_INSTRUCTION = """\
 - スマートフォン1台または身近な道具だけでできる
 - 具体性があり、すぐに始められる
 
+【絶対にやらないこと】
+- データに基づかない断定はしない
+- 生徒の能力や将来を決めつけない
+- 精神疾患、発達障害、IQ、性的指向、政治思想、宗教、医療状態について、推論・言及・示唆をしない
+
 【出力形式】
 以下の JSON スキーマに厳密に従ってください。余計な説明は不要です。
 - title: 実験タイトル（50文字以内）
@@ -405,6 +545,7 @@ _HYPOTHESIS_SYSTEM_INSTRUCTION = """\
 【絶対にやらないこと】
 - データに基づかない断定はしない
 - 生徒の能力や将来を決めつけない
+- 精神疾患、発達障害、IQ、性的指向、政治思想、宗教、医療状態について、推論・言及・示唆をしない
 
 【出力形式】
 以下の JSON スキーマに厳密に従ってください。
@@ -425,6 +566,7 @@ _WEEKLY_NARRATIVE_SYSTEM_INSTRUCTION = """\
 【絶対にやらないこと】
 - データに基づかない断定はしない
 - 生徒の能力や将来を決めつけない
+- 精神疾患、発達障害、IQ、性的指向、政治思想、宗教、医療状態について、推論・言及・示唆をしない
 
 【出力形式】
 以下の JSON スキーマに厳密に従ってください。余計な説明は不要です。
@@ -446,6 +588,7 @@ _MONTHLY_NARRATIVE_SYSTEM_INSTRUCTION = """\
 - 生徒の能力や将来を決めつけない
 - 診断、優劣評価、失敗扱い、他ユーザーとの比較をしない
 - 件数・率・因果関係を捏造しない
+- 精神疾患、発達障害、IQ、性的指向、政治思想、宗教、医療状態について、推論・言及・示唆をしない
 
 【入力メトリクスの補足】
 - completion_rate は「期間内に開始した実験のうち、期間内に完了した割合（百分率・小数1桁）」です。
@@ -458,4 +601,27 @@ _MONTHLY_NARRATIVE_SYSTEM_INSTRUCTION = """\
 - monthly_insights: 直近30日間の全体気づき（200文字以内、改行なし）
 - progress_wave: 進み方の波（200文字以内、改行なし）
 - continuity_insight: 継続のペースに関する気づき（200文字以内、改行なし）
+"""
+
+_BEHAVIOR_CATEGORY_SYSTEM_INSTRUCTION = """\
+あなたは高校生の興味発見を支援するアシスタントです。
+生徒のエビデンス（興味シグナルの集計・要約）と行動実験結果を読み、
+各エビデンスが示す行動パターンを分類してください。
+
+【分類のルール】
+- 許可される分類は次の10種類のみ:
+  EXPLORE, COMPARE, ANALYZE, CREATE, IMPROVE, ORGANIZE, PRACTICE, COMMUNICATE, DECIDE, REFLECT
+- 分類名は上記の英字をそのまま使用すること
+- 強度は 0.0〜1.0 の数値で表すこと
+- 複数の分類を付与してよいが、値はエビデンスとの関連性を反映すること
+
+【絶対にやらないこと】
+- データに基づかない断定はしない
+- 生徒の能力や将来を決めつけない
+- 精神疾患、発達障害、IQ、性的指向、政治思想、宗教、医療状態について、推論・言及・示唆をしない
+
+【出力形式】
+以下の JSON スキーマに厳密に従ってください。余計な説明は不要です。
+- evidence_id: エビデンスのID（整数）
+- categories: {分類名: 強度} のオブジェクト
 """
