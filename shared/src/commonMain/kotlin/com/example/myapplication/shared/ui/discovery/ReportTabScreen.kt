@@ -18,13 +18,18 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.myapplication.shared.discovery.ReportType
 import com.example.myapplication.shared.discovery.ReportUiState
+import kotlinx.datetime.DatePeriod
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.minus
 
 /**
  * レポート（Report）タブ画面。
@@ -36,8 +41,19 @@ fun ReportTabScreen(
     onRetry: () -> Unit,
     onReflectionListClick: () -> Unit,
     onEvidenceListClick: () -> Unit = {},
+    focusReportType: ReportType? = null,
     modifier: Modifier = Modifier
 ) {
+    val scrollState = rememberScrollState()
+
+    LaunchedEffect(focusReportType) {
+        if (focusReportType == ReportType.MONTHLY) {
+            scrollState.animateScrollTo(scrollState.maxValue)
+        } else if (focusReportType == ReportType.WEEKLY) {
+            scrollState.animateScrollTo(0)
+        }
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -46,7 +62,7 @@ fun ReportTabScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(scrollState)
                 .padding(horizontal = DiscoverySpacing.pageHorizontal)
                 .padding(top = DiscoverySpacing.xxxl, bottom = 80.dp)
         ) {
@@ -322,12 +338,17 @@ fun ReportTabScreen(
                     Spacer(modifier = Modifier.height(DiscoverySpacing.base))
 
                     // 4. 過去の自分との変化
+                    val weeklyBorder = if (focusReportType == ReportType.WEEKLY) {
+                        2.dp to DiscoveryColors.Accent
+                    } else {
+                        1.dp to DiscoveryColors.BorderSubtle
+                    }
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(DiscoveryRadius.card))
                             .background(DiscoveryColors.SurfaceSecondary)
-                            .border(1.dp, DiscoveryColors.BorderSubtle, RoundedCornerShape(DiscoveryRadius.card))
+                            .border(weeklyBorder.first, weeklyBorder.second, RoundedCornerShape(DiscoveryRadius.card))
                             .padding(DiscoverySpacing.cardPadding)
                     ) {
                         Text(
@@ -346,8 +367,110 @@ fun ReportTabScreen(
                             lineHeight = 21.sp
                         )
                     }
+
+                    Spacer(modifier = Modifier.height(DiscoverySpacing.base))
+
+                    // 5. 30日間の気付き（月次レポート）
+                    val monthlyBorder = if (focusReportType == ReportType.MONTHLY) {
+                        2.dp to DiscoveryColors.Accent
+                    } else {
+                        1.dp to DiscoveryColors.BorderSubtle
+                    }
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(DiscoveryRadius.card))
+                            .background(DiscoveryColors.Surface)
+                            .border(monthlyBorder.first, monthlyBorder.second, RoundedCornerShape(DiscoveryRadius.card))
+                            .padding(DiscoverySpacing.cardPadding)
+                    ) {
+                        Text(
+                            text = "🌱 30日間の気付き",
+                            color = DiscoveryColors.TextPrimary,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+
+                        Spacer(modifier = Modifier.height(DiscoverySpacing.xs))
+
+                        val monthly = data.monthlyNarrative
+                        val monthlyError = data.monthlyErrorMessage
+                        if (monthlyError != null) {
+                            Text(
+                                text = monthlyError,
+                                color = DiscoveryColors.TextSecondary,
+                                fontSize = 14.sp,
+                                lineHeight = 21.sp
+                            )
+                        } else if (monthly != null) {
+                            val periodText = formatPeriodRange(monthly.periodStart, monthly.periodEndExclusive)
+                            Text(
+                                text = "対象期間: $periodText",
+                                color = DiscoveryColors.TextSecondary,
+                                fontSize = 12.sp
+                            )
+
+                            Spacer(modifier = Modifier.height(DiscoverySpacing.sm))
+
+                            Text(
+                                text = "全体の気付き",
+                                color = DiscoveryColors.TextPrimary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Spacer(modifier = Modifier.height(DiscoverySpacing.xs))
+                            Text(
+                                text = monthly.monthlyInsights,
+                                color = DiscoveryColors.TextSecondary,
+                                fontSize = 14.sp,
+                                lineHeight = 21.sp
+                            )
+
+                            Spacer(modifier = Modifier.height(DiscoverySpacing.sm))
+
+                            Text(
+                                text = "進み方の波",
+                                color = DiscoveryColors.TextPrimary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Spacer(modifier = Modifier.height(DiscoverySpacing.xs))
+                            Text(
+                                text = monthly.progressWave,
+                                color = DiscoveryColors.TextSecondary,
+                                fontSize = 14.sp,
+                                lineHeight = 21.sp
+                            )
+
+                            Spacer(modifier = Modifier.height(DiscoverySpacing.sm))
+
+                            Text(
+                                text = "続けられたペース",
+                                color = DiscoveryColors.TextPrimary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Spacer(modifier = Modifier.height(DiscoverySpacing.xs))
+                            Text(
+                                text = monthly.continuityInsight,
+                                color = DiscoveryColors.TextSecondary,
+                                fontSize = 14.sp,
+                                lineHeight = 21.sp
+                            )
+                        }
+                    }
                 }
             }
         }
+    }
+}
+
+private fun formatPeriodRange(periodStart: String, periodEndExclusive: String): String {
+    return try {
+        val endExclusive = LocalDate.parse(periodEndExclusive)
+        val endInclusive = endExclusive.minus(DatePeriod(days = 1))
+        "$periodStart〜$endInclusive"
+    } catch (_: Exception) {
+        "$periodStart〜$periodEndExclusive"
     }
 }

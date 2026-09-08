@@ -58,6 +58,24 @@ class AndroidDiscoverySettingsStorage(private val prefs: SharedPreferences) : Di
             .apply()
     }
 
+    override fun getLastNotifiedWeekKey(sessionId: Int): String? =
+        prefs.getString("last_notified_week_key_$sessionId", null)
+
+    override fun saveLastNotifiedWeekKey(sessionId: Int, key: String) {
+        prefs.edit()
+            .putString("last_notified_week_key_$sessionId", key)
+            .commit()
+    }
+
+    override fun getLastNotifiedMonthKey(sessionId: Int): String? =
+        prefs.getString("last_notified_month_key_$sessionId", null)
+
+    override fun saveLastNotifiedMonthKey(sessionId: Int, key: String) {
+        prefs.edit()
+            .putString("last_notified_month_key_$sessionId", key)
+            .commit()
+    }
+
     companion object {
         fun get(context: Context): AndroidDiscoverySettingsStorage =
             AndroidDiscoverySettingsStorage(

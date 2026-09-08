@@ -9,4 +9,7 @@
 
     <!-- Discovery 空き時間通知 -->
     <string name="discovery_notification_channel_name">Discovery 通知</string>
+
+    <!-- Discovery 気付きレポート通知 -->
+    <string name="discovery_periodic_report_channel_name">気付きレポート</string>
 </resources>
