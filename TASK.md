@@ -5548,3 +5548,13 @@ Codexが`discovery-backend`ブランチ全体をレビュー。判定: **FAIL**�
 **修正:** `DiscoveryReportNotifier`が通知発行の成功/失敗を返すようにし、`DiscoveryPeriodicReportWorker`は成功時のみ通知済みキーを保存するよう変更する。
 
 **ディスパッチ方針:** 本体ディレクトリ(`discovery-backend`、クリーン)でKimiに3件まとめて修正させる。TDD必須。完了後、報告ファイルを`docs/quality-review/2026-09-09-案件27-31-gate-review-fixes-report.md`に作成させる。修正後、Codexに再レビューを依頼する。
+
+**修正結果(2026-09-09):** Kimiが3コミット(`3848c9d`月次キャッシュ削除、`5d06665`DBマイグレーション追加、`fe43548`通知競合窓修正)+報告書コミット(`d881aea`)で対応。backend 355テストPASS、Android/KMPビルド・AndroidTestコンパイルともにBUILD SUCCESSFUL。
+
+**Codex再レビュー結果: PASS。**
+- 修正1(月次キャッシュ削除): PASS — 親セッション削除前に同一トランザクションで削除、回帰テストも適切
+- 修正2(DBマイグレーション): PASS — 実データ6行を含む`discovery.db`の複製で旧スキーマを再現し、初期化時の列追加・既存行保持・新列の読み書きを実際に検証
+- 修正3(通知済みキー): PASS — 通知成功時のみキー保存、失敗時は未保存を確認
+- 新たな修正必須問題なし
+
+**案件27〜31、全て完了・マージ・ゲートレビューPASS。本件クローズ。**
