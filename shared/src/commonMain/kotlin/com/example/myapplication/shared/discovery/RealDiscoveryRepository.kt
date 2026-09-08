@@ -342,15 +342,33 @@ class RealDiscoveryRepository(
         )
     }
 
+    override suspend fun getMonthlyNarrative(): MonthlyNarrative {
+        val id = ensureSession()
+        val response = client.get("/sessions/$id/report/monthly-narrative")
+        if (!response.status.isSuccess()) {
+            throw DiscoveryApiException("月次レポートの取得に失敗しました (HTTP ${response.status.value})")
+        }
+        return response.body<MonthlyNarrativeResponseDto>().toUiModel()
+    }
+
     override suspend fun getReportData(): ReportData {
         val summary = fetchSummary().behaviorSummary
-        val narrative = try {
+        val weeklyNarrative = try {
             getWeeklyNarrative()
-        } catch (_: DiscoveryApiException) {
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
             WeeklyNarrative(
                 weeklyInsights = "週次レポートは現在取得できません。",
                 changeFromPast = "週次レポートは現在取得できません。"
             )
+        }
+        val (monthlyNarrative, monthlyErrorMessage) = try {
+            getMonthlyNarrative() to null
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null to "月次レポートは現在取得できません。"
         }
         val signalCounts = resolveSignalCounts(summary)
         val topSignal = signalCounts.maxByOrNull { it.value }?.key ?: BehaviorSignal.ANALYZE
@@ -358,9 +376,11 @@ class RealDiscoveryRepository(
             totalCompletedCount = summary.completedExperiments,
             totalMinutesSpent = summary.totalMinutesSpent,
             topSignal = topSignal,
-            weeklyInsights = narrative.weeklyInsights,
-            changeFromPast = narrative.changeFromPast,
-            signalDistribution = signalCounts.mapKeys { it.key.japaneseLabel }
+            weeklyInsights = weeklyNarrative.weeklyInsights,
+            changeFromPast = weeklyNarrative.changeFromPast,
+            signalDistribution = signalCounts.mapKeys { it.key.japaneseLabel },
+            monthlyNarrative = monthlyNarrative,
+            monthlyErrorMessage = monthlyErrorMessage
         )
     }
 
@@ -520,6 +540,8 @@ class RealDiscoveryRepository(
         reason = reason
     )
 
+    override suspend fun getActiveSessionId(): Int? = sessionId ?: sessionStorage.getLastSessionId()
+
     companion object {
         /** エミュレータから開発機 localhost を参照するための標準 URL。実機では呼び出し元でLAN IPを渡す。 */
         const val DEFAULT_BASE_URL = "http://10.0.2.2:8000"
@@ -653,6 +675,23 @@ private data class WeeklyNarrativeResponseDto(
 )
 
 @Serializable
+private data class MonthlyNarrativeResponseDto(
+    val periodStart: String,
+    val periodEndExclusive: String,
+    val monthlyInsights: String,
+    val progressWave: String,
+    val continuityInsight: String
+)
+
+private fun MonthlyNarrativeResponseDto.toUiModel(): MonthlyNarrative = MonthlyNarrative(
+    periodStart = periodStart,
+    periodEndExclusive = periodEndExclusive,
+    monthlyInsights = monthlyInsights,
+    progressWave = progressWave,
+    continuityInsight = continuityInsight
+)
+
+@Serializable
 private data class HypothesisFeedbackRequest(val reaction: String)
 
 @Serializable
@@ -728,12 +767,32 @@ interface DiscoverySettingsStorage {
     fun save(settings: MyDataSettings)
     fun loadNotificationLog(): NotificationLog
     fun saveNotificationLog(log: NotificationLog)
+    fun getLastNotifiedWeekKey(sessionId: Int): String? = null
+    fun saveLastNotifiedWeekKey(sessionId: Int, key: String) {}
+    fun getLastNotifiedMonthKey(sessionId: Int): String? = null
+    fun saveLastNotifiedMonthKey(sessionId: Int, key: String) {}
+}
+
+fun DiscoverySettingsStorage.getLastNotifiedPeriodKey(sessionId: Int, reportType: ReportType): String? =
+    when (reportType) {
+        ReportType.WEEKLY -> getLastNotifiedWeekKey(sessionId)
+        ReportType.MONTHLY -> getLastNotifiedMonthKey(sessionId)
+    }
+
+fun DiscoverySettingsStorage.saveLastNotifiedPeriodKey(sessionId: Int, reportType: ReportType, key: String) {
+    when (reportType) {
+        ReportType.WEEKLY -> saveLastNotifiedWeekKey(sessionId, key)
+        ReportType.MONTHLY -> saveLastNotifiedMonthKey(sessionId, key)
+    }
 }
 
 /** 永続化しない既定実装。テストや未対応プラットフォームで使用する。 */
 class InMemoryDiscoverySettingsStorage : DiscoverySettingsStorage {
     private var current = MyDataSettings()
     private var notificationLog = NotificationLog()
+    private val weekKeys = mutableMapOf<Int, String>()
+    private val monthKeys = mutableMapOf<Int, String>()
+
     override fun load(): MyDataSettings = current
     override fun save(settings: MyDataSettings) {
         current = settings
@@ -741,6 +800,14 @@ class InMemoryDiscoverySettingsStorage : DiscoverySettingsStorage {
     override fun loadNotificationLog(): NotificationLog = notificationLog
     override fun saveNotificationLog(log: NotificationLog) {
         notificationLog = log
+    }
+    override fun getLastNotifiedWeekKey(sessionId: Int): String? = weekKeys[sessionId]
+    override fun saveLastNotifiedWeekKey(sessionId: Int, key: String) {
+        weekKeys[sessionId] = key
+    }
+    override fun getLastNotifiedMonthKey(sessionId: Int): String? = monthKeys[sessionId]
+    override fun saveLastNotifiedMonthKey(sessionId: Int, key: String) {
+        monthKeys[sessionId] = key
     }
 }
 

@@ -57,6 +57,21 @@ class FakeDiscoveryRepositoryTest {
     }
 
     @Test
+    fun getMonthlyNarrative_matchesNarrativeUsedByReportData() = runTest {
+        val repo = FakeDiscoveryRepository(FakeScenario.NORMAL, enableArtificialDelay = false)
+
+        val narrative = repo.getMonthlyNarrative()
+        val report = repo.getReportData()
+
+        assertEquals(narrative, report.monthlyNarrative)
+        assertEquals("2026-08-02", narrative.periodStart)
+        assertEquals("2026-09-01", narrative.periodEndExclusive)
+        assertTrue(narrative.monthlyInsights.isNotEmpty())
+        assertTrue(narrative.progressWave.isNotEmpty())
+        assertTrue(narrative.continuityInsight.isNotEmpty())
+    }
+
+    @Test
     fun completeOnboarding_recordsArgumentsAndIncrementsCount() = runTest {
         val repo = FakeDiscoveryRepository(FakeScenario.NORMAL, enableArtificialDelay = false)
         repo.completeOnboarding(
