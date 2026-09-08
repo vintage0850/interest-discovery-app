@@ -759,6 +759,81 @@ class TestHypothesisFeedbackEndpoints:
         assert response.status_code == 422
 
 
+class TestDeleteSessionEndpoints:
+    def _create_session(self, test_client: TestClient) -> dict:
+        return test_client.post("/sessions", json={"student_label": "student-a"}).json()
+
+    def _seed_signal(self, test_client: TestClient, session_id: int) -> None:
+        test_client.post(
+            f"/sessions/{session_id}/signals",
+            json={
+                "action_type": "search",
+                "domain": "tech",
+                "content_summary": "Python tutorial",
+                "source": "search_history",
+                "occurred_at": "2026-09-01T10:00:00Z",
+            },
+        )
+
+    def _generate_experiment(self, test_client: TestClient, session_id: int) -> dict:
+        mock_client = MagicMock(spec=DiscoveryGeminiClient)
+        mock_client.generate_experiments.return_value = [
+            MagicMock(
+                title="Hello Python",
+                description="Write a one-line print script",
+                domain="tech",
+                planned_minutes=10,
+            ),
+        ]
+        app.dependency_overrides[get_gemini_client] = lambda: mock_client
+
+        generated = test_client.post(
+            f"/sessions/{session_id}/experiments/generate",
+            json={"n_candidates": 1},
+        ).json()
+        return generated[0]
+
+    def _repo(self) -> DiscoveryRepository:
+        return app.dependency_overrides[get_repository]()
+
+    def test_delete_session_returns_204_and_removes_data(
+        self, test_client: TestClient
+    ) -> None:
+        session = self._create_session(test_client)
+        session_id = session["id"]
+        self._seed_signal(test_client, session_id)
+        experiment = self._generate_experiment(test_client, session_id)
+
+        response = test_client.delete(f"/sessions/{session_id}")
+        assert response.status_code == 204
+        assert response.text == ""
+
+        assert self._repo().get_session(session_id) is None
+        assert self._repo().list_experiments(session_id) == []
+
+    def test_delete_session_returns_404_when_not_found(
+        self, test_client: TestClient
+    ) -> None:
+        response = test_client.delete("/sessions/99999")
+        assert response.status_code == 404
+
+    def test_delete_session_does_not_affect_other_sessions(
+        self, test_client: TestClient
+    ) -> None:
+        session_a = self._create_session(test_client)
+        session_b = self._create_session(test_client)
+        self._seed_signal(test_client, session_a["id"])
+        self._seed_signal(test_client, session_b["id"])
+
+        response = test_client.delete(f"/sessions/{session_a['id']}")
+        assert response.status_code == 204
+
+        repo = self._repo()
+        assert repo.get_session(session_a["id"]) is None
+        assert repo.get_session(session_b["id"]) is not None
+        assert len(repo.list_signals(session_b["id"])) == 1
+
+
 class TestExistingEndpoints:
     def test_health_endpoint(self, test_client: TestClient) -> None:
         response = test_client.get("/health")

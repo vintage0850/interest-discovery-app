@@ -106,6 +106,19 @@ def list_sessions(
     return repo.list_sessions(student_label)
 
 
+@router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_session(
+    session_id: int,
+    repo: Annotated[DiscoveryRepository, Depends(get_repository)],
+) -> None:
+    """指定したセッションとそれに紐づく全データを削除する。"""
+    deleted = repo.delete_session_cascade(session_id)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
+        )
+
+
 @router.post(
     "/sessions/{session_id}/psych-axis-survey",
     response_model=list[PsychAxisResultResponse],

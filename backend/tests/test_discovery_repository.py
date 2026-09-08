@@ -8,6 +8,7 @@ from sqlmodel import Session, SQLModel, create_engine
 
 from discovery.models import (
     ActionType,
+    DiscoverySession,
     DomainType,
     Experiment,
     ExperimentResult,
@@ -860,6 +861,133 @@ class TestUserReflectionRepository:
         session = repository.create_session("student-a")
         with pytest.raises(ValueError):
             repository.create_user_reflection(session.id, "x" * 2001)
+
+
+class TestSessionCascadeDeletionRepository:
+    def test_delete_session_cascade_removes_all_related_rows(
+        self, repository: DiscoveryRepository
+    ) -> None:
+        import datetime
+        from discovery.models import ActionType, DomainType, InterestSignalSource
+
+        session = repository.create_session("student-a")
+        session_id = session.id
+
+        # InterestSignal
+        repository.add_signal(
+            session_id,
+            action_type=ActionType.SEARCH.value,
+            domain=DomainType.TECH,
+            content_summary="Python tutorial",
+            source=InterestSignalSource.SEARCH_HISTORY.value,
+            occurred_at=datetime.datetime.now(datetime.timezone.utc),
+        )
+
+        # Evidence
+        repository.build_evidence(session_id)
+
+        # Experiment + ExperimentResult
+        experiment = repository.create_experiment(
+            session_id,
+            title="Try coding",
+            description="Write Python",
+            domain=DomainType.TECH,
+            planned_minutes=10,
+        )
+        repository.select_experiment(experiment.id, "note")
+        repository.start_experiment(experiment.id)
+        repository.complete_experiment(
+            experiment.id,
+            enjoyment=4,
+            curiosity=5,
+            retry_intent=3,
+            confidence=0.8,
+        )
+
+        # InterestHypothesis + HypothesisFeedback + Criterion
+        hypothesis = repository.create_hypothesis(
+            session_id,
+            summary="Likes tech",
+            confidence=0.7,
+            supporting_evidence=[],
+            suggested_next_domains=[],
+        )
+        repository.add_hypothesis_feedback(hypothesis.id, HypothesisReaction.AGREE)
+
+        # PsychAxisResult
+        repository.upsert_psych_axis_results(
+            session_id,
+            {
+                PsychAxis.INVESTIGATE.value: 3.0,
+                PsychAxis.CREATE.value: 4.0,
+                PsychAxis.EXECUTE.value: 2.0,
+                PsychAxis.COMMUNICATE.value: 5.0,
+            },
+        )
+
+        # UserReflection
+        repository.create_user_reflection(session_id, "Today I felt curious.", mood=4)
+
+        # WeeklyNarrativeCache
+        repository.save_weekly_narrative_cache(
+            session_id,
+            cache_date="2026-09-08",
+            weekly_insights="Insights",
+            change_from_past="Changes",
+        )
+
+        assert repository.delete_session_cascade(session_id) is True
+
+        # All related rows should be gone
+        from sqlmodel import Session as DBSession
+
+        with DBSession(repository._engine) as db:
+            assert db.get(DiscoverySession, session_id) is None
+            assert repository.list_signals(session_id) == []
+            assert repository.list_evidence(session_id) == []
+            assert repository.list_experiments(session_id) == []
+            assert repository.get_summary_data(session_id)["results"] == []
+            assert repository.get_latest_hypothesis(session_id) is None
+            assert repository.list_criteria(session_id) == []
+            assert repository.get_psych_axis_results(session_id) == []
+            assert repository.list_user_reflections(session_id) == []
+            assert repository.get_weekly_narrative_cache(session_id, "2026-09-08") is None
+
+    def test_delete_session_cascade_returns_false_for_missing_session(
+        self, repository: DiscoveryRepository
+    ) -> None:
+        assert repository.delete_session_cascade(99999) is False
+
+    def test_delete_session_cascade_does_not_affect_other_sessions(
+        self, repository: DiscoveryRepository
+    ) -> None:
+        import datetime
+        from discovery.models import ActionType, DomainType, InterestSignalSource
+
+        session_a = repository.create_session("student-a")
+        session_b = repository.create_session("student-b")
+
+        repository.add_signal(
+            session_a.id,
+            action_type=ActionType.SEARCH.value,
+            domain=DomainType.TECH,
+            content_summary="Python tutorial",
+            source=InterestSignalSource.SEARCH_HISTORY.value,
+            occurred_at=datetime.datetime.now(datetime.timezone.utc),
+        )
+        repository.add_signal(
+            session_b.id,
+            action_type=ActionType.SEARCH.value,
+            domain=DomainType.ART,
+            content_summary="Art tutorial",
+            source=InterestSignalSource.SEARCH_HISTORY.value,
+            occurred_at=datetime.datetime.now(datetime.timezone.utc),
+        )
+
+        assert repository.delete_session_cascade(session_a.id) is True
+        assert repository.get_session(session_a.id) is None
+        assert repository.get_session(session_b.id) is not None
+        assert len(repository.list_signals(session_b.id)) == 1
 
 
 class TestEvidenceRepository:
