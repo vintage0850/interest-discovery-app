@@ -10,6 +10,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
+import io.ktor.utils.io.errors.IOException
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNamingStrategy
@@ -1640,5 +1641,89 @@ class RealDiscoveryRepositoryTest {
         assertEquals(1, reflections.size)
         assertEquals("今日は楽しかった", reflections[0].content)
         assertEquals(4, reflections[0].mood)
+    }
+
+    // ---- 案件30：プライバシー削除 ----
+
+    @Test
+    fun resetAllData_callsDeleteSessionEndpointThenClearsLocalState() = runTest {
+        val storage = InMemorySessionStorage()
+        storage.saveLastSessionId(1)
+        val (client, paths) = mockClient { path ->
+            when (path) {
+                "/sessions/1" -> HttpStatusCode.NoContent to ""
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client, sessionStorage = storage)
+        repo.switchToSession(1)
+
+        repo.resetAllData()
+
+        assertEquals(listOf("/sessions/1"), paths)
+        assertNull(storage.getLastSessionId())
+        assertNull(repo.getActiveSessionId())
+    }
+
+    @Test
+    fun resetAllData_stillClearsLocalStateWhenDeleteEndpointFails() = runTest {
+        val storage = InMemorySessionStorage()
+        storage.saveLastSessionId(1)
+        val (client, paths) = mockClient { path ->
+            when (path) {
+                "/sessions/1" -> HttpStatusCode.InternalServerError to """{"detail":"server error"}"""
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client, sessionStorage = storage)
+        repo.switchToSession(1)
+
+        repo.resetAllData()
+
+        assertEquals(listOf("/sessions/1"), paths)
+        assertNull(storage.getLastSessionId())
+        assertNull(repo.getActiveSessionId())
+    }
+
+    @Test
+    fun resetAllData_withNoActiveSession_skipsDeleteAndClearsLocalState() = runTest {
+        val storage = InMemorySessionStorage()
+        val (client, paths) = mockClient { path ->
+            error("unexpected request: $path")
+        }
+        val repo = RealDiscoveryRepository(httpClient = client, sessionStorage = storage)
+
+        repo.resetAllData()
+
+        assertEquals(emptyList<String>(), paths)
+        assertNull(storage.getLastSessionId())
+        assertNull(repo.getActiveSessionId())
+    }
+
+    @Test
+    fun resetAllData_stillClearsLocalStateWhenDeleteThrows() = runTest {
+        val storage = InMemorySessionStorage()
+        storage.saveLastSessionId(1)
+        val requestedPaths = mutableListOf<String>()
+        val engine = MockEngine { request ->
+            requestedPaths.add(request.url.encodedPath)
+            throw IOException("network unreachable")
+        }
+        val client = HttpClient(engine) {
+            install(ContentNegotiation) {
+                json(Json {
+                    ignoreUnknownKeys = true
+                    namingStrategy = JsonNamingStrategy.SnakeCase
+                })
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client, sessionStorage = storage)
+        repo.switchToSession(1)
+
+        repo.resetAllData()
+
+        assertEquals(listOf("/sessions/1"), requestedPaths)
+        assertNull(storage.getLastSessionId())
+        assertNull(repo.getActiveSessionId())
     }
 }

@@ -4,7 +4,7 @@ import json
 import datetime
 from typing import Any, Optional
 
-from sqlalchemy import desc, update
+from sqlalchemy import delete, desc, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
@@ -820,4 +820,66 @@ class DiscoveryRepository:
             db.commit()
             db.refresh(evidence)
             return evidence
+
+    def delete_session_cascade(self, session_id: int) -> bool:
+        """セッションとそれに紐づく全データをカスケード削除する。
+
+        外部キー制約を回避するため、子テーブルから順に削除する。
+        対象セッションが存在しない場合は False を返す。
+        """
+        with Session(self._engine) as db:
+            session = db.get(DiscoverySession, session_id)
+            if session is None:
+                return False
+
+            # ExperimentResult (Experiment 経由)
+            db.exec(
+                delete(ExperimentResult).where(
+                    ExperimentResult.experiment_id.in_(
+                        select(Experiment.id).where(Experiment.session_id == session_id)
+                    )
+                )
+            )
+
+            # HypothesisFeedback (InterestHypothesis 経由)
+            db.exec(
+                delete(HypothesisFeedback).where(
+                    HypothesisFeedback.hypothesis_id.in_(
+                        select(InterestHypothesis.id).where(
+                            InterestHypothesis.session_id == session_id
+                        )
+                    )
+                )
+            )
+
+            # Criterion (InterestHypothesis への外部キーを持つため先に削除)
+            db.exec(
+                delete(Criterion).where(Criterion.session_id == session_id)
+            )
+
+            # 中間・子テーブル（session_id 直接参照）
+            db.exec(delete(Experiment).where(Experiment.session_id == session_id))
+            db.exec(
+                delete(InterestHypothesis).where(
+                    InterestHypothesis.session_id == session_id
+                )
+            )
+            db.exec(delete(InterestSignal).where(InterestSignal.session_id == session_id))
+            db.exec(delete(Evidence).where(Evidence.session_id == session_id))
+            db.exec(
+                delete(PsychAxisResult).where(PsychAxisResult.session_id == session_id)
+            )
+            db.exec(
+                delete(UserReflection).where(UserReflection.session_id == session_id)
+            )
+            db.exec(
+                delete(WeeklyNarrativeCache).where(
+                    WeeklyNarrativeCache.session_id == session_id
+                )
+            )
+
+            # 親テーブル
+            db.delete(session)
+            db.commit()
+            return True
 
