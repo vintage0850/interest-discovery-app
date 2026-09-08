@@ -8,6 +8,14 @@ private const val WEEKLY_INSIGHTS =
     "「構造を見比べる」「UIを分析する」活動に自然と時間が伸びる傾向があります。"
 private const val CHANGE_FROM_PAST =
     "先月は「つくる」中心でしたが、今月は「仕組みを見る」「比べる」ことへの関心が高まっています。"
+private const val MONTHLY_PERIOD_START = "2026-08-02"
+private const val MONTHLY_PERIOD_END_EXCLUSIVE = "2026-09-01"
+private const val MONTHLY_INSIGHTS =
+    "直近30日間では、分析と構造化を中心とした実験に継続して取り組めています。"
+private const val PROGRESS_WAVE =
+    "序盤から中盤にかけて実験数が増加し、安定したペースを維持できました。"
+private const val CONTINUITY_INSIGHT =
+    "週2回以上のペースで振り返りを完了できており、着実に行動習慣が定着しています。"
 
 /**
  * 完全なインメモリ状態で動作する Discovery 機能のリポジトリ実装。
@@ -18,6 +26,10 @@ class FakeDiscoveryRepository(
 ) : DiscoveryRepository {
 
     private var scenario: FakeScenario = initialScenario
+
+    var activeSessionId: Int? = 1
+
+    override suspend fun getActiveSessionId(): Int? = activeSessionId
 
     // 5つの初期実験プール
     private val allExperiments = listOf(
@@ -395,22 +407,36 @@ class FakeDiscoveryRepository(
         )
     }
 
+    override suspend fun getMonthlyNarrative(): MonthlyNarrative {
+        simulateLatency()
+        checkErrorState()
+        return MonthlyNarrative(
+            periodStart = MONTHLY_PERIOD_START,
+            periodEndExclusive = MONTHLY_PERIOD_END_EXCLUSIVE,
+            monthlyInsights = MONTHLY_INSIGHTS,
+            progressWave = PROGRESS_WAVE,
+            continuityInsight = CONTINUITY_INSIGHT
+        )
+    }
+
     override suspend fun getReportData(): ReportData {
         simulateLatency()
         checkErrorState()
-        val narrative = getWeeklyNarrative()
+        val weeklyNarrative = getWeeklyNarrative()
+        val monthlyNarrative = getMonthlyNarrative()
         return ReportData(
             totalCompletedCount = completedCount,
             totalMinutesSpent = completedCount * 7,
             topSignal = BehaviorSignal.ANALYZE,
-            weeklyInsights = narrative.weeklyInsights,
-            changeFromPast = narrative.changeFromPast,
+            weeklyInsights = weeklyNarrative.weeklyInsights,
+            changeFromPast = weeklyNarrative.changeFromPast,
             signalDistribution = mapOf(
                 "分析する" to 4,
                 "比べる" to 3,
                 "つくる" to 2,
                 "整理する" to 1
-            )
+            ),
+            monthlyNarrative = monthlyNarrative
         )
     }
 

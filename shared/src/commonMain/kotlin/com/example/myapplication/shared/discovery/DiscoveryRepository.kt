@@ -28,6 +28,7 @@ interface DiscoveryRepository {
     suspend fun getNextExperiment(): Experiment
     suspend fun getDomainFields(): List<DomainField>
     suspend fun getWeeklyNarrative(): WeeklyNarrative
+    suspend fun getMonthlyNarrative(): MonthlyNarrative = throw NotImplementedError("getMonthlyNarrative is not implemented")
     suspend fun getReportData(): ReportData
     suspend fun getSettings(): MyDataSettings
     suspend fun updateSettings(settings: MyDataSettings)
@@ -70,6 +71,9 @@ interface DiscoveryRepository {
 
     /** 通知候補となる選択済み実験を、ドメイン状態付きで取得する。 */
     suspend fun getNotificationCandidates(): List<NotificationCandidate>
+
+    /** 現在のアクティブなセッションIDを取得する。 */
+    suspend fun getActiveSessionId(): Int? = null
 }
 
 /** 直近7日とその前7日の比較から生成された週次レポート文。 */

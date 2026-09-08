@@ -190,6 +190,32 @@ data class DiscoveryData(
 )
 
 /**
+ * 直近30日とその前30日の比較から生成された月次レポート文。
+ */
+@Serializable
+data class MonthlyNarrative(
+    val periodStart: String,
+    val periodEndExclusive: String,
+    val monthlyInsights: String,
+    val progressWave: String,
+    val continuityInsight: String
+)
+
+/**
+ * 気付きレポートの種別（週次／月次）。
+ */
+@Serializable
+enum class ReportType(val value: String) {
+    WEEKLY("weekly"),
+    MONTHLY("monthly");
+
+    companion object {
+        fun fromValue(value: String?): ReportType? =
+            entries.firstOrNull { it.value.equals(value, ignoreCase = true) }
+    }
+}
+
+/**
  * 週次・月次レポートデータ
  */
 @Serializable
@@ -204,7 +230,9 @@ data class ReportData(
         "比べる" to 3,
         "つくる" to 2,
         "整理する" to 1
-    )
+    ),
+    val monthlyNarrative: MonthlyNarrative? = null,
+    val monthlyErrorMessage: String? = null
 )
 
 /**
