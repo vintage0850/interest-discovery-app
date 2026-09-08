@@ -8,6 +8,7 @@ import io.ktor.client.plugins.logging.DEFAULT
 import io.ktor.client.plugins.logging.LogLevel
 import io.ktor.client.plugins.logging.Logger
 import io.ktor.client.plugins.logging.Logging
+import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.patch
 import io.ktor.client.request.post
@@ -405,6 +406,24 @@ class RealDiscoveryRepository(
         settingsStorage.save(settings)
     }
     override suspend fun resetAllData() {
+        val activeSessionId = sessionId ?: sessionStorage.getLastSessionId()
+        if (activeSessionId != null) {
+            try {
+                val response = client.delete("/sessions/$activeSessionId")
+                if (!response.status.isSuccess()) {
+                    Logger.DEFAULT.log(
+                        "Session deletion request failed (HTTP ${response.status.value}). " +
+                            "Proceeding with local data cleanup."
+                    )
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Logger.DEFAULT.log(
+                    "Session deletion request failed (${e.message}). Proceeding with local data cleanup."
+                )
+            }
+        }
         sessionId = null
         cachedExperiments = emptyList()
         cycleIndex = 0

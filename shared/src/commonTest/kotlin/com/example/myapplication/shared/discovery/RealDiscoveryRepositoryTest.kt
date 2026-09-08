@@ -1641,4 +1641,46 @@ class RealDiscoveryRepositoryTest {
         assertEquals("今日は楽しかった", reflections[0].content)
         assertEquals(4, reflections[0].mood)
     }
+
+    // ---- 案件30：プライバシー削除 ----
+
+    @Test
+    fun resetAllData_callsDeleteSessionEndpointThenClearsLocalState() = runTest {
+        val storage = InMemorySessionStorage()
+        storage.saveLastSessionId(1)
+        val (client, paths) = mockClient { path ->
+            when (path) {
+                "/sessions/1" -> HttpStatusCode.NoContent to ""
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client, sessionStorage = storage)
+        repo.switchToSession(1)
+
+        repo.resetAllData()
+
+        assertEquals(listOf("/sessions/1"), paths)
+        assertNull(storage.getLastSessionId())
+        assertNull(repo.getActiveSessionId())
+    }
+
+    @Test
+    fun resetAllData_stillClearsLocalStateWhenDeleteEndpointFails() = runTest {
+        val storage = InMemorySessionStorage()
+        storage.saveLastSessionId(1)
+        val (client, paths) = mockClient { path ->
+            when (path) {
+                "/sessions/1" -> HttpStatusCode.InternalServerError to """{"detail":"server error"}"""
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client, sessionStorage = storage)
+        repo.switchToSession(1)
+
+        repo.resetAllData()
+
+        assertEquals(listOf("/sessions/1"), paths)
+        assertNull(storage.getLastSessionId())
+        assertNull(repo.getActiveSessionId())
+    }
 }
