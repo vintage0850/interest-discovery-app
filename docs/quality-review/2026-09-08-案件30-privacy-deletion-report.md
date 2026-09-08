@@ -137,4 +137,4 @@ test(discovery): review指摘対応 — エッジケーステスト追加と重�
 - KMPコンパイルパス（iOSシミュレータターゲット、共通メイン）。
 - ユーザー指示に基づき `TASK.md` は未編集。
 
-**次のステップ:** Stage 6 Ship（`/spartan:pr-ready`）へ進み、PR を作成する。
+**PR:** https://github.com/vintage0850/interest-discovery-app/pull/2
