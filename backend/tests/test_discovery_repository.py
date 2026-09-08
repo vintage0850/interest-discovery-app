@@ -9,8 +9,10 @@ from sqlmodel import Session, SQLModel, create_engine
 
 from discovery.models import (
     ActionType,
+    BehaviorCategory,
     DiscoverySession,
     DomainType,
+    Evidence,
     Experiment,
     ExperimentResult,
     ExperimentStatus,
@@ -935,6 +937,15 @@ class TestSessionCascadeDeletionRepository:
             change_from_past="Changes",
         )
 
+        # MonthlyNarrativeCache
+        repository.save_monthly_narrative_cache(
+            session_id,
+            cache_month="2026-09",
+            monthly_insights="Monthly insights",
+            progress_wave="Progress wave",
+            continuity_insight="Continuity insight",
+        )
+
         assert repository.delete_session_cascade(session_id) is True
 
         # All related rows should be gone
@@ -948,6 +959,7 @@ class TestSessionCascadeDeletionRepository:
         assert repository.get_psych_axis_results(session_id) == []
         assert repository.list_user_reflections(session_id) == []
         assert repository.get_weekly_narrative_cache(session_id, "2026-09-08") is None
+        assert repository.get_monthly_narrative_cache(session_id, "2026-09") is None
 
     def test_delete_session_cascade_returns_false_for_missing_session(
         self, repository: DiscoveryRepository

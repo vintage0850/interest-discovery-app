@@ -877,6 +877,11 @@ class DiscoveryRepository:
                     WeeklyNarrativeCache.session_id == session_id
                 )
             )
+            db.exec(
+                delete(MonthlyNarrativeCache).where(
+                    MonthlyNarrativeCache.session_id == session_id
+                )
+            )
 
             # 親テーブル
             db.delete(session)
