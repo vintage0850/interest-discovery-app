@@ -18,7 +18,12 @@ import com.example.myapplication.shared.discovery.ReportType
  * 単体テストおよび Worker テストで通知発行をモック・検証可能にする。
  */
 interface DiscoveryReportNotifier {
-    fun notifyReport(reportType: ReportType, sessionId: Int)
+    /**
+     * 通知を発行する。
+     *
+     * @return 通知が実際に発行された場合 true。権限が無いなどで発行されなかった場合 false。
+     */
+    fun notifyReport(reportType: ReportType, sessionId: Int): Boolean
 }
 
 /**
@@ -63,10 +68,10 @@ class AndroidDiscoveryReportNotifier(context: Context) : DiscoveryReportNotifier
 
     private val appContext = context.applicationContext
 
-    override fun notifyReport(reportType: ReportType, sessionId: Int) {
+    override fun notifyReport(reportType: ReportType, sessionId: Int): Boolean {
         ensureChannel()
         val manager = NotificationManagerCompat.from(appContext)
-        if (!manager.areNotificationsEnabled()) return
+        if (!manager.areNotificationsEnabled()) return false
 
         val (title, body) = buildReportNotificationContent(reportType)
 
@@ -79,6 +84,7 @@ class AndroidDiscoveryReportNotifier(context: Context) : DiscoveryReportNotifier
             .build()
 
         manager.notify(reportNotificationIdFor(sessionId, reportType), notification)
+        return true
     }
 
     private fun contentIntent(reportType: ReportType, sessionId: Int): PendingIntent {

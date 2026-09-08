@@ -218,13 +218,36 @@ class DiscoveryPeriodicReportWorkerTest {
         assertEquals("2026-09", settingsStorage.getLastNotifiedMonthKey(1))
     }
 
+    @Test
+    fun 通知発行が失敗した場合は該当キーを保存しない() = runBlocking {
+        val settingsStorage = InMemoryDiscoverySettingsStorage().apply {
+            save(MyDataSettings(notificationsEnabled = true))
+        }
+        val notifier = FakeDiscoveryReportNotifier(refuseType = ReportType.WEEKLY)
+        val worker = buildWorker(
+            repository = FakeDiscoveryRepository(enableArtificialDelay = false),
+            settingsStorage = settingsStorage,
+            notifier = notifier
+        )
+
+        val result = worker.doWork()
+
+        assertTrue(result is ListenableWorker.Result.Success)
+        assertEquals(listOf(ReportType.MONTHLY to 1), notifier.notifiedReports)
+        assertNull(settingsStorage.getLastNotifiedWeekKey(1))
+        assertEquals("2026-09", settingsStorage.getLastNotifiedMonthKey(1))
+    }
+
     private class FakeDiscoveryReportNotifier(
-        private val failingType: ReportType? = null
+        private val failingType: ReportType? = null,
+        private val refuseType: ReportType? = null
     ) : DiscoveryReportNotifier {
         val notifiedReports = mutableListOf<Pair<ReportType, Int>>()
-        override fun notifyReport(reportType: ReportType, sessionId: Int) {
+        override fun notifyReport(reportType: ReportType, sessionId: Int): Boolean {
             if (reportType == failingType) throw IllegalStateException("notification failed")
+            if (reportType == refuseType) return false
             notifiedReports.add(reportType to sessionId)
+            return true
         }
     }
 }

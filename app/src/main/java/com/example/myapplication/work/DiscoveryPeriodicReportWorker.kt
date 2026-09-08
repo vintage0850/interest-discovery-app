@@ -98,8 +98,9 @@ class DiscoveryPeriodicReportWorker @JvmOverloads constructor(
         if (shouldNotifyPeriodReport(lastWeekKey, currentWeekKey)) {
             try {
                 repository.getWeeklyNarrative()
-                notifier.notifyReport(ReportType.WEEKLY, sessionId)
-                settingsStorage.saveLastNotifiedWeekKey(sessionId, currentWeekKey)
+                if (notifier.notifyReport(ReportType.WEEKLY, sessionId)) {
+                    settingsStorage.saveLastNotifiedWeekKey(sessionId, currentWeekKey)
+                }
             } catch (_: Exception) {
                 // 通信エラーや503時はキー保存せず次回再試行
             }
@@ -110,8 +111,9 @@ class DiscoveryPeriodicReportWorker @JvmOverloads constructor(
         if (shouldNotifyPeriodReport(lastMonthKey, currentMonthKey)) {
             try {
                 repository.getMonthlyNarrative()
-                notifier.notifyReport(ReportType.MONTHLY, sessionId)
-                settingsStorage.saveLastNotifiedMonthKey(sessionId, currentMonthKey)
+                if (notifier.notifyReport(ReportType.MONTHLY, sessionId)) {
+                    settingsStorage.saveLastNotifiedMonthKey(sessionId, currentMonthKey)
+                }
             } catch (_: Exception) {
                 // 通信エラーや503時はキー保存せず次回再試行
             }
