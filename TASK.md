@@ -5275,3 +5275,98 @@ Codexの受入条件・API契約・指標定義を変更するものではなく
 
 Geminiには、上記2レーンそれぞれについて対象ファイルを最大3ファイルのwork unitへ分割する
 ことを依頼する（レーンをまたぐ分割はしない）。
+
+### Work Unit分割計画（Gemini、2026-09-08）
+
+仕様・設計内容に基づき、Lane A（backend）および Lane B（Android/KMP＋Androidホスト）の対象ファイルをそれぞれ最大3ファイル以下の論理的に独立した作業単位（Work Unit）へ分割しました。
+
+#### Lane A: Backend (担当: Kimi) - 全9ファイル / 4 Work Units
+
+- **Work Unit A-1: データモデル、キャッシュ保存およびリポジトリ実装**
+  - **対象ファイル (3):**
+    - `backend/discovery/models.py`
+    - `backend/discovery/repository.py`
+    - `backend/tests/test_discovery_repository.py`
+  - **実施内容:** `MonthlyNarrativeCache` テーブルと `MonthlyNarrativeResponse` をモデルに定義し、`repository.py` に月次キャッシュの取得および競合安全な保存ロジック（upsert、`IntegrityError` 時のリカバリ）を実装します。対応するテストを `test_discovery_repository.py` に追加して独立検証します。
+
+- **Work Unit A-2: 月次集計、指標算出ロジックの実装**
+  - **対象ファイル (2):**
+    - `backend/discovery/aggregation.py`
+    - `backend/tests/test_discovery_aggregation.py`
+  - **実施内容:** 直近30日 vs 前30日の月次専用メトリクス（`started_experiment_count`、`completed_started_experiment_count`、`completion_rate`、`active_days`、`active_day_rate`、および10日ごとの3つの進捗区間）の算出ロジックを `aggregation.py` に実装します。対応するテストを `test_discovery_aggregation.py` に追加します。
+
+- **Work Unit A-3: Geminiプロンプト、構造化出力およびエラーサニタイズ**
+  - **対象ファイル (2):**
+    - `backend/discovery/gemini_prompts.py`
+    - `backend/tests/test_discovery_gemini_prompts.py`
+  - **実施内容:** 月次専用プロンプト `generate_monthly_narrative` および構造化出力 schema を定義し、エラーハンドリング（サニタイズ）を実装します。対応するテストを `test_discovery_gemini_prompts.py` に追加します。
+
+- **Work Unit A-4: APIエンドポイント (ルーター) の実装と統合テスト**
+  - **対象ファイル (2):**
+    - `backend/discovery/router.py`
+    - `backend/tests/test_discovery_router.py`
+  - **実施内容:** `GET /sessions/{session_id}/report/monthly-narrative` エンドポイントをルーターに追加し、キャッシュ・集計・プロンプト呼び出しを統合します。対応するテストを `test_discovery_router.py` に追加して API 契約・404/503・セッション分離を検証します。
+
+---
+
+#### Lane B: Android/KMP & Android Host (担当: Antigravity) - 全22ファイル / 8 Work Units
+
+- **Work Unit B-1: 共通モデル、共通インターフェースおよびダミー（Fake）実装**
+  - **対象ファイル (3):**
+    - `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/DiscoveryModels.kt`
+    - `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/DiscoveryRepository.kt`
+    - `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/FakeDiscoveryRepository.kt`
+  - **実施内容:** KMP共通モジュールに月次モデルおよび `ReportData` の拡張定義を追加し、`DiscoveryRepository` に `getMonthlyNarrative()` 契約を定義。`FakeDiscoveryRepository` にモック/ダミーデータを返すように追従させ、開発とUIテストの並行実行を可能にします。
+
+- **Work Unit B-2: リポジトリ実実装および契約・モック検証テスト**
+  - **対象ファイル (3):**
+    - `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/RealDiscoveryRepository.kt`
+    - `shared/src/commonTest/kotlin/com/example/myapplication/shared/discovery/RealDiscoveryRepositoryTest.kt`
+    - `shared/src/commonTest/kotlin/com/example/myapplication/shared/discovery/FakeDiscoveryRepositoryTest.kt`
+  - **実施内容:** `RealDiscoveryRepository` に `GET /sessions/{session_id}/report/monthly-narrative` の DTO、API呼び出し、データマージ、および独立フォールバックを実装。`RealDiscoveryRepositoryTest` および `FakeDiscoveryRepositoryTest` にて、正常系・異常系・フォールバック時の挙動を検証します。
+
+- **Work Unit B-3: 共通画面月次カード表示とローカル設定保存の定義**
+  - **対象ファイル (3):**
+    - `shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/discovery/ReportTabScreen.kt`
+    - `shared/src/androidMain/kotlin/com/example/myapplication/shared/discovery/DiscoverySettingsStorage.android.kt`
+    - `app/src/main/res/values/strings.xml`
+  - **実施内容:** `ReportTabScreen` に週次ナラティブの下へ「🌱 30日間の気付き」カードを追加。また、`DiscoverySettingsStorage` においてセッションごとの最終通知キー（週次・月次）を保存する永続化インターフェースを定義。`strings.xml` に通知チャンネル名を定義します。
+
+- **Work Unit B-4: UI状態制御、ナビゲーションフローと画面フォーカス**
+  - **対象ファイル (3):**
+    - `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/DiscoveryState.kt`
+    - `shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/App.kt`
+    - `shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/discovery/DiscoveryMainScaffold.kt`
+  - **実施内容:** `DiscoveryState` にて通知タップ時のReportタブ遷移・カードフォーカス状態（週次／月次）の同期管理および不正遷移に対する Snackbar エラーハンドリングを実装。`App.kt`・`DiscoveryMainScaffold` を経由して通知Intentパラメータを受け渡すよう結合します。
+
+- **Work Unit B-5: KMP UI状態およびナビゲーションテスト**
+  - **対象ファイル (2):**
+    - `shared/src/commonTest/kotlin/com/example/myapplication/shared/discovery/DiscoveryStateTest.kt`
+    - `shared/src/commonTest/kotlin/com/example/myapplication/shared/discovery/PeriodicReportNotificationTest.kt` (新規)
+  - **実施内容:** 通知タップによる画面状態の遷移、不正セッション・未知レポートタイプの際のフォールバック動作、および UI レベルでの読み込み順序と個別失敗時の挙動を検証するユニットテストを実装します。
+
+- **Work Unit B-6: バックグラウンド実行（WorkManager & Scheduler）の実装**
+  - **対象ファイル (3):**
+    - `app/src/main/java/com/example/myapplication/work/DiscoveryPeriodicReportWorker.kt` (新規)
+    - `app/src/main/java/com/example/myapplication/work/DiscoveryPeriodicReportScheduler.kt` (新規)
+    - `app/proguard-rules.pro`
+  - **実施内容:** Android ホスト側で24時間周期の一意な定期実行を行う `DiscoveryPeriodicReportWorker` および `DiscoveryPeriodicReportScheduler` を新規実装。プロガード（ProGuard）の keep ルールを `proguard-rules.pro` に定義します。
+
+- **Work Unit B-7: システム通知ディスパッチャーとアプリ起動ハンドリング**
+  - **対象ファイル (2):**
+    - `app/src/main/java/com/example/myapplication/work/DiscoveryReportNotifier.kt` (新規)
+    - `app/src/main/java/com/example/myapplication/MainActivity.kt`
+  - **実施内容:** `DiscoveryReportNotifier` を新規実装し、安全な PendingIntent と一意な ID を持つ通知を生成。`MainActivity` でスケジューラを起動登録し、通知タップ起動（cold/warm）の Intent 受渡しロジックを追加します。
+
+- **Work Unit B-8: WorkManager・ホスト統合テストの追加**
+  - **対象ファイル (3):**
+    - `app/src/test/java/com/example/myapplication/work/DiscoveryPeriodicReportRulesTest.kt` (新規)
+    - `app/src/androidTest/java/com/example/myapplication/work/DiscoveryPeriodicReportWorkerTest.kt` (新規)
+    - `app/src/androidTest/java/com/example/myapplication/MainActivityLaunchTest.kt`
+  - **実施内容:** UTC期間キー判定（週キー・月キー）、初回判定、抑止（重複・巻戻り）、文言、および Worker の実行統合と Activity タップ起動時の画面到達の自動テストを実装します。
+
+---
+
+**次の担当:**
+1. **Lane A (backend):** Kimiが Work Unit A-1 〜 A-4 に従い TDD で順次実装（`models.py`・`repository.py` の実装テストから開始）。
+2. **Lane B (Android/KMP＋ホスト):** Antigravityが Work Unit B-1 〜 B-8 に従い TDD で順次実装（`DiscoveryModels.kt`・`FakeDiscoveryRepository.kt` の定義テストから開始）。
