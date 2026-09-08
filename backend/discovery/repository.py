@@ -743,3 +743,19 @@ class DiscoveryRepository:
             )
             return list(db.exec(statement).all())
 
+    def update_evidence_behavior_categories(
+        self,
+        evidence_id: int,
+        behavior_categories: dict[str, float] | None,
+    ) -> Evidence:
+        """指定エビデンスの behavior_categories を更新する。"""
+        with Session(self._engine) as db:
+            evidence = db.get(Evidence, evidence_id)
+            if evidence is None:
+                raise ValueError(f"Evidence {evidence_id} not found")
+            evidence.behavior_categories = behavior_categories
+            db.add(evidence)
+            db.commit()
+            db.refresh(evidence)
+            return evidence
+

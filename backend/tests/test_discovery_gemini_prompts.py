@@ -4,10 +4,18 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from discovery.gemini_prompts import DiscoveryGeminiClient
+import json
+
+from discovery.gemini_prompts import (
+    DiscoveryGeminiClient,
+    _EXPERIMENT_SYSTEM_INSTRUCTION,
+    _HYPOTHESIS_SYSTEM_INSTRUCTION,
+    _WEEKLY_NARRATIVE_SYSTEM_INSTRUCTION,
+)
 from discovery.models import (
     ActionType,
     DomainType,
+    Evidence,
     Experiment,
     ExperimentResult,
     ExperimentStatus,
@@ -299,3 +307,19 @@ class TestGenerateWeeklyNarrative:
         assert "tech" in prompt
         assert "recent" in prompt.lower() or "直近" in prompt
         assert "previous" in prompt.lower() or "前週" in prompt
+
+
+class TestSystemInstructionsIncludeSafetyConstraints:
+    """28-A: 各 system instruction にセンシティブ属性に関する禁止事項が含まれることを検証する。"""
+
+    def test_experiment_system_instruction_includes_sensitive_attributes(self) -> None:
+        assert "精神疾患" in _EXPERIMENT_SYSTEM_INSTRUCTION
+        assert "医療状態" in _EXPERIMENT_SYSTEM_INSTRUCTION
+
+    def test_hypothesis_system_instruction_includes_sensitive_attributes(self) -> None:
+        assert "精神疾患" in _HYPOTHESIS_SYSTEM_INSTRUCTION
+        assert "医療状態" in _HYPOTHESIS_SYSTEM_INSTRUCTION
+
+    def test_weekly_narrative_system_instruction_includes_sensitive_attributes(self) -> None:
+        assert "精神疾患" in _WEEKLY_NARRATIVE_SYSTEM_INSTRUCTION
+        assert "医療状態" in _WEEKLY_NARRATIVE_SYSTEM_INSTRUCTION
