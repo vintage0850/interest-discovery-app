@@ -210,7 +210,8 @@ class RealDiscoveryRepository(
             testingFocus = buildTestingFocus(behavior),
             recentChanges = buildRecentChanges(),
             evidenceReason = buildEvidenceReason(summary.latestHypothesis),
-            criteria = summary.criteria.map { it.toUiModel() }
+            criteria = summary.criteria.map { it.toUiModel() },
+            discrepancies = behavior.discrepancies.map { it.toUiModel() }
         )
     }
 
@@ -635,7 +636,23 @@ private data class BehaviorSummaryDto(
     val domainExperimentCounts: Map<String, Int> = emptyMap(),
     val domainCompletedCounts: Map<String, Int> = emptyMap(),
     val actionTypeCounts: Map<String, Int> = emptyMap(),
-    val diveCandidateDomains: List<String> = emptyList()
+    val diveCandidateDomains: List<String> = emptyList(),
+    val discrepancies: List<DiscrepancyDto> = emptyList()
+)
+
+@Serializable
+private data class DiscrepancyDto(
+    val type: String,
+    val domain: String,
+    val experimentId: Int,
+    val message: String
+)
+
+private fun DiscrepancyDto.toUiModel(): DiscrepancyUiModel = DiscrepancyUiModel(
+    type = type,
+    domain = domain,
+    experimentId = experimentId,
+    message = message
 )
 
 @Serializable

@@ -58,6 +58,9 @@ kotlin {
                 implementation(libs.sqldelight.sqlite.driver)
                 implementation(libs.junit)
                 implementation(libs.kotlinx.coroutines.test)
+                implementation(libs.androidx.activity.compose)
+                implementation(libs.androidx.compose.ui.test.junit4)
+                implementation(libs.robolectric)
             }
         }
         iosMain.dependencies {
@@ -82,6 +85,12 @@ android {
 
     buildFeatures {
         compose = true
+    }
+
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+        }
     }
 }
 

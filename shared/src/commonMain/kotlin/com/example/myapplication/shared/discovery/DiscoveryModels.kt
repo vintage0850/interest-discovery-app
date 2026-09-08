@@ -174,6 +174,18 @@ object HypothesisFeedbackPolicy {
 }
 
 /**
+ * 行動シグナルと実験結果の矛盾（Discover画面の「気になる発見」用）。
+ * backend の `_detect_discrepancies()` が生成する各要素をそのまま受け取る。
+ */
+@Serializable
+data class DiscrepancyUiModel(
+    val type: String,
+    val domain: String,
+    val experimentId: Int,
+    val message: String
+)
+
+/**
  * 発見・仮説データ（Discover画面用）
  */
 @Serializable
@@ -186,7 +198,8 @@ data class DiscoveryData(
     val evidenceReason: String = "直近3回の実験で高評価（4〜5点）を付け、予定時間より長く取り組んだため",
     val disclaimer: String = "※ これは現時点の行動から導き出した仮説です。",
     val nextExperiment: Experiment? = null,
-    val criteria: List<CriterionUiModel> = emptyList()
+    val criteria: List<CriterionUiModel> = emptyList(),
+    val discrepancies: List<DiscrepancyUiModel> = emptyList()
 )
 
 /**
