@@ -2,9 +2,11 @@ package com.example.myapplication
 
 import android.Manifest
 import android.os.Build
+import android.content.Intent
 import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -37,6 +39,34 @@ class MainActivityLaunchTest {
     @Test
     fun mainActivityがクラッシュせずRESUMEDまで到達する() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            assertEquals(Lifecycle.State.RESUMED, scenario.state)
+        }
+    }
+
+    @Test
+    fun coldStart_週次レポートIntentで起動してもRESUMEDまで到達する() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val intent = Intent(context, MainActivity::class.java).apply {
+            putExtra(MainActivity.EXTRA_REPORT_TYPE, "weekly")
+            putExtra(MainActivity.EXTRA_REPORT_SESSION_ID, 1)
+        }
+        ActivityScenario.launch<MainActivity>(intent).use { scenario ->
+            assertEquals(Lifecycle.State.RESUMED, scenario.state)
+        }
+    }
+
+    @Test
+    fun warmStart_月次レポートIntentでonNewIntentを呼び出してもRESUMEDを維持する() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            assertEquals(Lifecycle.State.RESUMED, scenario.state)
+            val context = InstrumentationRegistry.getInstrumentation().targetContext
+            val newIntent = Intent(context, MainActivity::class.java).apply {
+                putExtra(MainActivity.EXTRA_REPORT_TYPE, "monthly")
+                putExtra(MainActivity.EXTRA_REPORT_SESSION_ID, 1)
+            }
+            scenario.onActivity { activity ->
+                activity.onNewIntent(newIntent)
+            }
             assertEquals(Lifecycle.State.RESUMED, scenario.state)
         }
     }
