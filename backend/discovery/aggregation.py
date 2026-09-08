@@ -84,6 +84,11 @@ def build_monthly_metrics(
 
     期間は ``[start, end)`` で半開区間として扱う。
     月次専用メトリクス（完了率・アクティブ日数・進捗の波）を返す。
+
+    Note:
+        この関数は ``end - start == 30日`` を前提としている。
+        ``active_day_rate`` の分母および ``progress_segments`` の区間幅は
+        30日固定で計算される。
     """
 
     utc_start = _as_utc(start)
