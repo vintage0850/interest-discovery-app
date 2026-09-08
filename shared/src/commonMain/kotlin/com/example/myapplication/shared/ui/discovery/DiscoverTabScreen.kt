@@ -150,6 +150,47 @@ fun DiscoverTabScreen(
                         }
                     }
 
+                    if (data.discrepancies.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(DiscoverySpacing.base))
+
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(DiscoveryRadius.card))
+                                .background(DiscoveryColors.Surface)
+                                .border(1.dp, DiscoveryColors.BorderSubtle, RoundedCornerShape(DiscoveryRadius.card))
+                                .padding(DiscoverySpacing.cardPadding)
+                        ) {
+                            Text(
+                                text = "気になる発見",
+                                color = DiscoveryColors.TextPrimary,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+
+                            Spacer(modifier = Modifier.height(DiscoverySpacing.sm))
+
+                            data.discrepancies.forEach { discrepancy ->
+                                Text(
+                                    text = discrepancy.message,
+                                    color = DiscoveryColors.TextSecondary,
+                                    fontSize = 14.sp,
+                                    lineHeight = 21.sp
+                                )
+                                Spacer(modifier = Modifier.height(DiscoverySpacing.xs))
+                            }
+
+                            Spacer(modifier = Modifier.height(DiscoverySpacing.sm))
+
+                            Text(
+                                text = "もう一度試してみますか？",
+                                color = DiscoveryColors.Accent,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
                     if (data.criteria.isNotEmpty()) {
                         Spacer(modifier = Modifier.height(DiscoverySpacing.base))
 
