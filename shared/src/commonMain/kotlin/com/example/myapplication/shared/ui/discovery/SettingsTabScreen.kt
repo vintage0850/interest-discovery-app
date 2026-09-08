@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.myapplication.shared.discovery.SettingsUiState
 import com.example.myapplication.shared.ui.LocalGoogleCalendarLinkHandler
+import com.example.myapplication.shared.ui.LocalLineLinkHandler
 
 /**
  * 設定（Settings）タブ画面。
@@ -86,12 +87,13 @@ fun SettingsTabScreen(
             SectionHeader(title = "連携")
             SettingsCard {
                 Column {
+                    val onLinkLine = LocalLineLinkHandler.current
                     SettingsRow(
                         icon = "💬",
                         title = "LINE連携",
                         badge = "未連携",
                         description = "公式LINEから今日の実験やリマインドを受け取れます",
-                        onClick = { activeModal = "line" }
+                        onClick = { onLinkLine?.invoke() }
                     )
                     Spacer(modifier = Modifier.height(1.dp).fillMaxWidth().background(DiscoveryColors.BorderSubtle))
                     val calendarLinked = settingsState.googleCalendarLinked

@@ -1,5 +1,7 @@
 package com.example.myapplication
 
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -18,10 +20,13 @@ import com.example.myapplication.shared.discovery.AndroidDiscoverySettingsStorag
 import com.example.myapplication.shared.discovery.AndroidOnboardingStorage
 import com.example.myapplication.shared.ui.App
 import com.example.myapplication.shared.ui.LocalGoogleCalendarLinkHandler
+import com.example.myapplication.shared.ui.LocalLineLinkHandler
 import com.example.myapplication.work.DiscoveryNotificationScheduler
 import com.example.myapplication.work.DiscoveryPeriodicReportScheduler
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+
+private const val LINE_ADD_FRIEND_URL = "https://lin.ee/utP8awy"
 
 class MainActivity : ComponentActivity() {
 
@@ -72,6 +77,11 @@ class MainActivity : ComponentActivity() {
                             else -> Unit
                         }
                     }
+                },
+                LocalLineLinkHandler provides {
+                    startActivity(
+                        Intent(Intent.ACTION_VIEW, Uri.parse(LINE_ADD_FRIEND_URL))
+                    )
                 }
             ) {
                 App(

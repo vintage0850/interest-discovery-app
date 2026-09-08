@@ -93,6 +93,13 @@ android {
         buildConfig = true
     }
 
+    testOptions {
+        unitTests {
+            // 案件29：Robolectric で AndroidManifest / リソースを読めるようにする
+            isIncludeAndroidResources = true
+        }
+    }
+
     // MigrationTestHelper は端末上の assets からスキーマ JSON を読むので、
     // 書き出し先の schemas/ を androidTest の assets に含める。
     sourceSets.getByName("androidTest") {
@@ -153,6 +160,10 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.mockk)
+    // 案件29：Activity/Intent を JVM 上で検証するため Robolectric を導入
+    testImplementation(libs.robolectric)
+    testImplementation(platform(libs.androidx.compose.bom))
+    testImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.test.runner)
@@ -161,7 +172,12 @@ dependencies {
     androidTestImplementation(libs.androidx.room.testing)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
-    // WorkManager のテスト用（TestListenableWorkerBuilder）。Robolectric を導入していないため androidTest 側に置く
+    // WorkManager のテスト用（TestListenableWorkerBuilder / WorkManagerTestInitHelper）
+    testImplementation(libs.androidx.work.testing) {
+        exclude(group = "androidx.concurrent", module = "concurrent-futures")
+        exclude(group = "androidx.concurrent", module = "concurrent-futures-ktx")
+    }
+    testImplementation(libs.androidx.concurrent.futures.ktx)
     androidTestImplementation(libs.androidx.work.testing) {
         exclude(group = "androidx.concurrent", module = "concurrent-futures")
         exclude(group = "androidx.concurrent", module = "concurrent-futures-ktx")

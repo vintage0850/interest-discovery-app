@@ -71,6 +71,14 @@ import kotlinx.serialization.Serializable
  */
 val LocalGoogleCalendarLinkHandler = staticCompositionLocalOf<(() -> Unit)?> { null }
 
+/**
+ * LINE 公式アカウントの友だち追加ページを開く処理を Android ホスト側に委譲する CompositionLocal。
+ *
+ * ブラウザ/公式アプリ起動はプラットフォーム固有のため、shared から直接呼ばず、
+ * MainActivity 経由で [Intent.ACTION_VIEW] を発行する。
+ */
+val LocalLineLinkHandler = staticCompositionLocalOf<(() -> Unit)?> { null }
+
 @Composable
 fun App(
     driverFactory: DatabaseDriverFactory? = null,
