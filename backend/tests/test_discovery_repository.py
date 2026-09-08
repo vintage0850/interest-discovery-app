@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+from unittest.mock import patch
 
 import pytest
 from sqlalchemy.pool import StaticPool
@@ -15,6 +16,7 @@ from discovery.models import (
     HypothesisReaction,
     InterestSignal,
     InterestSignalSource,
+    MonthlyNarrativeCache,
     PsychAxis,
     PsychAxisResult,
     UserReflection,
@@ -955,4 +957,153 @@ class TestEvidenceRepository:
     ) -> None:
         session = repository.create_session("student-a")
         assert repository.list_evidence(session.id) == []
+
+
+class TestMonthlyNarrativeCacheRepository:
+    def test_save_and_get_monthly_narrative_cache(self, repository: DiscoveryRepository) -> None:
+        session = repository.create_session("student-a")
+        saved = repository.save_monthly_narrative_cache(
+            session_id=session.id,
+            cache_month="2026-09",
+            monthly_insights="直近30日の気づき",
+            progress_wave="進み方の波",
+            continuity_insight="継続率の分析",
+        )
+        assert saved.session_id == session.id
+        assert saved.cache_month == "2026-09"
+
+        fetched = repository.get_monthly_narrative_cache(session.id, "2026-09")
+        assert fetched is not None
+        assert fetched.monthly_insights == "直近30日の気づき"
+        assert fetched.progress_wave == "進み方の波"
+        assert fetched.continuity_insight == "継続率の分析"
+
+    def test_get_monthly_narrative_cache_not_found(self, repository: DiscoveryRepository) -> None:
+        session = repository.create_session("student-a")
+        assert repository.get_monthly_narrative_cache(session.id, "2026-09") is None
+
+    def test_save_monthly_narrative_cache_overwrites_same_month(
+        self, repository: DiscoveryRepository
+    ) -> None:
+        session = repository.create_session("student-a")
+        repository.save_monthly_narrative_cache(
+            session_id=session.id,
+            cache_month="2026-09",
+            monthly_insights="最初",
+            progress_wave="最初の波",
+            continuity_insight="最初の継続",
+        )
+        updated = repository.save_monthly_narrative_cache(
+            session_id=session.id,
+            cache_month="2026-09",
+            monthly_insights="更新後",
+            progress_wave="更新後の波",
+            continuity_insight="更新後の継続",
+        )
+        assert updated.monthly_insights == "更新後"
+
+        fetched = repository.get_monthly_narrative_cache(session.id, "2026-09")
+        assert fetched is not None
+        assert fetched.monthly_insights == "更新後"
+        assert fetched.progress_wave == "更新後の波"
+        assert fetched.continuity_insight == "更新後の継続"
+
+    def test_monthly_narrative_cache_isolated_per_session(
+        self, repository: DiscoveryRepository
+    ) -> None:
+        session_a = repository.create_session("student-a")
+        session_b = repository.create_session("student-b")
+        repository.save_monthly_narrative_cache(
+            session_id=session_a.id,
+            cache_month="2026-09",
+            monthly_insights="A",
+            progress_wave="A-wave",
+            continuity_insight="A-cont",
+        )
+        repository.save_monthly_narrative_cache(
+            session_id=session_b.id,
+            cache_month="2026-09",
+            monthly_insights="B",
+            progress_wave="B-wave",
+            continuity_insight="B-cont",
+        )
+
+        fetched_a = repository.get_monthly_narrative_cache(session_a.id, "2026-09")
+        fetched_b = repository.get_monthly_narrative_cache(session_b.id, "2026-09")
+        assert fetched_a is not None
+        assert fetched_b is not None
+        assert fetched_a.monthly_insights == "A"
+        assert fetched_b.monthly_insights == "B"
+
+    def test_monthly_narrative_cache_isolated_per_month(
+        self, repository: DiscoveryRepository
+    ) -> None:
+        session = repository.create_session("student-a")
+        repository.save_monthly_narrative_cache(
+            session_id=session.id,
+            cache_month="2026-08",
+            monthly_insights="8月",
+            progress_wave="8月波",
+            continuity_insight="8月継続",
+        )
+        repository.save_monthly_narrative_cache(
+            session_id=session.id,
+            cache_month="2026-09",
+            monthly_insights="9月",
+            progress_wave="9月波",
+            continuity_insight="9月継続",
+        )
+
+        fetched_august = repository.get_monthly_narrative_cache(session.id, "2026-08")
+        fetched_september = repository.get_monthly_narrative_cache(session.id, "2026-09")
+        assert fetched_august is not None
+        assert fetched_august.monthly_insights == "8月"
+        assert fetched_september is not None
+        assert fetched_september.monthly_insights == "9月"
+
+    def test_save_monthly_narrative_cache_concurrent_insert_returns_winner(
+        self, repository: DiscoveryRepository
+    ) -> None:
+        session = repository.create_session("student-a")
+        with Session(repository._engine) as db:
+            winner = MonthlyNarrativeCache(
+                session_id=session.id,
+                cache_month="2026-09",
+                monthly_insights="先に勝った",
+                progress_wave="winner-wave",
+                continuity_insight="winner-cont",
+            )
+            db.add(winner)
+            db.commit()
+
+        original_exec = Session.exec
+        call_count = [0]
+
+        class _FirstProxy:
+            def __init__(self, value):
+                self._value = value
+
+            def first(self):
+                return self._value
+
+        def fake_exec(self, statement, *args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return _FirstProxy(None)
+            if call_count[0] == 2:
+                return _FirstProxy(winner)
+            return original_exec(self, statement, *args, **kwargs)
+
+        with patch.object(Session, "exec", fake_exec):
+            repository.save_monthly_narrative_cache(
+                session_id=session.id,
+                cache_month="2026-09",
+                monthly_insights="後から",
+                progress_wave="loser-wave",
+                continuity_insight="loser-cont",
+            )
+
+        result = repository.get_monthly_narrative_cache(session.id, "2026-09")
+        assert result is not None
+        assert result.monthly_insights == "先に勝った"
 

@@ -11,6 +11,7 @@ from discovery.aggregation import (
     _DURATION_RATIO_HIGH,
     build_behavior_summary,
     build_behavior_summary_for_period,
+    build_monthly_metrics,
 )
 from discovery.models import (
     ActionType,
@@ -697,3 +698,257 @@ class TestDiveCandidateDomains:
         assert summary.domain_experiment_counts == {tech: 3}
         assert summary.domain_completed_counts == {tech: 2}
         assert summary.dive_candidate_domains == [tech]
+
+
+class TestMonthlyMetrics:
+    """月次レポート用の決定論的メトリクス計算のテスト。"""
+
+    def _signal(self, created_at: datetime.datetime) -> InterestSignal:
+        return InterestSignal(
+            session_id=1,
+            action_type=ActionType.SEARCH.value,
+            domain=DomainType.TECH.value,
+            content_summary="summary",
+            source=InterestSignalSource.SEARCH_HISTORY.value,
+            created_at=created_at,
+            occurred_at=created_at,
+        )
+
+    def _experiment(
+        self,
+        experiment_id: int,
+        started_at: datetime.datetime | None = None,
+        completed_at: datetime.datetime | None = None,
+    ) -> Experiment:
+        status = ExperimentStatus.COMPLETED.value if completed_at else ExperimentStatus.STARTED.value
+        return Experiment(
+            id=experiment_id,
+            session_id=1,
+            title="Experiment",
+            description="desc",
+            domain=DomainType.TECH.value,
+            planned_minutes=10,
+            status=status,
+            started_at=started_at,
+            completed_at=completed_at,
+        )
+
+    def test_empty_period_returns_zero_metrics_and_null_rate(self) -> None:
+        period_end = datetime.datetime(2026, 9, 1, 0, 0, 0, tzinfo=datetime.timezone.utc)
+        start = period_end - datetime.timedelta(days=30)
+        metrics = build_monthly_metrics([], [], start, period_end)
+
+        assert metrics["started_experiment_count"] == 0
+        assert metrics["completed_started_experiment_count"] == 0
+        assert metrics["completion_rate"] is None
+        assert metrics["active_days"] == 0
+        assert metrics["active_day_rate"] == 0.0
+        assert len(metrics["progress_segments"]) == 3
+        for segment in metrics["progress_segments"]:
+            assert segment["completed_experiment_count"] == 0
+            assert segment["active_days"] == 0
+
+    def test_started_and_completed_within_period_counts(self) -> None:
+        period_end = datetime.datetime(2026, 9, 1, 0, 0, 0, tzinfo=datetime.timezone.utc)
+        start = period_end - datetime.timedelta(days=30)
+        started_at = start + datetime.timedelta(days=5)
+        completed_at = start + datetime.timedelta(days=10)
+        experiments = [self._experiment(1, started_at, completed_at)]
+
+        metrics = build_monthly_metrics([], experiments, start, period_end)
+
+        assert metrics["started_experiment_count"] == 1
+        assert metrics["completed_started_experiment_count"] == 1
+        assert metrics["completion_rate"] == 1.0
+
+    def test_started_within_period_but_completed_later_counts_as_zero_rate(self) -> None:
+        period_end = datetime.datetime(2026, 9, 1, 0, 0, 0, tzinfo=datetime.timezone.utc)
+        start = period_end - datetime.timedelta(days=30)
+        started_at = start + datetime.timedelta(days=5)
+        completed_at = period_end + datetime.timedelta(hours=1)
+        experiments = [self._experiment(1, started_at, completed_at)]
+
+        metrics = build_monthly_metrics([], experiments, start, period_end)
+
+        assert metrics["started_experiment_count"] == 1
+        assert metrics["completed_started_experiment_count"] == 0
+        assert metrics["completion_rate"] == 0.0
+
+    def test_completion_rate_is_null_when_no_started_experiments(self) -> None:
+        period_end = datetime.datetime(2026, 9, 1, 0, 0, 0, tzinfo=datetime.timezone.utc)
+        start = period_end - datetime.timedelta(days=30)
+        signal = self._signal(start + datetime.timedelta(days=1))
+
+        metrics = build_monthly_metrics([signal], [], start, period_end)
+
+        assert metrics["completion_rate"] is None
+
+    def test_active_days_deduplicate_same_day_events(self) -> None:
+        period_end = datetime.datetime(2026, 9, 1, 0, 0, 0, tzinfo=datetime.timezone.utc)
+        start = period_end - datetime.timedelta(days=30)
+        day = start + datetime.timedelta(days=3)
+        signals = [
+            self._signal(day),
+            self._signal(day + datetime.timedelta(hours=3)),
+        ]
+        experiments = [
+            self._experiment(
+                1,
+                started_at=day + datetime.timedelta(hours=1),
+                completed_at=day + datetime.timedelta(hours=2),
+            ),
+        ]
+
+        metrics = build_monthly_metrics(signals, experiments, start, period_end)
+
+        assert metrics["active_days"] == 1
+        assert metrics["active_day_rate"] == pytest.approx(1.0 / 30.0)
+
+    def test_active_days_count_different_days(self) -> None:
+        period_end = datetime.datetime(2026, 9, 1, 0, 0, 0, tzinfo=datetime.timezone.utc)
+        start = period_end - datetime.timedelta(days=30)
+        signals = [
+            self._signal(start + datetime.timedelta(days=1)),
+            self._signal(start + datetime.timedelta(days=5)),
+        ]
+
+        metrics = build_monthly_metrics(signals, [], start, period_end)
+
+        assert metrics["active_days"] == 2
+        assert metrics["active_day_rate"] == pytest.approx(2.0 / 30.0)
+
+    def test_progress_segments_split_recent_into_three_10_day_windows(self) -> None:
+        period_end = datetime.datetime(2026, 9, 1, 0, 0, 0, tzinfo=datetime.timezone.utc)
+        start = period_end - datetime.timedelta(days=30)
+        # segment 1: [start, start+10)
+        # segment 2: [start+10, start+20)
+        # segment 3: [start+20, period_end)
+        e1 = self._experiment(
+            1,
+            started_at=start + datetime.timedelta(days=1),
+            completed_at=start + datetime.timedelta(days=2),
+        )
+        e2 = self._experiment(
+            2,
+            started_at=start + datetime.timedelta(days=11),
+            completed_at=start + datetime.timedelta(days=12),
+        )
+        e3 = self._experiment(
+            3,
+            started_at=start + datetime.timedelta(days=25),
+            completed_at=start + datetime.timedelta(days=26),
+        )
+        signals = [
+            self._signal(start + datetime.timedelta(days=3)),
+            self._signal(start + datetime.timedelta(days=15)),
+        ]
+
+        metrics = build_monthly_metrics(signals, [e1, e2, e3], start, period_end)
+
+        segments = metrics["progress_segments"]
+        assert len(segments) == 3
+        assert segments[0]["completed_experiment_count"] == 1
+        assert segments[0]["active_days"] == 3  # e1 started/completed + signal day
+        assert segments[1]["completed_experiment_count"] == 1
+        assert segments[1]["active_days"] == 3  # e2 started/completed + signal day
+        assert segments[2]["completed_experiment_count"] == 1
+        assert segments[2]["active_days"] == 2  # e3 started/completed day
+
+    def test_events_at_period_end_are_excluded(self) -> None:
+        period_end = datetime.datetime(2026, 9, 1, 0, 0, 0, tzinfo=datetime.timezone.utc)
+        start = period_end - datetime.timedelta(days=30)
+        experiments = [
+            self._experiment(
+                1,
+                started_at=period_end - datetime.timedelta(hours=1),
+                completed_at=period_end,
+            ),
+        ]
+
+        metrics = build_monthly_metrics([], experiments, start, period_end)
+
+        assert metrics["started_experiment_count"] == 1
+        assert metrics["completed_started_experiment_count"] == 0
+        assert metrics["active_days"] == 1  # started_at is within period
+
+    def test_naive_datetimes_treated_as_utc(self) -> None:
+        period_end = datetime.datetime(2026, 9, 1, 0, 0, 0, tzinfo=datetime.timezone.utc)
+        start = period_end - datetime.timedelta(days=30)
+        naive_signal = InterestSignal(
+            session_id=1,
+            action_type=ActionType.SEARCH.value,
+            domain=DomainType.TECH.value,
+            content_summary="summary",
+            source=InterestSignalSource.SEARCH_HISTORY.value,
+            created_at=start + datetime.timedelta(days=2),
+            occurred_at=start + datetime.timedelta(days=2),
+        )
+
+        metrics = build_monthly_metrics([naive_signal], [], start, period_end)
+
+        assert metrics["active_days"] == 1
+
+    def test_month_length_independence_for_28_day_february(self) -> None:
+        period_end = datetime.datetime(2026, 3, 1, 0, 0, 0, tzinfo=datetime.timezone.utc)
+        start = period_end - datetime.timedelta(days=30)
+        signal = self._signal(start + datetime.timedelta(days=1))
+
+        metrics = build_monthly_metrics([signal], [], start, period_end)
+
+        assert metrics["active_day_rate"] == pytest.approx(1.0 / 30.0)
+        assert len(metrics["progress_segments"]) == 3
+
+    def test_completed_experiment_started_before_period_counts_active_day(
+        self,
+    ) -> None:
+        period_end = datetime.datetime(
+            2026, 9, 1, 0, 0, 0, tzinfo=datetime.timezone.utc
+        )
+        start = period_end - datetime.timedelta(days=30)
+        experiment = self._experiment(
+            1,
+            started_at=start - datetime.timedelta(days=5),
+            completed_at=start + datetime.timedelta(days=5),
+        )
+
+        metrics = build_monthly_metrics([], [experiment], start, period_end)
+
+        assert metrics["started_experiment_count"] == 0
+        assert metrics["completed_started_experiment_count"] == 0
+        assert metrics["active_days"] == 1
+
+    def test_leap_year_february_counts_february_29(self) -> None:
+        period_end = datetime.datetime(
+            2024, 3, 1, 0, 0, 0, tzinfo=datetime.timezone.utc
+        )
+        start = period_end - datetime.timedelta(days=30)
+        leap_day_signal = self._signal(
+            datetime.datetime(2024, 2, 29, 12, 0, 0, tzinfo=datetime.timezone.utc)
+        )
+
+        metrics = build_monthly_metrics([leap_day_signal], [], start, period_end)
+
+        assert metrics["active_days"] == 1
+        assert metrics["active_day_rate"] == pytest.approx(1.0 / 30.0)
+
+    def test_aware_datetime_with_non_utc_offset_converted_to_utc(self) -> None:
+        period_end = datetime.datetime(
+            2026, 9, 1, 0, 0, 0, tzinfo=datetime.timezone.utc
+        )
+        start = period_end - datetime.timedelta(days=30)
+        jst = datetime.timezone(datetime.timedelta(hours=9))
+        # 2026-08-02 09:00 JST == 2026-08-02 00:00 UTC
+        aware_signal = InterestSignal(
+            session_id=1,
+            action_type=ActionType.SEARCH.value,
+            domain=DomainType.TECH.value,
+            content_summary="summary",
+            source=InterestSignalSource.SEARCH_HISTORY.value,
+            created_at=datetime.datetime(2026, 8, 2, 9, 0, 0, tzinfo=jst),
+            occurred_at=datetime.datetime(2026, 8, 2, 9, 0, 0, tzinfo=jst),
+        )
+
+        metrics = build_monthly_metrics([aware_signal], [], start, period_end)
+
+        assert metrics["active_days"] == 1
+

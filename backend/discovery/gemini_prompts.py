@@ -61,6 +61,26 @@ class WeeklyNarrativeCandidate(BaseModel):
     change_from_past: str = Field(..., min_length=1, max_length=200)
 
 
+class MonthlyNarrativeCandidate(BaseModel):
+    """Gemini が生成する月次ナラティブ。"""
+
+    monthly_insights: str = Field(..., min_length=1, max_length=200)
+    progress_wave: str = Field(..., min_length=1, max_length=200)
+    continuity_insight: str = Field(..., min_length=1, max_length=200)
+
+    @field_validator("monthly_insights", "progress_wave", "continuity_insight")
+    @classmethod
+    def _validate_text(cls, value: str) -> str:
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("field must not be empty or whitespace only")
+        if len(trimmed) > 200:
+            raise ValueError("field must be 200 characters or less after trimming")
+        if "\n" in trimmed or "\r" in trimmed:
+            raise ValueError("field must not contain line breaks")
+        return trimmed
+
+
 class DiscoveryGeminiClient:
     """Gemini API を使って実験候補と興味仮説を生成するクライアント。"""
 
@@ -165,6 +185,33 @@ class DiscoveryGeminiClient:
         except APIError as exc:
             raise RuntimeError(_sanitize_gemini_error_message(exc)) from exc
         candidate = self._parse_weekly_narrative_response(response.text or "")
+        return candidate.model_dump()
+
+    def generate_monthly_narrative(
+        self,
+        recent_metrics: dict[str, Any],
+        previous_metrics: dict[str, Any],
+    ) -> dict[str, Any]:
+        """直近30日とその前30日のメトリクスを比較し、月次ナラティブを生成する。"""
+        from google.genai.errors import APIError
+
+        client = self._ensure_client()
+        prompt = self._build_monthly_narrative_prompt(
+            recent_metrics, previous_metrics
+        )
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=_MONTHLY_NARRATIVE_SYSTEM_INSTRUCTION,
+                    response_mime_type="application/json",
+                    response_schema=MonthlyNarrativeCandidate,
+                ),
+            )
+        except APIError as exc:
+            raise RuntimeError(_sanitize_gemini_error_message(exc)) from exc
+        candidate = self._parse_monthly_narrative_response(response.text or "")
         return candidate.model_dump()
 
     def _build_experiment_prompt(
@@ -297,6 +344,35 @@ class DiscoveryGeminiClient:
             raise ValueError("Gemini 応答がオブジェクトではありません")
         return WeeklyNarrativeCandidate.model_validate(data)
 
+    def _build_monthly_narrative_prompt(
+        self,
+        recent_metrics: dict[str, Any],
+        previous_metrics: dict[str, Any],
+    ) -> str:
+        recent_text = json.dumps(recent_metrics, ensure_ascii=False, indent=2)
+        previous_text = json.dumps(previous_metrics, ensure_ascii=False, indent=2)
+        return (
+            "以下は高校生の興味発見アクティビティの直近30日間と、その前の30日間のメトリクスです。\n\n"
+            "【直近30日】\n"
+            f"{recent_text}\n\n"
+            "【前の30日】\n"
+            f"{previous_text}\n\n"
+            "これらを比較して、直近30日間の全体気づき、進み方の波、継続できたペースを"
+            "簡潔に日本語で出力してください。"
+        )
+
+    def _parse_monthly_narrative_response(self, raw: str) -> MonthlyNarrativeCandidate:
+        if not raw:
+            raise ValueError("Gemini から空の応答が返りました")
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Gemini 応答の JSON パースに失敗しました: {exc}") from exc
+
+        if isinstance(data, list):
+            raise ValueError("Gemini 応答がオブジェクトではありません")
+        return MonthlyNarrativeCandidate.model_validate(data)
+
 
 _EXPERIMENT_SYSTEM_INSTRUCTION = """\
 あなたは高校生の興味発見を支援するアシスタントです。
@@ -354,4 +430,32 @@ _WEEKLY_NARRATIVE_SYSTEM_INSTRUCTION = """\
 以下の JSON スキーマに厳密に従ってください。余計な説明は不要です。
 - weekly_insights: 直近1週間の気づき（200文字以内）
 - change_from_past: 前週からの変化（200文字以内）
+"""
+
+_MONTHLY_NARRATIVE_SYSTEM_INSTRUCTION = """\
+あなたは高校生の興味発見を支援するアシスタントです。
+生徒の直近30日間とその前の30日間の行動データを比較し、簡潔な月次レポートを生成してください。
+
+【あなたの役割】
+- 直近30日間の全体気づきを述べる
+- 直近30日間の進み方の波（3つの10日区間のペース変化）を述べる
+- 完了率とアクティブ日数を根拠に、継続できた点と次に試せる小さな工夫を述べる
+
+【絶対にやらないこと】
+- データに基づかない断定はしない
+- 生徒の能力や将来を決めつけない
+- 診断、優劣評価、失敗扱い、他ユーザーとの比較をしない
+- 件数・率・因果関係を捏造しない
+
+【入力メトリクスの補足】
+- completion_rate は「期間内に開始した実験のうち、期間内に完了した割合（百分率・小数1桁）」です。
+- completion_rate が null の場合は、期間内に開始された実験が0件であることを意味します。0%とは解釈しないでください。
+- active_day_rate は「期間内に活動があった日数を30日で割った値（百分率・小数1桁）」です。活動日数はシグナル発生・実験開始・実験完了の日付を重複なく数えたものです。
+- progress_segments は直近30日を3つの10日区間に分けたものです。各区間に completed_experiment_count と active_days が含まれます。
+
+【出力形式】
+以下の JSON スキーマに厳密に従ってください。余計な説明は不要です。
+- monthly_insights: 直近30日間の全体気づき（200文字以内、改行なし）
+- progress_wave: 進み方の波（200文字以内、改行なし）
+- continuity_insight: 継続のペースに関する気づき（200文字以内、改行なし）
 """

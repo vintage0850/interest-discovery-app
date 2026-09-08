@@ -25,6 +25,7 @@ from discovery.models import (
     InterestHypothesis,
     InterestSignal,
     InterestSignalSource,
+    MonthlyNarrativeCache,
     PsychAxis,
     PsychAxisResult,
     UserReflection,
@@ -663,6 +664,67 @@ class DiscoveryRepository:
                     select(WeeklyNarrativeCache).where(
                         WeeklyNarrativeCache.session_id == session_id,
                         WeeklyNarrativeCache.cache_date == cache_date,
+                    )
+                ).first()
+                if winner is not None:
+                    return winner
+                raise
+            db.refresh(cache)
+            return cache
+
+    def get_monthly_narrative_cache(
+        self, session_id: int, cache_month: str
+    ) -> MonthlyNarrativeCache | None:
+        """指定セッション・UTC月のキャッシュ済み月次ナラティブを取得する。"""
+        with Session(self._engine) as db:
+            statement = select(MonthlyNarrativeCache).where(
+                MonthlyNarrativeCache.session_id == session_id,
+                MonthlyNarrativeCache.cache_month == cache_month,
+            )
+            return db.exec(statement).first()
+
+    def save_monthly_narrative_cache(
+        self,
+        session_id: int,
+        cache_month: str,
+        monthly_insights: str,
+        progress_wave: str,
+        continuity_insight: str,
+    ) -> MonthlyNarrativeCache:
+        """月次ナラティブをキャッシュとして保存する（同一月なら上書き）。"""
+        with Session(self._engine) as db:
+            existing = db.exec(
+                select(MonthlyNarrativeCache).where(
+                    MonthlyNarrativeCache.session_id == session_id,
+                    MonthlyNarrativeCache.cache_month == cache_month,
+                )
+            ).first()
+            if existing is not None:
+                existing.monthly_insights = monthly_insights
+                existing.progress_wave = progress_wave
+                existing.continuity_insight = continuity_insight
+                db.add(existing)
+                db.commit()
+                db.refresh(existing)
+                return existing
+
+            cache = MonthlyNarrativeCache(
+                session_id=session_id,
+                cache_month=cache_month,
+                monthly_insights=monthly_insights,
+                progress_wave=progress_wave,
+                continuity_insight=continuity_insight,
+            )
+            db.add(cache)
+            try:
+                db.commit()
+            except IntegrityError:
+                # 同時リクエストで先に他方がINSERTした場合はそちらを正とする。
+                db.rollback()
+                winner = db.exec(
+                    select(MonthlyNarrativeCache).where(
+                        MonthlyNarrativeCache.session_id == session_id,
+                        MonthlyNarrativeCache.cache_month == cache_month,
                     )
                 ).first()
                 if winner is not None:

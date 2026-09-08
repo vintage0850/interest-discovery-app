@@ -299,3 +299,143 @@ class TestGenerateWeeklyNarrative:
         assert "tech" in prompt
         assert "recent" in prompt.lower() or "直近" in prompt
         assert "previous" in prompt.lower() or "前週" in prompt
+
+
+class TestGenerateMonthlyNarrative:
+    def _recent_metrics(self) -> dict:
+        return {
+            "behavior_summary": {"total_signals": 10, "completed_experiments": 3},
+            "started_experiment_count": 5,
+            "completed_started_experiment_count": 3,
+            "completion_rate": 0.6,
+            "active_days": 12,
+            "active_day_rate": 0.4,
+            "progress_segments": [
+                {"completed_experiment_count": 1, "active_days": 4},
+                {"completed_experiment_count": 1, "active_days": 4},
+                {"completed_experiment_count": 1, "active_days": 4},
+            ],
+        }
+
+    def _previous_metrics(self) -> dict:
+        return {
+            "behavior_summary": {"total_signals": 5, "completed_experiments": 1},
+            "started_experiment_count": 3,
+            "completed_started_experiment_count": 1,
+            "completion_rate": 1.0 / 3.0,
+            "active_days": 6,
+            "active_day_rate": 0.2,
+        }
+
+    def test_returns_monthly_narrative(self, client: DiscoveryGeminiClient) -> None:
+        response = MagicMock()
+        response.text = """{
+            "monthly_insights": "技術分野への興味が高まっています",
+            "progress_wave": "後半に実験が集中しました",
+            "continuity_insight": "継続的に活動できています"
+        }"""
+        client._client.models.generate_content.return_value = response
+
+        result = client.generate_monthly_narrative(
+            recent_metrics=self._recent_metrics(),
+            previous_metrics=self._previous_metrics(),
+        )
+        assert result["monthly_insights"] == "技術分野への興味が高まっています"
+        assert result["progress_wave"] == "後半に実験が集中しました"
+        assert result["continuity_insight"] == "継続的に活動できています"
+
+    def test_rejects_too_long_insights(self, client: DiscoveryGeminiClient) -> None:
+        response = MagicMock()
+        response.text = f"""{{
+            "monthly_insights": "{'あ' * 201}",
+            "progress_wave": "進み方",
+            "continuity_insight": "継続率"
+        }}"""
+        client._client.models.generate_content.return_value = response
+
+        with pytest.raises(ValueError):
+            client.generate_monthly_narrative(
+                recent_metrics=self._recent_metrics(),
+                previous_metrics=self._previous_metrics(),
+            )
+
+    def test_rejects_empty_insights(self, client: DiscoveryGeminiClient) -> None:
+        response = MagicMock()
+        response.text = """{
+            "monthly_insights": "",
+            "progress_wave": "進み方",
+            "continuity_insight": "継続率"
+        }"""
+        client._client.models.generate_content.return_value = response
+
+        with pytest.raises(ValueError):
+            client.generate_monthly_narrative(
+                recent_metrics=self._recent_metrics(),
+                previous_metrics=self._previous_metrics(),
+            )
+
+    def test_rejects_multiline_text(self, client: DiscoveryGeminiClient) -> None:
+        response = MagicMock()
+        response.text = """{
+            "monthly_insights": "1行目\\n2行目",
+            "progress_wave": "進み方",
+            "continuity_insight": "継続率"
+        }"""
+        client._client.models.generate_content.return_value = response
+
+        with pytest.raises(ValueError):
+            client.generate_monthly_narrative(
+                recent_metrics=self._recent_metrics(),
+                previous_metrics=self._previous_metrics(),
+            )
+
+    def test_rejects_malformed_json(self, client: DiscoveryGeminiClient) -> None:
+        response = MagicMock()
+        response.text = "not valid json"
+        client._client.models.generate_content.return_value = response
+
+        with pytest.raises(ValueError):
+            client.generate_monthly_narrative(
+                recent_metrics=self._recent_metrics(),
+                previous_metrics=self._previous_metrics(),
+            )
+
+    def test_converts_api_error_to_safe_runtime_error(
+        self, client: DiscoveryGeminiClient
+    ) -> None:
+        from google.genai.errors import APIError
+
+        client._client.models.generate_content.side_effect = APIError(
+            code=500, response_json={"error": "network error"}
+        )
+        with pytest.raises(RuntimeError) as exc_info:
+            client.generate_monthly_narrative(
+                recent_metrics=self._recent_metrics(),
+                previous_metrics=self._previous_metrics(),
+            )
+        assert "network error" not in str(exc_info.value)
+        assert "Gemini API" in str(exc_info.value)
+
+    def test_request_includes_metrics_and_period_context(
+        self, client: DiscoveryGeminiClient
+    ) -> None:
+        response = MagicMock()
+        response.text = """{
+            "monthly_insights": "技術分野への興味が高まっています",
+            "progress_wave": "後半に実験が集中しました",
+            "continuity_insight": "継続的に活動できています"
+        }"""
+        client._client.models.generate_content.return_value = response
+
+        client.generate_monthly_narrative(
+            recent_metrics=self._recent_metrics(),
+            previous_metrics=self._previous_metrics(),
+        )
+
+        call_args = client._client.models.generate_content.call_args
+        prompt = call_args.kwargs["contents"]
+        assert "completion_rate" in prompt
+        assert "active_days" in prompt
+        assert "progress_segments" in prompt
+        assert "直近30日" in prompt
+        assert "前の30日" in prompt

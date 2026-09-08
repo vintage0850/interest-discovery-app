@@ -12,6 +12,7 @@ from discovery.models import (
     ExperimentSelectRequest,
     InterestSignalCreate,
     InterestSignalSource,
+    MonthlyNarrativeResponse,
     OnboardingUpdateRequest,
     PsychAxis,
     PsychAxisSurveySubmitRequest,
@@ -439,5 +440,89 @@ class TestHypothesisResponseValidation:
                 supporting_evidence=[{"domain": "tech"}],  # type: ignore[arg-type]
                 suggested_next_domains=["art"],
                 created_at=now,
+            )
+
+
+class TestMonthlyNarrativeResponseValidation:
+    def test_valid_monthly_narrative_response_passes(self) -> None:
+        response = MonthlyNarrativeResponse(
+            period_start="2026-08-02",
+            period_end_exclusive="2026-09-01",
+            monthly_insights="直近30日間の気づきです",
+            progress_wave="進み方の波の分析です",
+            continuity_insight="継続率に関する分析です",
+        )
+        assert response.period_start == "2026-08-02"
+        assert response.period_end_exclusive == "2026-09-01"
+        assert response.monthly_insights == "直近30日間の気づきです"
+
+    def test_monthly_narrative_response_rejects_empty_insights(self) -> None:
+        with pytest.raises(ValidationError):
+            MonthlyNarrativeResponse(
+                period_start="2026-08-02",
+                period_end_exclusive="2026-09-01",
+                monthly_insights="",
+                progress_wave="進み方の波",
+                continuity_insight="継続率",
+            )
+
+    def test_monthly_narrative_response_rejects_whitespace_only_insights(self) -> None:
+        with pytest.raises(ValidationError):
+            MonthlyNarrativeResponse(
+                period_start="2026-08-02",
+                period_end_exclusive="2026-09-01",
+                monthly_insights="   ",
+                progress_wave="進み方の波",
+                continuity_insight="継続率",
+            )
+
+    def test_monthly_narrative_response_rejects_too_long_insights(self) -> None:
+        with pytest.raises(ValidationError):
+            MonthlyNarrativeResponse(
+                period_start="2026-08-02",
+                period_end_exclusive="2026-09-01",
+                monthly_insights="あ" * 201,
+                progress_wave="進み方の波",
+                continuity_insight="継続率",
+            )
+
+    def test_monthly_narrative_response_rejects_too_long_progress_wave(self) -> None:
+        with pytest.raises(ValidationError):
+            MonthlyNarrativeResponse(
+                period_start="2026-08-02",
+                period_end_exclusive="2026-09-01",
+                monthly_insights="直近30日間の気づき",
+                progress_wave="あ" * 201,
+                continuity_insight="継続率",
+            )
+
+    def test_monthly_narrative_response_rejects_too_long_continuity_insight(self) -> None:
+        with pytest.raises(ValidationError):
+            MonthlyNarrativeResponse(
+                period_start="2026-08-02",
+                period_end_exclusive="2026-09-01",
+                monthly_insights="直近30日間の気づき",
+                progress_wave="進み方の波",
+                continuity_insight="あ" * 201,
+            )
+
+    def test_monthly_narrative_response_rejects_newlines(self) -> None:
+        with pytest.raises(ValidationError):
+            MonthlyNarrativeResponse(
+                period_start="2026-08-02",
+                period_end_exclusive="2026-09-01",
+                monthly_insights="1行目\n2行目",
+                progress_wave="進み方の波",
+                continuity_insight="継続率",
+            )
+
+    def test_monthly_narrative_response_rejects_carriage_returns(self) -> None:
+        with pytest.raises(ValidationError):
+            MonthlyNarrativeResponse(
+                period_start="2026-08-02",
+                period_end_exclusive="2026-09-01",
+                monthly_insights="1行目\r2行目",
+                progress_wave="進み方の波",
+                continuity_insight="継続率",
             )
 
