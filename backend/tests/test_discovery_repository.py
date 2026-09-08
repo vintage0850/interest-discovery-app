@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+from unittest.mock import patch
 
 import pytest
 from sqlalchemy.pool import StaticPool
@@ -15,6 +16,7 @@ from discovery.models import (
     HypothesisReaction,
     InterestSignal,
     InterestSignalSource,
+    MonthlyNarrativeCache,
     PsychAxis,
     PsychAxisResult,
     UserReflection,
@@ -1058,4 +1060,50 @@ class TestMonthlyNarrativeCacheRepository:
         assert fetched_august.monthly_insights == "8月"
         assert fetched_september is not None
         assert fetched_september.monthly_insights == "9月"
+
+    def test_save_monthly_narrative_cache_concurrent_insert_returns_winner(
+        self, repository: DiscoveryRepository
+    ) -> None:
+        session = repository.create_session("student-a")
+        with Session(repository._engine) as db:
+            winner = MonthlyNarrativeCache(
+                session_id=session.id,
+                cache_month="2026-09",
+                monthly_insights="先に勝った",
+                progress_wave="winner-wave",
+                continuity_insight="winner-cont",
+            )
+            db.add(winner)
+            db.commit()
+
+        original_exec = Session.exec
+        call_count = [0]
+
+        class _FirstProxy:
+            def __init__(self, value):
+                self._value = value
+
+            def first(self):
+                return self._value
+
+        def fake_exec(self, statement, *args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return _FirstProxy(None)
+            if call_count[0] == 2:
+                return _FirstProxy(winner)
+            return original_exec(self, statement, *args, **kwargs)
+
+        with patch.object(Session, "exec", fake_exec):
+            repository.save_monthly_narrative_cache(
+                session_id=session.id,
+                cache_month="2026-09",
+                monthly_insights="後から",
+                progress_wave="loser-wave",
+                continuity_insight="loser-cont",
+            )
+
+        result = repository.get_monthly_narrative_cache(session.id, "2026-09")
+        assert result is not None
+        assert result.monthly_insights == "先に勝った"
 

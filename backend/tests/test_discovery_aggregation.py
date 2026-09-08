@@ -898,3 +898,57 @@ class TestMonthlyMetrics:
         assert metrics["active_day_rate"] == pytest.approx(1.0 / 30.0)
         assert len(metrics["progress_segments"]) == 3
 
+    def test_completed_experiment_started_before_period_counts_active_day(
+        self,
+    ) -> None:
+        period_end = datetime.datetime(
+            2026, 9, 1, 0, 0, 0, tzinfo=datetime.timezone.utc
+        )
+        start = period_end - datetime.timedelta(days=30)
+        experiment = self._experiment(
+            1,
+            started_at=start - datetime.timedelta(days=5),
+            completed_at=start + datetime.timedelta(days=5),
+        )
+
+        metrics = build_monthly_metrics([], [experiment], start, period_end)
+
+        assert metrics["started_experiment_count"] == 0
+        assert metrics["completed_started_experiment_count"] == 0
+        assert metrics["active_days"] == 1
+
+    def test_leap_year_february_counts_february_29(self) -> None:
+        period_end = datetime.datetime(
+            2024, 3, 1, 0, 0, 0, tzinfo=datetime.timezone.utc
+        )
+        start = period_end - datetime.timedelta(days=30)
+        leap_day_signal = self._signal(
+            datetime.datetime(2024, 2, 29, 12, 0, 0, tzinfo=datetime.timezone.utc)
+        )
+
+        metrics = build_monthly_metrics([leap_day_signal], [], start, period_end)
+
+        assert metrics["active_days"] == 1
+        assert metrics["active_day_rate"] == pytest.approx(1.0 / 30.0)
+
+    def test_aware_datetime_with_non_utc_offset_converted_to_utc(self) -> None:
+        period_end = datetime.datetime(
+            2026, 9, 1, 0, 0, 0, tzinfo=datetime.timezone.utc
+        )
+        start = period_end - datetime.timedelta(days=30)
+        jst = datetime.timezone(datetime.timedelta(hours=9))
+        # 2026-08-02 09:00 JST == 2026-08-02 00:00 UTC
+        aware_signal = InterestSignal(
+            session_id=1,
+            action_type=ActionType.SEARCH.value,
+            domain=DomainType.TECH.value,
+            content_summary="summary",
+            source=InterestSignalSource.SEARCH_HISTORY.value,
+            created_at=datetime.datetime(2026, 8, 2, 9, 0, 0, tzinfo=jst),
+            occurred_at=datetime.datetime(2026, 8, 2, 9, 0, 0, tzinfo=jst),
+        )
+
+        metrics = build_monthly_metrics([aware_signal], [], start, period_end)
+
+        assert metrics["active_days"] == 1
+

@@ -506,3 +506,23 @@ class TestMonthlyNarrativeResponseValidation:
                 continuity_insight="あ" * 201,
             )
 
+    def test_monthly_narrative_response_rejects_newlines(self) -> None:
+        with pytest.raises(ValidationError):
+            MonthlyNarrativeResponse(
+                period_start="2026-08-02",
+                period_end_exclusive="2026-09-01",
+                monthly_insights="1行目\n2行目",
+                progress_wave="進み方の波",
+                continuity_insight="継続率",
+            )
+
+    def test_monthly_narrative_response_rejects_carriage_returns(self) -> None:
+        with pytest.raises(ValidationError):
+            MonthlyNarrativeResponse(
+                period_start="2026-08-02",
+                period_end_exclusive="2026-09-01",
+                monthly_insights="1行目\r2行目",
+                progress_wave="進み方の波",
+                continuity_insight="継続率",
+            )
+

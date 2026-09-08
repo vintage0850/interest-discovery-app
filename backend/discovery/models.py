@@ -684,6 +684,8 @@ class MonthlyNarrativeResponse(SQLModel):
             raise ValueError("field must not be empty or whitespace only")
         if len(trimmed) > 200:
             raise ValueError("field must be 200 characters or less after trimming")
+        if "\n" in trimmed or "\r" in trimmed:
+            raise ValueError("field must not contain newlines")
         return trimmed
 
 

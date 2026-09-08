@@ -11,7 +11,7 @@ from sqlmodel import SQLModel, create_engine
 from discovery.gemini_prompts import DiscoveryGeminiClient
 from discovery.models import DomainType, PsychAxis
 from discovery.repository import DiscoveryRepository
-from discovery.router import get_gemini_client, get_repository
+from discovery.router import _prepare_metrics_for_prompt, get_gemini_client, get_repository
 from main import app
 
 
@@ -1386,6 +1386,33 @@ class TestMonthlyNarrativeEndpoints:
         assert response_oct.status_code == 200
 
         assert mock_client.generate_monthly_narrative.call_count == 2
+
+
+class TestPrepareMetricsForPrompt:
+    def test_rounds_rates_to_one_decimal_percent(self) -> None:
+        metrics = {
+            "completion_rate": 1.0 / 3.0,
+            "active_day_rate": 1.0 / 6.0,
+            "started_experiment_count": 3,
+        }
+        prepared = _prepare_metrics_for_prompt(metrics)
+        assert prepared["completion_rate"] == 33.3
+        assert prepared["active_day_rate"] == 16.7
+        assert prepared["started_experiment_count"] == 3
+
+    def test_preserves_none_rates(self) -> None:
+        metrics = {"completion_rate": None, "active_day_rate": None}
+        prepared = _prepare_metrics_for_prompt(metrics)
+        assert prepared["completion_rate"] is None
+        assert prepared["active_day_rate"] is None
+
+    def test_does_not_mutate_input(self) -> None:
+        metrics = {"completion_rate": 0.5, "active_day_rate": 0.25}
+        prepared = _prepare_metrics_for_prompt(metrics)
+        assert metrics["completion_rate"] == 0.5
+        assert metrics["active_day_rate"] == 0.25
+        assert prepared["completion_rate"] == 50.0
+        assert prepared["active_day_rate"] == 25.0
 
 
 class TestPsychAxisSurveyEndpoints:

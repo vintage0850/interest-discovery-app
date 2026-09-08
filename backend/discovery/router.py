@@ -477,6 +477,16 @@ def _compute_top_domain(summary: dict[str, Any]) -> str:
     return max(domain_counts.items(), key=lambda item: item[1])[0]
 
 
+def _prepare_metrics_for_prompt(metrics: dict[str, Any]) -> dict[str, Any]:
+    """月次メトリクスをGeminiプロンプト用に百分率に丸める。"""
+    prepared = dict(metrics)
+    for key in ("completion_rate", "active_day_rate"):
+        value = prepared.get(key)
+        if value is not None:
+            prepared[key] = round(value * 100, 1)
+    return prepared
+
+
 @router.get(
     "/sessions/{session_id}/report/weekly-narrative",
     response_model=WeeklyNarrativeResponse,
@@ -598,7 +608,8 @@ def get_monthly_narrative(
 
     try:
         narrative_data = client.generate_monthly_narrative(
-            recent_metrics, previous_metrics
+            _prepare_metrics_for_prompt(recent_metrics),
+            _prepare_metrics_for_prompt(previous_metrics),
         )
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(

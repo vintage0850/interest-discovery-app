@@ -24,6 +24,12 @@ _DIVE_CANDIDATE_MIN_RATING = 4.0
 _DIVE_CANDIDATE_MIN_CONFIDENCE = 0.70
 
 
+def _as_utc(dt: datetime.datetime) -> datetime.datetime:
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=datetime.timezone.utc)
+    return dt.astimezone(datetime.timezone.utc)
+
+
 def build_behavior_summary_for_period(
     signals: list[InterestSignal],
     experiments: list[Experiment],
@@ -38,11 +44,6 @@ def build_behavior_summary_for_period(
     """
     if start is None or end is None:
         raise ValueError("start and end must be provided")
-
-    def _as_utc(dt: datetime.datetime) -> datetime.datetime:
-        if dt.tzinfo is None:
-            return dt.replace(tzinfo=datetime.timezone.utc)
-        return dt.astimezone(datetime.timezone.utc)
 
     utc_start = _as_utc(start)
     utc_end = _as_utc(end)
@@ -84,11 +85,6 @@ def build_monthly_metrics(
     期間は ``[start, end)`` で半開区間として扱う。
     月次専用メトリクス（完了率・アクティブ日数・進捗の波）を返す。
     """
-
-    def _as_utc(dt: datetime.datetime) -> datetime.datetime:
-        if dt.tzinfo is None:
-            return dt.replace(tzinfo=datetime.timezone.utc)
-        return dt.astimezone(datetime.timezone.utc)
 
     utc_start = _as_utc(start)
     utc_end = _as_utc(end)
@@ -134,10 +130,9 @@ def build_monthly_metrics(
     for experiment in started_experiments:
         started_at = _as_utc(experiment.started_at)
         active_dates.add(started_at.date())
-        if experiment.completed_at is not None:
-            completed_at = _as_utc(experiment.completed_at)
-            if utc_start <= completed_at < utc_end:
-                active_dates.add(completed_at.date())
+    for experiment in completed_experiments_in_period:
+        completed_at = _as_utc(experiment.completed_at)
+        active_dates.add(completed_at.date())
 
     active_days = len(active_dates)
     active_day_rate = active_days / 30.0
