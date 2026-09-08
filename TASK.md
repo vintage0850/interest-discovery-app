@@ -5528,3 +5528,23 @@ Lane B(Codex)が本体作業ディレクトリを編集中のため、案件28�
 **worktree整理:** `.worktrees/{monthly-narrative-report, action-taxonomy-safety, privacy-deletion, contradiction-handling}` は全てマージ済みのため削除済み(2026-09-09)。
 
 **残課題:** Codexによる最終ゲートレビュー(仕様照合含む)は未実施。次回実施すること。
+
+---
+
+## 2026-09-09 Codex最終ゲートレビュー結果 — FAIL(修正必須3件)
+
+Codexが`discovery-backend`ブランチ全体をレビュー。判定: **FAIL**。競合解決自体(gemini_prompts.py・repository.py)は適切、Robolectric統一も正常。ただし統合後の横断的な不整合を3件検出(既存353テストでは検出不可)。
+
+### 修正必須1(重大): 案件30×27 — 月次キャッシュの削除漏れ
+`backend/discovery/repository.py`の`delete_session_cascade()`(824行目付近)が`MonthlyNarrativeCache`を削除対象に含んでいない。案件30(プライバシー削除)は案件27(月次レポート)がマージされる前に設計されたため、新設テーブルを見落としたのが原因。セッション削除後も月次レポートキャッシュが残存する。
+**修正:** 親セッション削除前に`MonthlyNarrativeCache`も削除する行を追加し、案件30の削除テストに月次キャッシュの検証を追加する。
+
+### 修正必須2(重大): 案件28 — 既存DBのスキーマ移行漏れ
+`backend/discovery/models.py`の`Evidence.behavior_categories`(183行目付近)は`SQLModel.metadata.create_all()`では既存テーブルに追加されない(create_allは新規テーブル作成のみでALTER TABLEは行わない)。実際の`backend/discovery.db`の`evidence`テーブルにこの列が存在しないことをCodexが確認済み。本番相当DBで`no such column`エラーになる。
+**修正:** 起動時に`behavior_categories`列の有無を確認し、無ければ`ALTER TABLE evidence ADD COLUMN behavior_categories TEXT`相当のマイグレーションを実行する処理を追加する。既存DBからの移行を検証するテストも追加する。
+
+### 修正必須3(中): 案件27 — 通知未発行でも通知済みキーが保存される競合窓
+`app/src/main/java/com/example/myapplication/work/DiscoveryReportNotifier.kt`(66行目付近)は通知権限が無い場合に静かにreturnするが、`app/src/main/java/com/example/myapplication/work/DiscoveryPeriodicReportWorker.kt`(96行目付近)はその後も通知済みキーを保存してしまう。TASK.md 5126-5128行目に記録した「notify()完了後だけ保存する」という設計判断に反する。
+**修正:** `DiscoveryReportNotifier`が通知発行の成功/失敗を返すようにし、`DiscoveryPeriodicReportWorker`は成功時のみ通知済みキーを保存するよう変更する。
+
+**ディスパッチ方針:** 本体ディレクトリ(`discovery-backend`、クリーン)でKimiに3件まとめて修正させる。TDD必須。完了後、報告ファイルを`docs/quality-review/2026-09-09-案件27-31-gate-review-fixes-report.md`に作成させる。修正後、Codexに再レビューを依頼する。
