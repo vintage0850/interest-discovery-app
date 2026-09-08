@@ -1238,3 +1238,85 @@ class TestMonthlyNarrativeCacheRepository:
         assert result is not None
         assert result.monthly_insights == "先に勝った"
 
+
+class TestSchemaMigrationRepository:
+    def test_migration_adds_behavior_categories_column_to_existing_db(
+        self,
+    ) -> None:
+        """既存DBにbehavior_categories列が無い場合、マイグレーションで追加される。"""
+        from sqlalchemy.pool import StaticPool
+        from sqlmodel import create_engine
+
+        engine = create_engine(
+            "sqlite:///:memory:?cache=shared",
+            echo=False,
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        SQLModel.metadata.create_all(engine)
+
+        # 旧スキーマに戻す: behavior_categories 列を削除
+        with engine.connect() as conn:
+            conn.exec_driver_sql(
+                "ALTER TABLE evidence DROP COLUMN behavior_categories"
+            )
+            conn.commit()
+
+        # マイグレーションを含むリポジトリ初期化（旧スキーマから列を追加）
+        repository = DiscoveryRepository(engine)
+
+        # 旧スキーマではORMからINSERTできないため、マイグレーション後にレコードを作成
+        session = repository.create_session("student-a")
+        repository.add_signal(
+            session.id,
+            action_type=ActionType.SEARCH.value,
+            domain=DomainType.TECH,
+            content_summary="Python tutorial",
+            source=InterestSignalSource.SEARCH_HISTORY.value,
+            occurred_at=datetime.datetime.now(datetime.timezone.utc),
+        )
+        evidence = repository.build_evidence(session.id)[0]
+
+        # 新カラムが使えることを確認
+        updated = repository.update_evidence_behavior_categories(
+            evidence.id,
+            behavior_categories={BehaviorCategory.COMPARE.value: 0.7},
+        )
+        assert updated.behavior_categories == {BehaviorCategory.COMPARE.value: 0.7}
+
+        fetched = repository.list_evidence(session.id)[0]
+        assert fetched.behavior_categories == {BehaviorCategory.COMPARE.value: 0.7}
+
+    def test_migration_is_idempotent(self) -> None:
+        """behavior_categories列が既に存在する場合、マイグレーションは冪等に動作する。"""
+        from sqlalchemy.pool import StaticPool
+        from sqlmodel import create_engine
+
+        engine = create_engine(
+            "sqlite:///:memory:?cache=shared",
+            echo=False,
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        SQLModel.metadata.create_all(engine)
+
+        # 2回初期化してもエラーにならない
+        DiscoveryRepository(engine)
+        repository = DiscoveryRepository(engine)
+
+        session = repository.create_session("student-a")
+        repository.add_signal(
+            session.id,
+            action_type=ActionType.SEARCH.value,
+            domain=DomainType.TECH,
+            content_summary="Python tutorial",
+            source=InterestSignalSource.SEARCH_HISTORY.value,
+            occurred_at=datetime.datetime.now(datetime.timezone.utc),
+        )
+        evidence = repository.build_evidence(session.id)[0]
+        updated = repository.update_evidence_behavior_categories(
+            evidence.id,
+            behavior_categories={BehaviorCategory.EXPLORE.value: 0.9},
+        )
+        assert updated.behavior_categories == {BehaviorCategory.EXPLORE.value: 0.9}
+

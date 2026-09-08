@@ -10,6 +10,26 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 from sqlmodel import Session, select
 
+
+def _run_migrations(engine: Engine) -> None:
+    """既存DBのスキーマを最新状態にマイグレーションする。
+
+    SQLModel.metadata.create_all() は新規テーブルの作成のみを行い、
+    既存テーブルへの列追加は行わない。この関数でその差分を補完する。
+    """
+    if engine.dialect.name != "sqlite":
+        return
+
+    with engine.connect() as conn:
+        columns = {
+            row[1] for row in conn.exec_driver_sql("PRAGMA table_info(evidence)")
+        }
+        if "behavior_categories" not in columns:
+            conn.exec_driver_sql(
+                "ALTER TABLE evidence ADD COLUMN behavior_categories TEXT"
+            )
+        conn.commit()
+
 from discovery.aggregation import summarize_domain_signals
 from discovery.models import (
     ActionType,
@@ -52,6 +72,7 @@ class DiscoveryRepository:
 
     def __init__(self, engine: Engine) -> None:
         self._engine = engine
+        _run_migrations(engine)
 
     def create_session(self, student_label: str) -> DiscoverySession:
         session = DiscoverySession(student_label=student_label)
