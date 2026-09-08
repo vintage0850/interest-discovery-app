@@ -5016,3 +5016,262 @@ Codex確定後、Geminiが実装可能な作業単位（work unit）へ分割し
 - 案件26（週次ナラティブのキャッシュ、本ファイル4830行目）: セッション×期間キーキャッシュ設計
 - 案件22（Google Calendar連携通知、本ファイル4211行目）: WorkManager定期実行＋ローカル通知＋
   端末内`SharedPreferences`による重複抑止のパターン（現在Kimi実装中）
+
+### 仕様確定（2026-09-08、CTO・品質保証責任者）
+
+#### 1. Gate 1/2判定と確定方針
+
+- **Gate 1（仕様）: PASS。** 月次ナラティブの期間、指標、API、通知条件、文言、遷移、失敗時挙動、
+  受入条件、対象外を本節で固定する。以後、フィールド名や境界条件を実装者判断で変更しない。
+- **Gate 2（設計）: PASS。** Claude確定済みの`MonthlyNarrativeCache`テーブル、および
+  WorkManager＋ローカル通知＋端末内`SharedPreferences`方式を維持する。FCM、サーバーcron、
+  backend通知履歴は導入しない。案件17/26の週次API・週次キャッシュ、案件22の
+  `DiscoveryFreeTimeWorker`は変更しない。
+- 週次レポートは既存`GET /sessions/{session_id}/report/weekly-narrative`と
+  `weekly_insights`／`change_from_past`を正本とし、本件で契約や集計ロジックを変更しない。
+- 月次レポートは直近の**完了した30日間**を、その前の30日間と比較する。月次通知はこの月次APIを、
+  週次通知は既存週次APIを事前取得し、取得成功後にだけ発行する。
+
+#### 2. 月次ナラティブの集計範囲・指標定義
+
+**期間基準:** リクエスト時刻をUTCへ正規化し、その時刻が属する月の1日00:00:00 UTCを
+`period_end`とする。比較対象はすべて半開区間とし、次のように固定する。
+
+- recent: `[period_end - 30日, period_end)`
+- previous: `[period_end - 60日, period_end - 30日)`
+- `cache_month`: `period_end`の`YYYY-MM`。同一セッション・同一`cache_month`では初回に確定した
+  ナラティブを再利用する。
+- 例: 2026-09中の呼出しは`period_end=2026-09-01T00:00:00Z`、recentは
+  `[2026-08-02T00:00:00Z, 2026-09-01T00:00:00Z)`となる。月途中の初回呼出時刻によって
+  集計範囲が変わらないこと。
+- SQLite由来のnaive datetimeは案件17と同様にUTCとして扱い、aware datetimeはUTCへ変換する。
+
+**既存行動サマリー:** recent／previousとも案件17の
+`build_behavior_summary_for_period`を再利用する。シグナルは`InterestSignal.created_at`、
+完了実験は`Experiment.completed_at`で期間判定し、境界の`period_end`ちょうどは次期間に含める。
+
+**月次専用メトリクス:** recent／previousそれぞれについて、backendが決定論的に以下を算出してから
+Geminiへ渡す。Geminiに件数・率を計算させない。
+
+- `started_experiment_count`: `started_at`が期間内の実験数。現在のstatusは問わない。
+- `completed_started_experiment_count`: 上記実験のうち`completed_at`も同じ期間内にある実験数。
+- `completion_rate`: `completed_started_experiment_count / started_experiment_count`。
+  分母0件では`null`とし、0%と解釈しない。値域は`0.0..1.0`。
+- `active_days`: UTC日付単位で、`InterestSignal.created_at`、`Experiment.started_at`、
+  `Experiment.completed_at`のいずれかが期間内に1件以上ある日を1日と数えた重複なし日数。
+- `active_day_rate`: `active_days / 30`。値域は`0.0..1.0`。シグナル数やイベント数ではなく、
+  活動のあった日数の割合である。
+- `progress_segments`: recentを古い順に10日ずつの3区間へ分け、各区間の
+  `completed_experiment_count`と`active_days`を配列で渡す。これを「進捗の波」の唯一の根拠とし、
+  3区間を不均等な暦週へ置き換えない。
+- 率をプロンプトへ表示する場合は小数第1位の百分率へ丸めるが、比較判定は丸め前の値で行う。
+  件数・分母も必ず同時に渡し、少数標本を強い傾向として断定させない。
+
+**ナラティブの役割:** `monthly_insights`はrecentとpreviousの全体差、`progress_wave`はrecent内の
+3区間のペース変化、`continuity_insight`は`completion_rate`と`active_day_rate`の両方を根拠に、
+継続できた点と次に試せる小さな工夫を記述する。「継続率」という単一の架空指標は作らない。
+データ0件や率が`null`の場合もGemini呼出しは行うが、データ不足を明記した中立文にし、件数・率・
+因果関係を捏造しない。診断、優劣評価、失敗扱い、他ユーザーとの比較を禁止する。
+
+#### 3. 月次API契約・キャッシュ契約
+
+`GET /sessions/{session_id}/report/monthly-narrative`の200レスポンスを
+`MonthlyNarrativeResponse`として次のJSONに固定する。Kotlin DTOはcamelCaseとし、既存の
+`JsonNamingStrategy.SnakeCase`で変換する。
+
+```json
+{
+  "period_start": "2026-08-02",
+  "period_end_exclusive": "2026-09-01",
+  "monthly_insights": "...",
+  "progress_wave": "...",
+  "continuity_insight": "..."
+}
+```
+
+- `period_start`／`period_end_exclusive`: UTC日付のISO `YYYY-MM-DD`。上記recent半開区間を示す。
+- `monthly_insights`／`progress_wave`／`continuity_insight`: それぞれtrim後1〜200文字。
+  改行を含まない日本語1段落とし、空白だけ、201文字以上、構造化出力の欠落は不正として拒否する。
+- 存在しないセッションは404。Gemini設定不足、SDK失敗、不正な構造化出力は、内部詳細を漏らさない
+  `503`（detail: `Monthly narrative generation is currently unavailable`）とする。
+- `MonthlyNarrativeCache`は`session_id + cache_month`をユニークキーとし、少なくとも
+  `monthly_insights`、`progress_wave`、`continuity_insight`、`created_at`を保持する。
+  `period_start`／`period_end_exclusive`は`cache_month`から決定論的に復元してよく、通知履歴は持たせない。
+- キャッシュヒットではGeminiを呼ばない。キャッシュミス時だけ生成・保存し、保存後のDBレコードを
+  レスポンスの正本とする。同時INSERTで`IntegrityError`になった側は案件26と同様に勝者レコードを
+  再取得し、勝者の3フィールドを返す。セッション間・月間でキャッシュを共有しない。
+- 月次生成は既存`response_schema`と`_sanitize_gemini_error_message`のパターンを踏襲し、
+  既存週次レスポンスや`WeeklyNarrativeCache`に列を追加しない。
+
+#### 4. 通知トリガー判定の具体ルール
+
+- 新規`DiscoveryPeriodicReportWorker`を、`NetworkType.CONNECTED`制約付きの一意な
+  `PeriodicWorkRequest`として**24時間間隔**で登録する。`ExistingPeriodicWorkPolicy.KEEP`を使い、
+  多重登録しない。WorkManagerの実行時刻はOS都合で遅延し得るため、境界直後や24時間ちょうどの
+  配信は保証しない。
+- 週キーは、実行時のUTC日付を含む週の月曜日00:00:00 UTCの日付`YYYY-MM-DD`。
+  月キーは実行時UTC月の`YYYY-MM`。端末ローカル日付、ISO週番号、経過時間168時間／30日では判定しない。
+- `SharedPreferences`へセッションごと・種別ごとに
+  `last_notified_week_key_{session_id}`と`last_notified_month_key_{session_id}`を保存する。
+  現在キーが保存済みキーより新しい場合だけ対象とする。キー未保存の初回は現在キーを1回配信対象とし、
+  複数週／月を跨いでいても過去分を連続配信せず、現在キーのレポート1件だけを取得する。
+  端末時刻の巻き戻り等で現在キーが保存済みキー以前なら通知しない。
+- Discovery通知設定ON、OS通知権限あり、有効な永続化済みセッションあり、対象キー未通知、API取得成功を
+  全条件とする。Google Calendar連携・空き時間・案件22の6時間クールダウンは条件にしない。
+- 時間帯制約は**設けない**。24時間周期のWorkManagerへローカル時刻制約を重ねると、OS遅延により
+  毎回時間帯外となって恒久的に取りこぼす可能性があるためである。通知は週1回／月1回に限定され、
+  正確な時刻を保証しない。
+- 週次と月次は独立判定する。同一実行で両方が対象なら週次→月次の順でAPI取得・通知し、別通知IDで
+  2件とも表示する。一方の失敗は他方を妨げず、成功した種別のキーだけを更新する。
+- API/通信/503、セッション復元失敗、権限なし、設定OFF、通知発行例外では通知せず、該当キーを
+  更新しない。Workerは安全に`Result.success()`で終了し、次回定期実行へ委ねる。
+  `NotificationManager.notify()`まで例外なく完了した後にだけキーを同期保存する。
+
+#### 5. 通知文言とタップ時遷移
+
+文言を次で固定し、AI生成本文、指標値、実験タイトル、振り返り本文、アカウント情報をロック画面へ
+出さない。
+
+- 週次タイトル: `📊 1週間の気付きレポートができました`
+- 週次本文: `この1週間の変化と、新しく見えてきた傾向を確認できます`
+- 月次タイトル: `🌱 1か月の気付きレポートができました`
+- 月次本文: `この30日間の進み方と、続けられたペースを振り返れます`
+
+通知は`report_type`（`weekly`／`monthly`）と`session_id`だけを明示的Intentへ含め、
+`PendingIntent.FLAG_IMMUTABLE | FLAG_UPDATE_CURRENT`を使う。requestCodeと通知IDは
+`session_id + report_type`で衝突しない値とする。
+
+タップ時はcold start／warm startのどちらでもMikkeの`DiscoveryHome`へ戻したうえで
+`DiscoveryState.selectTab(AppTab.REPORT)`を実行し、`loadReportData()`で再取得する。週次通知は週次カード、
+月次通知は月次カードを画面内に表示してフォーカスする（タブを開くだけで月次カードを画面外に残さない）。
+タップだけで実験開始・状態変更・Gemini再生成の強制は行わない。Intentの種別不正、対象セッションなし、
+または通知後にアクティブセッションが切り替わっていた場合はDiscovery Homeへ遷移し、
+`このレポートは現在表示できません`をSnackbar表示する。別セッションへ自動切替しない。
+
+#### 6. アプリ内表示と失敗時表示
+
+- 既存Reportタブに週次表示を残し、その下へ`🌱 30日間の気付き`カードを追加する。カードには
+  対象期間（`period_start`〜`period_end_exclusive`の前日）、`全体の気付き`、`進み方の波`、
+  `続けられたペース`の3項目を表示する。新規画面・新規ボトムタブは作らない。
+- 通常のReportタブ表示でも週次・月次の両方を取得する。月次APIだけ失敗した場合は月次カードに
+  `月次レポートは現在取得できません。`を表示し、既存の実績・週次ナラティブを表示し続ける。
+  週次だけ失敗した場合も案件17の既存フォールバックを維持し、月次カードを表示する。
+  `fetchSummary()`失敗時だけは従来通り画面全体エラーとする。
+- 画面にはAPIが返した文だけを表示し、Android/KMP側で率や傾向を再計算しない。
+
+#### 7. 対象ファイル・担当宣言
+
+**設計裁定:** Claudeの既存判断を維持する。**実装担当はbackend、Android/KMPともKimi。**
+同一担当がbackend→KMP契約・画面→Android Workerの順にTDDで実装する。Geminiは実装前に各work unitを
+最大3ファイルへ分割するが、担当解除まで他AIは下記ファイルを編集しない。
+
+backend（Kimi）:
+- `backend/discovery/models.py` — `MonthlyNarrativeCache`、`MonthlyNarrativeResponse`
+- `backend/discovery/aggregation.py` — 月次専用メトリクスと30日／10日境界集計
+- `backend/discovery/gemini_prompts.py` — 構造化候補モデルと`generate_monthly_narrative`
+- `backend/discovery/repository.py` — 月次キャッシュ取得・競合安全な保存
+- `backend/discovery/router.py` — `GET /sessions/{session_id}/report/monthly-narrative`
+- `backend/tests/test_discovery_aggregation.py` — 指標・UTC境界・ゼロ分母・3区間
+- `backend/tests/test_discovery_gemini_prompts.py` — schema、文字数、プロンプト根拠、エラーサニタイズ
+- `backend/tests/test_discovery_repository.py` — 月次キャッシュの分離・upsert・競合時勝者
+- `backend/tests/test_discovery_router.py` — API契約、404/503、月・セッション分離、キャッシュヒット
+
+Android/KMP（Kimi）:
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/DiscoveryModels.kt` —
+  月次モデル、ReportData、通知種別・期間キー状態
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/DiscoveryRepository.kt` —
+  `getMonthlyNarrative()`契約
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/RealDiscoveryRepository.kt` —
+  月次DTO、API取得、ReportData統合、独立フォールバック、設定保存契約
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/FakeDiscoveryRepository.kt` —
+  月次ダミー実装とReportData互換
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/discovery/DiscoveryState.kt` —
+  Reportタブ選択、通知種別フォーカス、再読込、無効通知フォールバック
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/App.kt` — 通知IntentからReportタブへの共通遷移
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/discovery/DiscoveryMainScaffold.kt` —
+  通知種別をReport画面へ受け渡す
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/discovery/ReportTabScreen.kt` —
+  月次カードと週次／月次フォーカス
+- `shared/src/androidMain/kotlin/com/example/myapplication/shared/discovery/DiscoverySettingsStorage.android.kt` —
+  セッション×種別の最終通知キー保存
+- `shared/src/commonTest/kotlin/com/example/myapplication/shared/discovery/RealDiscoveryRepositoryTest.kt`
+- `shared/src/commonTest/kotlin/com/example/myapplication/shared/discovery/FakeDiscoveryRepositoryTest.kt`
+- `shared/src/commonTest/kotlin/com/example/myapplication/shared/discovery/DiscoveryStateTest.kt`
+- `shared/src/commonTest/kotlin/com/example/myapplication/shared/discovery/PeriodicReportNotificationTest.kt`（新規）
+
+Androidホスト（Kimi）:
+- `app/src/main/java/com/example/myapplication/work/DiscoveryPeriodicReportWorker.kt`（新規）— 全トリガー統合
+- `app/src/main/java/com/example/myapplication/work/DiscoveryPeriodicReportScheduler.kt`（新規）— 24時間周期登録
+- `app/src/main/java/com/example/myapplication/work/DiscoveryReportNotifier.kt`（新規）— 固定文言、Channel、Intent
+- `app/src/main/java/com/example/myapplication/MainActivity.kt` — scheduler登録、cold/warm startのIntent受渡し
+- `app/src/main/res/values/strings.xml` — レポート通知Channel名
+- `app/proguard-rules.pro` — 新規Workerの2引数コンストラクタ保持
+- `app/src/test/java/com/example/myapplication/work/DiscoveryPeriodicReportRulesTest.kt`（新規）—
+  UTC期間キー、初回、重複、巻戻り、文言、独立失敗
+- `app/src/androidTest/java/com/example/myapplication/work/DiscoveryPeriodicReportWorkerTest.kt`（新規）— Worker統合
+- `app/src/androidTest/java/com/example/myapplication/MainActivityLaunchTest.kt` — 通知タップ遷移
+
+既存`DiscoveryFreeTimeWorker.kt`、`DiscoveryNotificationScheduler.kt`、`DiscoveryNotifier.kt`、
+`AndroidManifest.xml`、Gradle／version catalogは変更しない。追加依存・追加権限・上記以外のファイルが
+必要になった場合は実装を止め、理由と代替案をTASK.mdへ追記して再承認を受ける。
+
+#### 8. 最終受入条件
+
+- backendの月次期間がUTC月初アンカーの2つの30日半開区間になり、境界直前／ちょうど、naive／aware
+  datetime、月長28/29/30/31日の影響を受けないことをテストで確認する。
+- `completion_rate`の分母・分子、分母0件=`null`、`active_days`の同日重複除外、
+  `active_day_rate`、recentの3×10日区間が本仕様通りで、Geminiが再計算しない。
+- 月次APIが固定5フィールドをsnake_caseで返し、3文が各1〜200文字・改行なしとなる。
+  不在セッション404、生成失敗503、同月2回目のGemini呼出しなし、セッション／月分離、同時生成時の
+  DB勝者レスポンス一致を確認する。既存週次APIの全テストも回帰しない。
+- KMPが5フィールドをcamelCaseへ復号し、通常のReportタブに対象期間と3項目を表示する。
+  週次／月次の片方の503・通信失敗で他方や実績データを失わず、`fetchSummary()`失敗だけが全体エラーになる。
+- Workerは24時間の一意な定期実行で、UTC週キー／月キーを正しく判定する。初回は現在分を1回、
+  長期停止後も現在分だけ、保存済みと同じキー・過去キーでは0回となる。両方対象時は2通知となり、
+  片方の失敗は成功側の通知・キー保存を妨げない。
+- 設定OFF、OS権限なし、セッションなし、ネットワーク/API/503、通知発行例外では通知もキー更新もない。
+  Google Calendar未認可でもレポート通知は発行可能で、案件22の通知履歴・クールダウンと混ざらない。
+- 通知文言が固定テンプレート通りで、AI本文・個人データ・数値を含まない。週次／月次で通知IDと
+  PendingIntentが衝突せず、cold/warm startとも対応カードへ到達する。セッション不一致・不正種別は
+  Home＋確定Snackbarへ安全にフォールバックする。
+- `MonthlyNarrativeCache`以外のbackend DBスキーマ差分、通知履歴DB、FCM、追加権限、追加依存がない。
+- TDDでRED→GREENを記録し、`cd backend && python -m pytest -q`、
+  `.\gradlew.bat :shared:testDebugUnitTest --no-daemon`、
+  `.\gradlew.bat :app:testDebugUnitTest --no-daemon`、`.\gradlew.bat :app:assembleDebug --no-daemon`を
+  全件PASSさせる。実機で通知ON/OFF、権限許可／拒否、週次、月次、同時2件、offline後の再試行、
+  cold/warm tap遷移、月次カード表示を確認する。
+
+#### 9. 対象外（最終確定）
+
+- iOS／Web通知、FCM・Webhook・サーバーpush・サーバーcron、複数端末間の通知同期
+- 通知時刻・曜日・頻度・週開始曜日の設定UI、正確な境界時刻配信、サイレント時間帯、リッチ通知
+- 日次・四半期・年次レポート、過去の未通知週／月の一括配信、通知履歴一覧・既読同期
+- 通知文言・ナラティブのA/Bテスト、MLによる配信時刻最適化、他ユーザー・学校平均との差
+- 月次指標のグラフ／生データ表示、PDF・SNS共有、レポート編集、Geminiとの対話
+- 既存週次ナラティブの集計・API・キャッシュ変更、案件22のCalendar条件・Worker・通知Channel変更
+- 通知から別セッションへの自動切替、backendへの通知設定・通知履歴・端末識別子の保存
+- 新規DBマイグレーション基盤の導入。`MonthlyNarrativeCache`はClaude確定通り既存
+  `SQLModel.metadata.create_all()`で新規作成する。
+
+**次の担当:** Geminiが上記対象ファイルを最大3ファイルのwork unitへ分割し、その後Kimiが
+backend→Android/KMPの順にTDD実装する。完了後Codexが本節のGate 3/4を独立レビューする。
+
+### ディスパッチ方針の変更（Claude、2026-09-08）
+
+ユーザーからの要望により、Codex確定の「Kimi単独・backend→Android/KMP順次」から、
+案件17と同じ「2レーン並行」へ変更する。backend対象ファイル群とAndroid/KMP対象ファイル群
+（第7節）は完全に排他（共有ファイルなし）であり、API契約（第3節）は本仕様確定で既に
+固定済みのため、Android/KMP側はモック/Fakeの固定契約に対して実装を進められる。これは
+Codexの受入条件・API契約・指標定義を変更するものではなく、実装者の割り当てのみの変更である。
+
+**変更後の担当:**
+- **Lane A（backend）:** Kimi。第7節「backend（Kimi）」のファイルのみ。
+- **Lane B（Android/KMP＋Androidホスト）:** Antigravity。第7節「Android/KMP（Kimi）」
+  「Androidホスト（Kimi）」のファイルのみ（担当をAntigravityへ読み替え）。
+- 両者は互いのファイルに触れない。案件22で確立済みの「Kimiと同じファイルを同時に編集しない」
+  運用を踏襲する。
+- Antigravityが2回失敗した場合（案件17・22で実績あり）は、AGENTS.mdの例外規定に従い
+  ユーザー明示指示のうえでCodexまたはClaudeが代打を検討する。3回目は試さない。
+
+Geminiには、上記2レーンそれぞれについて対象ファイルを最大3ファイルのwork unitへ分割する
+ことを依頼する（レーンをまたぐ分割はしない）。
