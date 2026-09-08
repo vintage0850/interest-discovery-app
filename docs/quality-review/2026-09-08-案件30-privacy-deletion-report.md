@@ -79,11 +79,13 @@
 - **`shared/src/commonTest/kotlin/com/example/myapplication/shared/discovery/RealDiscoveryRepositoryTest.kt`**
   - `resetAllData_callsDeleteSessionEndpointThenClearsLocalState`: DELETE呼び出し後にローカル状態がクリアされる
   - `resetAllData_stillClearsLocalStateWhenDeleteEndpointFails`: DELETE失敗時もローカル状態がクリアされる
+  - `resetAllData_withNoActiveSession_skipsDeleteAndClearsLocalState`: active session がない場合は DELETE をスキップする
+  - `resetAllData_stillClearsLocalStateWhenDeleteThrows`: ネットワーク例外発生時もローカル状態がクリアされる
 
 **実行結果:**
 
 - Windows環境のため iOSシミュレータ/Android実機でのテスト実行は不可。
-- `:shared:compileTestKotlinIosSimulatorArm64` にてテストコードの構文コンパイルを確認。
+- `:shared:compileTestKotlinIosSimulatorArm64` にてテストコードの構文コンパイルを確認（review修正後も `BUILD SUCCESSFUL`）。
 - `:shared:compileCommonMainKotlinMetadata` および `:shared:compileKotlinIosSimulatorArm64` にて実装コードのコンパイルを確認。
 
 ```text
@@ -109,14 +111,30 @@ test(discovery-android): resetAllData で DELETE 呼び出しとローカルク�
 - RealDiscoveryRepository.resetAllData() が /sessions/{id} を呼ぶよう変更
 - API失敗時もローカルクリアが継続することを確認
 - KMPテストを追加
+
+docs(quality-review): 案件30 プライバシー削除完了報告を追加
+
+- 実装内容、テスト結果、コミット計画を記載
+
+test(discovery): review指摘対応 — エッジケーステスト追加と重複import削除
+
+- resetAllData: active session なし / ネットワーク例外 のテストを追加
+- backend test: 重複import削除、private engine へのアクセスを public API に置き換え
 ```
 
 ---
 
 ## 5. レビュー状況
 
+- Gate 3.5 レビュー（`phase-reviewer` エージェント）を実施。
+- **判定: ACCEPT**
+- 指摘事項:
+  - **MEDIUM**: `DELETE /sessions/{session_id}` に認証・認可がない（既存 API 全体の制約）。 `.memory/blockers/unauthenticated-destructive-endpoints.md` に記録。
+  - **MEDIUM/LOW**: KMP テストのエッジケース不足（active session なし、例外発生時）→ テスト追加済み。
+  - **LOW**: バックエンドテストの重複 import と private メンバアクセス → 修正済み。
+- レビューで示されたカスケード削除パターンを `.memory/patterns/cascade-deletion.md` に保存。
 - バックエンド全テストパス（289件）。
 - KMPコンパイルパス（iOSシミュレータターゲット、共通メイン）。
 - ユーザー指示に基づき `TASK.md` は未編集。
 
-**次のステップ:** Stage 5 レビュー（`phase-reviewer` エージェントによる Gate 3.5 レビュー）を実施する。
+**次のステップ:** Stage 6 Ship（`/spartan:pr-ready`）へ進み、PR を作成する。
