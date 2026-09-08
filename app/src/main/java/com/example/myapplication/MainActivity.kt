@@ -19,9 +19,13 @@ import com.example.myapplication.shared.discovery.AndroidOnboardingStorage
 import com.example.myapplication.shared.ui.App
 import com.example.myapplication.shared.ui.LocalGoogleCalendarLinkHandler
 import com.example.myapplication.work.DiscoveryNotificationScheduler
+import com.example.myapplication.work.DiscoveryPeriodicReportScheduler
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
+
+    private val reportIntentState = MutableStateFlow<Pair<String?, Int?>?>(null)
 
     private val googleAuthManager by lazy { GoogleAuthManager.get(application) }
 
@@ -42,11 +46,20 @@ class MainActivity : ComponentActivity() {
         val onboardingStorage = AndroidOnboardingStorage.get(application)
         val notificationExperimentId = intent.getStringExtra(EXTRA_EXPERIMENT_ID)
 
+        val initialReportType = intent.getStringExtra(EXTRA_REPORT_TYPE)
+        val initialSessionId = if (intent.hasExtra(EXTRA_REPORT_SESSION_ID)) {
+            intent.getIntExtra(EXTRA_REPORT_SESSION_ID, -1).takeIf { it >= 0 }
+        } else null
+        if (initialReportType != null || initialSessionId != null) {
+            reportIntentState.value = initialReportType to initialSessionId
+        }
+
         // Google Calendar 連携は Android ホスト側で完結する。
         // 認可状態を KMP UI へ反映し、設定行タップで OAuth 同意画面を起動する。
         setContent {
             val authState by googleAuthManager.authState.collectAsState()
             val isLinked = authState is CalendarAuthState.Authorized
+            val reportIntent by reportIntentState.collectAsState()
 
             CompositionLocalProvider(
                 LocalGoogleCalendarLinkHandler provides {
@@ -68,6 +81,8 @@ class MainActivity : ComponentActivity() {
                     enableDiscoveryHttpLogging = BuildConfig.DEBUG,
                     discoveryBaseUrl = BuildConfig.DISCOVERY_BASE_URL,
                     notificationExperimentId = notificationExperimentId,
+                    notificationReportType = reportIntent?.first,
+                    notificationSessionId = reportIntent?.second,
                     isGoogleCalendarLinked = isLinked
                 )
             }
@@ -76,10 +91,29 @@ class MainActivity : ComponentActivity() {
         // 定期 Worker は通知設定が ON のユーザーに対して 1 度登録すればよい。
         // Worker 自身が ON/OFF・権限・認可を都度判定するため、ここでは無条件でスケジュールする。
         DiscoveryNotificationScheduler.schedule(application)
+        DiscoveryPeriodicReportScheduler.schedule(application)
+    }
+
+    public override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        val reportType = intent.getStringExtra(EXTRA_REPORT_TYPE)
+        val sessionId = if (intent.hasExtra(EXTRA_REPORT_SESSION_ID)) {
+            intent.getIntExtra(EXTRA_REPORT_SESSION_ID, -1).takeIf { it >= 0 }
+        } else null
+        if (reportType != null || sessionId != null) {
+            reportIntentState.value = reportType to sessionId
+        }
     }
 
     companion object {
         /** 通知タップ時に [MainActivity] へ渡す experiment_id のキー。 */
         const val EXTRA_EXPERIMENT_ID = "extra_experiment_id"
+
+        /** 気付きレポート通知タップ時に [MainActivity] へ渡す report_type のキー。 */
+        const val EXTRA_REPORT_TYPE = "report_type"
+
+        /** 気付きレポート通知タップ時に [MainActivity] へ渡す session_id のキー。 */
+        const val EXTRA_REPORT_SESSION_ID = "session_id"
     }
 }
