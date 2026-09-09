@@ -5613,6 +5613,14 @@ Codexが`discovery-backend`ブランチ全体をレビュー。判定: **FAIL**�
 
 **追加の設計判断(Claude、2026-09-09):** `photoUrl`は画像として描画しない。プロジェクトに画像読み込みライブラリ(Coil等)が存在せず、「プロフィール表示のみの軽量連携」という当初スコープに対して新規ライブラリ追加は過剰。代わりに、`photoUrl`が存在する場合は説明文に「プロフィール画像あり」等のテキスト表示を追加し、`displayName`/`email`の組み合わせに関わらず欠落しないようにする(email等を上書きするのではなく併記する)。
 
+**指摘1・2の修正(2026-09-09、Kimi):**
+- `SettingsTabGoogleAccountLinkJvmTest` に `Googleアカウント連携済みでphotoUrlがある場合はプロフィール画像ありが表示される` を追加。`Linked("Test User", "test@example.com", "https://example.com/photo.jpg")` で「プロフィール画像あり」が表示されることを検証。
+- RED 実行: テスト追加直後に `./gradlew :app:testDebugUnitTest --tests ...` を実行し、`java.lang.AssertionError` で失敗（説明文に該当テキストが無いため）。
+- GREEN 実装: `SettingsTabScreen.kt` の `GoogleAccountState.Linked` 説明文生成で、`photoUrl != null` の場合はベース説明文に改行して「プロフィール画像あり」を併記するように変更。
+- GREEN 実行: 同テストが `./gradlew :app:testDebugUnitTest --tests ...` で BUILD SUCCESSFUL。
+- 全検証: `./gradlew :shared:testDebugUnitTest :app:testDebugUnitTest :app:assembleDebug --console=plain` で BUILD SUCCESSFUL in 1m 4s。`:shared:testDebugUnitTest` PASS、`:app:testDebugUnitTest` PASS、`:app:assembleDebug` SUCCESS。
+- 詳細は `docs/quality-review/2026-09-09-案件32-google-account-link-report.md` の「再レビュー指摘（photoUrl 表示・TDD RED 証跡）の修正」を参照。
+
 ---
 
 ## 案件33: シグナル蓄積トリガー・レポート(マイルストーンナラティブ)

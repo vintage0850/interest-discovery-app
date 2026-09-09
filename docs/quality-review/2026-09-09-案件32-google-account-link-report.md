@@ -145,3 +145,57 @@ BUILD SUCCESSFUL in 2m 25s
 :app:testDebugUnitTest — 128 tests completed, 0 failed — PASS
 :app:assembleDebug — SUCCESS
 ```
+
+## 再レビュー指摘（photoUrl 表示・TDD RED 証跡）の修正 (2026-09-09)
+
+`docs/quality-review/2026-09-09-案件32-gate-review-2.md` で CHANGES REQUIRED が出たうち、残る指摘1（`photoUrl` 未表示）と指摘2（TDD RED 証跡なし）を修正した。
+
+### 設計判断
+
+Claude の追加設計判断に従い、`photoUrl` は画像として描画せず、画像読み込みライブラリ（Coil 等）の追加も行わない。代わりに `photoUrl` が存在する場合は説明文に「プロフィール画像あり」のテキストを追加し、`displayName`/`email` の組み合わせに関わらず欠落しないようにする（上書きではなく併記）。
+
+### TDD RED → GREEN
+
+**RED**: `Linked(displayName, email, photoUrl)` の3値がすべて存在するケースで「プロフィール画像あり」が表示されることを検証するテストを追加し、実装前に失敗を確認した。
+
+```text
+$ ./gradlew :app:testDebugUnitTest --tests "com.example.myapplication.discovery.SettingsTabGoogleAccountLinkJvmTest.Googleアカウント連携済みでphotoUrlがある場合はプロフィール画像ありが表示される" --console=plain
+
+SettingsTabGoogleAccountLinkJvmTest > Googleアカウント連携済みでphotoUrlがある場合はプロフィール画像ありが表示される FAILED
+    java.lang.AssertionError at SettingsTabGoogleAccountLinkJvmTest.kt:125
+
+1 test completed, 1 failed
+
+> Task :app:testDebugUnitTest FAILED
+BUILD FAILED in 26s
+```
+
+失敗理由: 説明文に「プロフィール画像あり」が含まれていないため、Compose UI テストで該当テキストノードが検出できなかった。
+
+**GREEN**: `SettingsTabScreen.kt` の `GoogleAccountState.Linked` 説明文生成ロジックを変更し、`photoUrl != null` のときはベース説明文に改行して「プロフィール画像あり」を併記するように実装した。
+
+```text
+$ ./gradlew :app:testDebugUnitTest --tests "com.example.myapplication.discovery.SettingsTabGoogleAccountLinkJvmTest.Googleアカウント連携済みでphotoUrlがある場合はプロフィール画像ありが表示される" --console=plain
+
+BUILD SUCCESSFUL in 29s
+58 actionable tasks: 4 executed, 54 up-to-date
+```
+
+### 変更ファイル
+
+- `app/src/test/java/com/example/myapplication/discovery/SettingsTabGoogleAccountLinkJvmTest.kt`
+  - `Googleアカウント連携済みでphotoUrlがある場合はプロフィール画像ありが表示される` を追加。
+- `shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/discovery/SettingsTabScreen.kt`
+  - `Linked` 状態の `description` 生成で `photoUrl` 存在時に「プロフィール画像あり」を併記するように変更。
+
+### 修正後の全検証
+
+```text
+$ ./gradlew :shared:testDebugUnitTest :app:testDebugUnitTest :app:assembleDebug --console=plain
+BUILD SUCCESSFUL in 1m 4s
+92 actionable tasks: 6 executed, 86 up-to-date
+
+:shared:testDebugUnitTest — PASS
+:app:testDebugUnitTest — PASS
+:app:assembleDebug — SUCCESS
+```

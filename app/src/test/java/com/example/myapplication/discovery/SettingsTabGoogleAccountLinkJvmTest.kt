@@ -103,6 +103,29 @@ class SettingsTabGoogleAccountLinkJvmTest {
     }
 
     @Test
+    fun Googleアカウント連携済みでphotoUrlがある場合はプロフィール画像ありが表示される() {
+        composeTestRule.setContent {
+            SettingsTabScreen(
+                settingsState = SettingsUiState(
+                    googleAccountState = GoogleAccountState.Linked(
+                        displayName = "Test User",
+                        email = "test@example.com",
+                        photoUrl = "https://example.com/photo.jpg"
+                    )
+                ),
+                onToggleNotifications = {},
+                onResetData = {},
+                onPsychAxisSurveyClick = {},
+                onSessionListClick = {}
+            )
+        }
+
+        composeTestRule.onNodeWithText("Test User").assertExists()
+        // email と「プロフィール画像あり」は上書きではなく併記される。
+        composeTestRule.onNodeWithText("test@example.com\nプロフィール画像あり").assertExists()
+    }
+
+    @Test
     fun displayNameがnullでもLinkedは連携済みとして表示される() {
         composeTestRule.setContent {
             SettingsTabScreen(

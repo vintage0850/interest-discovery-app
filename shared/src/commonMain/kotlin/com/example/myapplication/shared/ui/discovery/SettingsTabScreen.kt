@@ -92,10 +92,16 @@ fun SettingsTabScreen(
                             val subtitle = accountState.displayName
                                 ?: accountState.email
                                 ?: "連携済み"
-                            val description = when {
+                            val baseDescription = when {
                                 accountState.displayName != null && accountState.email != null -> accountState.email
-                                accountState.photoUrl != null -> accountState.photoUrl
+                                accountState.email != null -> accountState.email
                                 else -> "タップして連携を解除"
+                            }
+                            // プロフィール画像のURLは画像ライブラリを追加せず、存在有無をテキストで示す。
+                            val description = if (accountState.photoUrl != null) {
+                                "$baseDescription\nプロフィール画像あり"
+                            } else {
+                                baseDescription
                             }
                             SettingsRow(
                                 icon = "👤",
