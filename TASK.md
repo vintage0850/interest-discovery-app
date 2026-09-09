@@ -5558,3 +5558,24 @@ Codexが`discovery-backend`ブランチ全体をレビュー。判定: **FAIL**�
 - 新たな修正必須問題なし
 
 **案件27〜31、全て完了・マージ・ゲートレビューPASS。本件クローズ。**
+
+---
+
+## 案件32: Googleアカウント連携(設定画面「アカウントを作成」の実装)
+
+**現状:** `SettingsTabScreen.kt`(78-81行目)の「アカウントを作成」行は`onClick = { activeModal = "account" }`でローカルstateを更新するだけで、案件29と同根の未消費state(無反応ボタン)。案件29ではLINE連携・Googleカレンダー連携のみ対応し、この行はスコープ外としていた。
+
+**目的確認(ユーザー回答、2026-09-09):** プロフィール表示のみの軽量連携。Google Sign-InでdisplayName/email/photoUrlを取得して設定画面に表示するだけで、バックエンド(DiscoverySession/DB)への変更は行わない。既存の匿名DiscoverySession(端末ローカル)の仕組みはそのまま維持する。
+
+**設計判断(Claude):**
+1. **既存の`GoogleAuthManager`(`app/.../data/calendar/GoogleAuthManager.kt`)は流用しない。** これはPlay ServicesのAuthorizationClientでカレンダーAPIの「スコープ同意」を扱うものであり、身元確認(サインイン)とは目的が違う。混同すると将来カレンダー機能の変更がアカウント表示に影響する結合を生む。
+2. 新規に`app/.../data/account/GoogleAccountManager.kt`を作成し、Credential Manager API(`androidx.credentials` + `googleid`ライブラリの`GetSignInWithGoogleOption`)でGoogleサインインを行う。取得するのは身元情報(displayName/email/photoUrl)のみで、アクセストークンやAPIスコープは要求しない。
+3. 状態は`GoogleAccountState`(`NotConfigured` / `NotLinked` / `Linked(displayName, email, photoUrl)`)としてStateFlowで公開する。既存の`CalendarAuthState`と同じ設計パターンを踏襲する。
+4. 取得した情報は端末ローカル(DataStoreまたは同等の永続化)にのみ保存し、バックエンドへは送信しない。ログアウト(連携解除)機能も併せて実装する。
+5. `App.kt`に`LocalGoogleAccountLinkHandler = staticCompositionLocalOf<(() -> Unit)?> { null }`を追加し、`MainActivity.kt`でCredential Managerのサインインフローを注入する(既存の`LocalGoogleCalendarLinkHandler`/`LocalLineLinkHandler`と同じ注入パターン)。
+6. `SettingsUiState`に連携状態(表示名の有無)を追加し、`SettingsTabScreen.kt`の「アカウントを作成」行を、未連携時は連携を開始、連携済み時はサインイン中のGoogleアカウント名を表示(件名も「アカウントを作成」→動的に「連携済みのGoogleアカウント」等に変更)するよう修正する。
+7. **今回のスコープ外:** バックエンドとの紐付け(DiscoverySessionへのユーザーID付与)、複数端末間のデータ同期、既存カレンダー連携との統合。将来的にデータバックアップ/同期が必要になった場合は、別案件としてClaudeが改めてアーキテクチャ判断を行う。
+
+**影響ファイル(想定):** `app/src/main/java/com/example/myapplication/data/account/GoogleAccountManager.kt`(新規)、`app/src/main/java/com/example/myapplication/MainActivity.kt`、`shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/App.kt`、`shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/discovery/SettingsTabScreen.kt`、`SettingsUiState`定義箇所、`app/build.gradle.kts`(Credential Manager / googleid依存追加)、対応するテスト。
+
+**ディスパッチ方針:** 新規worktree `.worktrees/google-account-link`(ブランチ`feature/google-account-link`、`discovery-backend`から分岐、作成済み)でKimiに実装させる。単一レーンのため他ブランチ(進行中の`feature/signal-milestone-report`)とのファイル競合なし。TDD必須。完了後、報告ファイルを`docs/quality-review/2026-09-09-案件32-google-account-link-report.md`に作成させる。完了後、Codexにゲートレビューを依頼する。
