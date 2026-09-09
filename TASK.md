@@ -5598,4 +5598,11 @@ Codexが`discovery-backend`ブランチ全体をレビュー。判定: **FAIL**�
   - `GetCredentialCancellationException` と他の `GetCredentialException` / 一般例外を区別し、失敗時は `LinkFailed`、キャンセル時は `NotLinked` に戻す。
   - `GoogleCredentialProvider` と `GoogleIdTokenParser` を注入可能にし、`GoogleAccountManagerTest` で TDD 的に save/restore/sign-out/error 分類を網羅。
 - 修正後の `./gradlew.bat :shared:testDebugUnitTest :app:testDebugUnitTest :app:assembleDebug` は BUILD SUCCESSFUL、`:app:testDebugUnitTest` は 128 tests completed, 0 failed。
-- コミット予定: `fix(discovery): 案件32 Googleアカウント連携のゲートレビュー指摘を修正`。
+- コミット: `b94dfe5 fix(discovery): 案件32 Googleアカウント連携のゲートレビュー指摘を修正`。
+
+**最終検証 (2026-09-09):**
+- 指摘1〜3の修正コミット後、`.\gradlew.bat :shared:testDebugUnitTest :app:testDebugUnitTest :app:assembleDebug --rerun-tasks --stacktrace` を実行。
+- BUILD SUCCESSFUL in 2m 25s、92 actionable tasks: 92 executed, 0 up-to-date。
+- `:shared:testDebugUnitTest` — 199 tests completed, 0 failed — PASS。
+- `:app:testDebugUnitTest` — 128 tests completed, 0 failed — PASS。
+- `:app:assembleDebug` — SUCCESS。

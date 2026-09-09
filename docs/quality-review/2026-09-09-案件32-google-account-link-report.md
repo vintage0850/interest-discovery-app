@@ -130,4 +130,18 @@ BUILD SUCCESSFUL in 2m 23s
 :app:assembleDebug — SUCCESS
 ```
 
-コミット予定: `fix(discovery): 案件32 Googleアカウント連携のゲートレビュー指摘を修正`
+コミット: `b94dfe5 fix(discovery): 案件32 Googleアカウント連携のゲートレビュー指摘を修正`
+
+## 最終検証 (2026-09-09)
+
+指摘1〜3の修正を含むコミット `b94dfe5` 作成後、改めて3つのGradleタスクを `--rerun-tasks` で実行し、すべて成功することを確認した。
+
+```text
+$ .\gradlew.bat :shared:testDebugUnitTest :app:testDebugUnitTest :app:assembleDebug --rerun-tasks --stacktrace
+BUILD SUCCESSFUL in 2m 25s
+92 actionable tasks: 92 executed, 0 up-to-date
+
+:shared:testDebugUnitTest — 199 tests completed, 0 failed — PASS
+:app:testDebugUnitTest — 128 tests completed, 0 failed — PASS
+:app:assembleDebug — SUCCESS
+```
