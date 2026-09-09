@@ -673,26 +673,48 @@ def get_milestone_narrative(
     session_id: int,
     repo: Annotated[DiscoveryRepository, Depends(get_repository)],
     client: Annotated[DiscoveryGeminiClient, Depends(get_gemini_client)],
+    milestone: Annotated[int | None, Query(ge=1)] = None,
 ) -> dict[str, Any]:
     """シグナル蓄積件数に応じたマイルストーンAIナラティブを取得する。
 
     シグナル総件数が10件未満（milestone=0）の場合はレポート対象外。
     同一マイルストーン内ではセッション単位でキャッシュを再利用する。
+
+    milestone クエリパラメータを省略すると、現在のシグナル総件数から
+    最新マイルストーンを自動算出する。Android Worker は未通知の過去
+    マイルストーンを指定して取得するためにこのパラメータを使う。
     """
     _require_session(repo, session_id)
     signal_count = repo.count_signals(session_id)
-    milestone = signal_count // 10
-    if milestone == 0:
+    current_milestone = signal_count // 10
+    if milestone is None:
+        milestone = current_milestone
+    if milestone == 0 or milestone > current_milestone:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Not enough signals to generate a milestone narrative",
         )
 
-    cached = repo.get_milestone_narrative_cache(session_id, milestone)
-    if cached is not None:
+    cached, is_owner = repo.get_or_reserve_milestone_narrative_cache(
+        session_id, milestone
+    )
+    if cached.insight_text:
         return {
             "milestone": milestone,
             "insight_text": cached.insight_text,
+        }
+
+    if not is_owner:
+        # 他リクエストが生成中。勝者のキャッシュが確定するまで待つ。
+        winner_cache = repo.wait_for_milestone_narrative_cache(session_id, milestone)
+        if winner_cache is None or not winner_cache.insight_text:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Milestone narrative generation is currently unavailable",
+            )
+        return {
+            "milestone": milestone,
+            "insight_text": winner_cache.insight_text,
         }
 
     data = repo.get_summary_data(session_id)
@@ -708,6 +730,8 @@ def get_milestone_narrative(
             top_domain=top_domain,
         )
     except (ValueError, RuntimeError) as exc:
+        # 生成失敗時は placeholder 予約を解除し、次回リクエストが再生成できるようにする。
+        repo.release_milestone_reservation(session_id, milestone)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Milestone narrative generation is currently unavailable",

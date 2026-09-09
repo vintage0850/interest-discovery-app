@@ -29,6 +29,9 @@ class FakeDiscoveryRepository(
 
     var activeSessionId: Int? = 1
 
+    /** Worker テスト用: getMilestoneNarrative() が返す最新マイルストーン。 */
+    var milestone: Int = 2
+
     override suspend fun getActiveSessionId(): Int? = activeSessionId
 
     // 5つの初期実験プール
@@ -419,12 +422,13 @@ class FakeDiscoveryRepository(
         )
     }
 
-    override suspend fun getMilestoneNarrative(): MilestoneNarrative {
+    override suspend fun getMilestoneNarrative(milestone: Int): MilestoneNarrative {
         simulateLatency()
         checkErrorState()
+        val resolved = if (milestone > 0) milestone else this.milestone
         return MilestoneNarrative(
-            milestone = 2,
-            insightText = "シグナルが20件に達し、分析と比較を組み合わせて考える傾向が強まっています。"
+            milestone = resolved,
+            insightText = "シグナルが${resolved * 10}件に達し、新しい傾向が見えてきました。"
         )
     }
 

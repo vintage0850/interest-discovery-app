@@ -121,12 +121,25 @@ class DiscoveryPeriodicReportWorker @JvmOverloads constructor(
         }
 
         // 6. マイルストーン通知の独立判定と実行
+        // 最新マイルストーンを取得し、前回通知から最新までの未通知マイルストーンを
+        // 順に生成・通知する。中間マイルストーンが欠落しないよう、1件ずつ確実に処理する。
         val lastNotifiedMilestone = settingsStorage.getLastNotifiedMilestone(sessionId)
         try {
-            val milestoneNarrative = repository.getMilestoneNarrative()
-            if (lastNotifiedMilestone == null || milestoneNarrative.milestone > lastNotifiedMilestone) {
-                if (notifier.notifyReport(ReportType.MILESTONE, sessionId)) {
-                    settingsStorage.saveLastNotifiedMilestone(sessionId, milestoneNarrative.milestone)
+            val latestMilestoneNarrative = repository.getMilestoneNarrative()
+            val latestMilestone = latestMilestoneNarrative.milestone
+            val startMilestone = (lastNotifiedMilestone ?: 0) + 1
+            for (milestone in startMilestone..latestMilestone) {
+                val narrative = if (milestone == latestMilestone) {
+                    latestMilestoneNarrative
+                } else {
+                    repository.getMilestoneNarrative(milestone)
+                }
+                val reachedSignalCount = narrative.milestone * 10
+                if (notifier.notifyReport(ReportType.MILESTONE, sessionId, reachedSignalCount)) {
+                    settingsStorage.saveLastNotifiedMilestone(sessionId, narrative.milestone)
+                } else {
+                    // 通知発行に失敗した場合はキー保存せず、次回同じマイルストーンから再試行
+                    break
                 }
             }
         } catch (_: Exception) {

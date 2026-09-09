@@ -5624,3 +5624,46 @@ Codexが`discovery-backend`ブランチ全体をレビュー。判定: **FAIL**�
 - 指摘3(重大): 通知ID計算式を`sessionId * 2 + 種別`から`sessionId * 3 + reportType.ordinal`へ変更しており、既存週次/月次の通知IDが変わる。「既存の週次/月次レポートのAPI契約・挙動は変更しない」に反する。`ordinal`依存も将来のenum順序変更に弱い。
 - 指摘4: 案件33と無関係な`behavior_categories`マイグレーションテストが混入・重複。TASK.mdの「テスト結果」「引き継ぎメモ」欄が未記入。
 - 指摘5: Codexのサンドボックス制約で`./gradlew testDebugUnitTest`を独立実行できず(Claude側で別途`BUILD SUCCESSFUL`を確認済みのため実質解消)。
+
+### テスト結果
+
+| 日付 | 担当 | コマンド | 結果 |
+| --- | --- | --- | --- |
+| 2026-09-09 | Kimi | `python -m pytest` (backend) | **398 passed**, 5 warnings in 79.52s。並行リクエストでGemini呼び出しが1回に抑えられることを含むマイルストーン関連テスト全て合格 |
+| 2026-09-09 | Kimi | `./gradlew testDebugUnitTest` (Android/KMP unit) | **BUILD SUCCESSFUL**。全テスト合格(0 failed) |
+| 2026-09-09 | Kimi | `./gradlew :app:compileDebugAndroidTestKotlin` | **BUILD SUCCESSFUL**。Android instrumented test ソースコンパイル成功 |
+
+### 引き継ぎメモ
+
+#### 完了事項(2026-09-09 / Kimi)
+
+- 指摘1(並行Gemini重複呼び出し)を修正
+  - `DiscoveryRepository.get_or_reserve_milestone_narrative_cache()` で `session_id × milestone` 単位のDB予約を導入。勝者だけがGeminiを呼び、敗者は勝者のキャッシュを待機して再利用する。
+  - `discovery/router.py` に非所有者用の待機ループを追加。生成中は503ではなく最大10秒待機後にキャッシュを返す。
+  - `test_discovery_router.py` に `httpx.AsyncClient` + ASGI transport を使った並行リクエストテストを追加。同一 `session_id × milestone` への2並行リクエストで `generate_milestone_narrative()` が合計1回だけ呼ばれることを検証。
+- 指摘2(中間マイルストーン欠落)を修正
+  - `GET /sessions/{session_id}/report/milestone-narrative` に任意クエリパラメータ `?milestone={milestone}` を追加(未指定時は従来通り最新milestone)。
+  - `RealDiscoveryRepository.getMilestoneNarrative(milestone: Int)` を追加し、URLに `?milestone=` を付与。
+  - `DiscoveryPeriodicReportWorker` を `(lastNotifiedMilestone ?: 0) + 1` から `latestMilestone` までループさせ、未通知の中間マイルストーンを欠落なく処理。
+  - `DiscoveryReportNotifier.buildReportNotificationContent()` に `reachedSignalCount` 引数を追加し、通知タイトルを「シグナルが{milestone*10}件溜まりました」と表示。
+  - `DiscoveryPeriodicReportWorkerTest` に中間マイルストーン(1→3で2も通知)ケース、`reachedSignalCount` 検証ケースを追加。
+- 指摘3(通知ID後方互換性)を修正
+  - `DiscoveryReportNotifier.reportIdentityFor()` で週次/月次の既存計算式 `30_000 + sessionId * 2 + (MONTHLY ? 1 : 0)` を維持。
+  - マイルストーンのみ別領域 `1_000_000 + sessionId` に明示的に割り当て。`ReportType.ordinal` には依存しない。
+  - `DiscoveryPeriodicReportRulesTest` に変更前週次/月次IDの固定値回帰テスト、複数セッション・3種別の衝突防止テストを追加。
+- 指摘4(無関係テスト整理・ドキュメント)を対応
+  - `backend/tests/test_discovery_repository.py` から重複していた `TestSchemaMigrationRepository` の一方を削除(残す方は `test_migration_adds_behavior_categories_column_to_existing_db` と `test_migration_is_idempotent` を含む1クラス)。
+  - 本「テスト結果」欄と「引き継ぎメモ」欄を更新。
+  - `docs/quality-review/2026-09-09-案件33-milestone-narrative-report.md` に修正後のテスト結果を追記。
+
+#### 次の担当と行動
+
+**次の担当: Codex**
+
+- `docs/quality-review/2026-09-09-案件33-gate-review.md` の指摘1〜4がすべて修正されたことを再レビューし、Gate 4-1/4-3/5-2の未確認項目を更新。
+- 指摘5(Gradleキャッシュ制約)は本環境で `./gradlew testDebugUnitTest` が **BUILD SUCCESSFUL** となったため解消済みとして確認。
+
+#### 未解決・注意事項
+
+- Android エミュレータ/実機がないため、`connectedDebugAndroidTest` は未実行。`:app:compileDebugAndroidTestKotlin` でのコンパイル成功は確認済み。
+- `feature/signal-milestone-report` ブランチ上でのみ検証済み。`main` ブランチへのマージ前に通常のコンフリクト確認が必要。

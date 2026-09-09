@@ -1,4 +1,4 @@
-﻿package com.example.myapplication.work
+package com.example.myapplication.work
 
 import com.example.myapplication.shared.discovery.ReportType
 import org.junit.Assert.assertEquals
@@ -103,10 +103,22 @@ class DiscoveryPeriodicReportRulesTest {
     }
 
     @Test
-    fun buildReportNotificationContent_マイルストーン固定文言の検証() {
-        val (title, body) = buildReportNotificationContent(ReportType.MILESTONE)
+    fun buildReportNotificationContent_マイルストーン到達件数を反映() {
+        val (title10, body10) = buildReportNotificationContent(ReportType.MILESTONE, reachedSignalCount = 10)
+        assertEquals("🎯 シグナルが10件溜まりました", title10)
+        assertEquals("新しく見えてきた自分の傾向を確認できます", body10)
+
+        val (title20, _) = buildReportNotificationContent(ReportType.MILESTONE, reachedSignalCount = 20)
+        assertEquals("🎯 シグナルが20件溜まりました", title20)
+
+        val (title30, _) = buildReportNotificationContent(ReportType.MILESTONE, reachedSignalCount = 30)
+        assertEquals("🎯 シグナルが30件溜まりました", title30)
+    }
+
+    @Test
+    fun buildReportNotificationContent_マイルストーン件数未指定時は10件でフォールバック() {
+        val (title, _) = buildReportNotificationContent(ReportType.MILESTONE)
         assertEquals("🎯 シグナルが10件溜まりました", title)
-        assertEquals("新しく見えてきた自分の傾向を確認できます", body)
     }
 
     @Test
@@ -153,5 +165,36 @@ class DiscoveryPeriodicReportRulesTest {
         assertNotEquals(weeklyRequestCode, monthlyRequestCode)
         assertNotEquals(monthlyRequestCode, milestoneRequestCode)
         assertNotEquals(milestoneRequestCode, weeklyRequestCode)
+    }
+
+    @Test
+    fun notificationIdAndRequestCode_週次月次IDは変更前の値を維持する() {
+        // 案件27導入時の計算式: 30_000 + sessionId * 2 + (MONTHLY ? 1 : 0)
+        assertEquals(30_002, reportNotificationIdFor(1, ReportType.WEEKLY))
+        assertEquals(30_003, reportNotificationIdFor(1, ReportType.MONTHLY))
+        assertEquals(30_002, reportRequestCodeFor(1, ReportType.WEEKLY))
+        assertEquals(30_003, reportRequestCodeFor(1, ReportType.MONTHLY))
+
+        assertEquals(30_004, reportNotificationIdFor(2, ReportType.WEEKLY))
+        assertEquals(30_005, reportNotificationIdFor(2, ReportType.MONTHLY))
+    }
+
+    @Test
+    fun notificationIdAndRequestCode_複数セッションの3種別が相互に衝突しない() {
+        val ids = mutableSetOf<Int>()
+        val requestCodes = mutableSetOf<Int>()
+        val sessionIds = listOf(1, 2, 10, 100, 1000)
+        val types = listOf(ReportType.WEEKLY, ReportType.MONTHLY, ReportType.MILESTONE)
+
+        for (sessionId in sessionIds) {
+            for (type in types) {
+                val id = reportNotificationIdFor(sessionId, type)
+                val requestCode = reportRequestCodeFor(sessionId, type)
+                assertFalse("Duplicate notification id for session=$sessionId type=$type", ids.contains(id))
+                assertFalse("Duplicate request code for session=$sessionId type=$type", requestCodes.contains(requestCode))
+                ids.add(id)
+                requestCodes.add(requestCode)
+            }
+        }
     }
 }

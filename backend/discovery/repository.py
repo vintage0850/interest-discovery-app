@@ -816,6 +816,87 @@ class DiscoveryRepository:
             db.refresh(cache)
             return cache
 
+    def get_or_reserve_milestone_narrative_cache(
+        self,
+        session_id: int,
+        milestone: int,
+    ) -> tuple[MilestoneNarrativeCache, bool]:
+        """マイルストーンキャッシュを取得または生成権を予約する。
+
+        戻り値は (cache, is_owner) のタプル。is_owner=True の場合、呼び出し側が
+        Gemini で生成し save_milestone_narrative_cache() で確定させる責任を持つ。
+        is_owner=False の場合、他リクエストが生成中の可能性があるため、
+        wait_for_milestone_narrative_cache() で確定を待つ。
+        """
+        with Session(self._engine) as db:
+            existing = db.exec(
+                select(MilestoneNarrativeCache).where(
+                    MilestoneNarrativeCache.session_id == session_id,
+                    MilestoneNarrativeCache.milestone == milestone,
+                )
+            ).first()
+            if existing is not None:
+                return existing, False
+
+            placeholder = MilestoneNarrativeCache(
+                session_id=session_id,
+                milestone=milestone,
+                insight_text="",
+            )
+            db.add(placeholder)
+            try:
+                db.commit()
+            except IntegrityError:
+                # 他リクエストが先に予約した。勝者のレコードを返す。
+                db.rollback()
+                winner = db.exec(
+                    select(MilestoneNarrativeCache).where(
+                        MilestoneNarrativeCache.session_id == session_id,
+                        MilestoneNarrativeCache.milestone == milestone,
+                    )
+                ).first()
+                if winner is not None:
+                    return winner, False
+                raise
+            db.refresh(placeholder)
+            return placeholder, True
+
+    def release_milestone_reservation(
+        self,
+        session_id: int,
+        milestone: int,
+    ) -> None:
+        """生成失敗時に placeholder 予約を解除し、次回リクエストが再生成できるようにする。"""
+        with Session(self._engine) as db:
+            placeholder = db.exec(
+                select(MilestoneNarrativeCache).where(
+                    MilestoneNarrativeCache.session_id == session_id,
+                    MilestoneNarrativeCache.milestone == milestone,
+                    MilestoneNarrativeCache.insight_text == "",
+                )
+            ).first()
+            if placeholder is not None:
+                db.delete(placeholder)
+                db.commit()
+
+    def wait_for_milestone_narrative_cache(
+        self,
+        session_id: int,
+        milestone: int,
+        timeout_seconds: float = 5.0,
+        interval_seconds: float = 0.05,
+    ) -> MilestoneNarrativeCache | None:
+        """他リクエストによる生成完了を短時間ポーリングで待つ。"""
+        import time
+
+        deadline = time.monotonic() + timeout_seconds
+        while time.monotonic() < deadline:
+            cached = self.get_milestone_narrative_cache(session_id, milestone)
+            if cached is not None and cached.insight_text:
+                return cached
+            time.sleep(interval_seconds)
+        return self.get_milestone_narrative_cache(session_id, milestone)
+
     def get_summary_data(self, session_id: int) -> dict[str, Any]:
         with Session(self._engine) as db:
             signals = list(

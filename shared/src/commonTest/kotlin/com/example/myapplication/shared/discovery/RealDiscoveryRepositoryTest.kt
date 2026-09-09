@@ -253,7 +253,9 @@ private val EVIDENCE_LIST_BODY = """
 private fun mockClient(handler: (path: String) -> Pair<HttpStatusCode, String>): Pair<HttpClient, MutableList<String>> {
     val requestedPaths = mutableListOf<String>()
     val engine = MockEngine { request ->
-        val path = request.url.encodedPath
+        val path = request.url.run {
+            encodedPath + encodedQuery.takeIf { it.isNotEmpty() }?.let { "?$it" }.orEmpty()
+        }
         requestedPaths.add(path)
         val (status, body) = handler(path)
         respond(
@@ -1010,6 +1012,26 @@ class RealDiscoveryRepositoryTest {
     }
 
     @Test
+    fun getMilestoneNarrative_withExplicitMilestone_appendsQueryParameter() = runTest {
+        val (client, paths) = mockClient { path ->
+            when (path) {
+                "/sessions" -> HttpStatusCode.Created to SESSION_BODY
+                "/sessions/1/report/milestone-narrative?milestone=1" -> HttpStatusCode.OK to """
+                    {"milestone": 1, "insight_text": "10件のシグナルから分析の傾向が見え始めました。"}
+                """.trimIndent()
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client)
+
+        val narrative = repo.getMilestoneNarrative(1)
+
+        assertEquals(1, narrative.milestone)
+        assertEquals("10件のシグナルから分析の傾向が見え始めました。", narrative.insightText)
+        assertEquals(listOf("/sessions", "/sessions/1/report/milestone-narrative?milestone=1"), paths)
+    }
+
+    @Test
     fun getMilestoneNarrative_throwsWhenServerReturnsError() = runTest {
         val (client, _) = mockClient { path ->
             when (path) {
@@ -1584,7 +1606,7 @@ class RealDiscoveryRepositoryTest {
     fun getSessionList_fetchesSessionsForStudentLabel() = runTest {
         val (client, paths) = mockClient { path ->
             when (path) {
-                "/sessions" -> HttpStatusCode.OK to """
+                "/sessions?student_label=test_user" -> HttpStatusCode.OK to """
                     [{"id": 2, "student_label": "test_user", "status": "active",
                       "created_at": "2026-09-02T00:00:00+00:00", "updated_at": "2026-09-03T00:00:00+00:00"},
                      {"id": 1, "student_label": "test_user", "status": "active",
@@ -1597,7 +1619,7 @@ class RealDiscoveryRepositoryTest {
 
         val sessions = repo.getSessionList()
 
-        assertEquals(listOf("/sessions"), paths)
+        assertEquals(listOf("/sessions?student_label=test_user"), paths)
         assertEquals(2, sessions.size)
         assertEquals(2, sessions[0].id)
         assertEquals(1, sessions[1].id)

@@ -119,3 +119,46 @@ Android エミュレータ/実機がこの作業環境にないため、`connect
 
 - `docs/quality-review/2026-09-09-案件33-milestone-narrative-report.md`(本ファイル)
 - `TASK.md` 案件33セクションに「実装結果」を追記
+
+---
+
+## ゲートレビュー指摘への対応 (2026-09-09)
+
+Codex から `CHANGES REQUIRED` とされた指摘1〜4を修正した。
+
+### 指摘1: 並行リクエストでのGemini重複呼び出し防止
+
+- `DiscoveryRepository.get_or_reserve_milestone_narrative_cache()` を新設。`session_id × milestone` 単位でDB予約レコードを挿入し、挿入に成功したリクエストだけがGemini生成の「勝者」となる。
+- 敗者は `wait_for_milestone_narrative_cache()` で勝者の生成結果をポーリング待機し、Geminiを呼ばずに同一キャッシュを返す。
+- `discovery/router.py` のエンドポイントは予約→生成(勝者)または待機(敗者)→応答の流れに変更。待機中は503ではなく最大10秒待機後にキャッシュを返す。
+- `test_discovery_router.py` に `httpx.AsyncClient(transport=httpx.ASGITransport(app=app))` を使った並行テスト `test_get_milestone_narrative_concurrent_requests_call_gemini_once` を追加。2リクエストが同一内容を返し、`generate_milestone_narrative()` の呼び出しが1回であることを検証。
+
+### 指摘2: 中間マイルストーンの欠落防止と通知文言修正
+
+- `GET /sessions/{session_id}/report/milestone-narrative` に `?milestone={milestone}` クエリパラメータを追加(未指定時は従来通り最新milestone)。
+- `RealDiscoveryRepository` に `getMilestoneNarrative(milestone: Int)` を追加し、明示的milestoneをURLに反映。
+- `DiscoveryPeriodicReportWorker` を `(lastNotifiedMilestone ?: 0) + 1` から `latestMilestone` までループさせ、未通知の中間マイルストーンを欠落なく生成・通知。
+- `DiscoveryReportNotifier` の通知文言構築に `reachedSignalCount` を導入。マイルストーン通知タイトルを「シグナルが{milestone×10}件溜まりました」と表示。
+- `DiscoveryPeriodicReportWorkerTest` に中間マイルストーン(1→3で2も通知)ケース、`reachedSignalCount` 検証ケースを追加。
+
+### 指摘3: 通知ID/requestCodeの後方互換性維持
+
+- `DiscoveryReportNotifier.reportIdentityFor()` で週次/月次の既存計算式 `30_000 + sessionId * 2 + (MONTHLY ? 1 : 0)` を維持。
+- マイルストーンのみ別領域 `1_000_000 + sessionId` に明示的に割り当て。`ReportType.ordinal` には依存しない。
+- `DiscoveryPeriodicReportRulesTest` に変更前の週次/月次ID固定値回帰テスト、複数セッション・3種別の衝突防止テストを追加。
+
+### 指摘4: 無関係テストの整理とドキュメント更新
+
+- `backend/tests/test_discovery_repository.py` から重複していた `TestSchemaMigrationRepository` の一方を削除。残す方は `test_migration_adds_behavior_categories_column_to_existing_db` と `test_migration_is_idempotent` を含む1クラス。
+- `TASK.md` 案件33セクションに「テスト結果」と「引き継ぎメモ」を追記。
+- 本ファイルに「ゲートレビュー指摘への対応」を追記。
+
+## 修正後のテスト・ビルド結果
+
+| コマンド | 結果 |
+|---|---|
+| `python -m pytest` (backend) | **398 passed**, 5 warnings in 79.52s |
+| `./gradlew testDebugUnitTest` (Android/KMP unit) | **BUILD SUCCESSFUL** (0 failed) |
+| `./gradlew :app:compileDebugAndroidTestKotlin` | **BUILD SUCCESSFUL** |
+
+既存プロジェクト由来の AGP/Kotlin API 非推奨警告は出力されたが、エラーはなかった。

@@ -1240,54 +1240,6 @@ class TestMonthlyNarrativeCacheRepository:
         assert result.monthly_insights == "先に勝った"
 
 
-class TestSchemaMigrationRepository:
-    def test_migration_adds_behavior_categories_column_to_existing_db(
-        self,
-    ) -> None:
-        """既存DBにbehavior_categories列が無い場合、マイグレーションで追加される。"""
-        from sqlalchemy.pool import StaticPool
-        from sqlmodel import create_engine
-
-        engine = create_engine(
-            "sqlite:///:memory:?cache=shared",
-            echo=False,
-            connect_args={"check_same_thread": False},
-            poolclass=StaticPool,
-        )
-        SQLModel.metadata.create_all(engine)
-
-        # 旧スキーマに戻す: behavior_categories 列を削除
-        with engine.connect() as conn:
-            conn.exec_driver_sql(
-                "ALTER TABLE evidence DROP COLUMN behavior_categories"
-            )
-            conn.commit()
-
-        # マイグレーションを含むリポジトリ初期化（旧スキーマから列を追加）
-        repository = DiscoveryRepository(engine)
-
-        # 旧スキーマではORMからINSERTできないため、マイグレーション後にレコードを作成
-        session = repository.create_session("student-a")
-        repository.add_signal(
-            session.id,
-            action_type=ActionType.SEARCH.value,
-            domain=DomainType.TECH,
-            content_summary="Python tutorial",
-            source=InterestSignalSource.SEARCH_HISTORY.value,
-            occurred_at=datetime.datetime.now(datetime.timezone.utc),
-        )
-        evidence = repository.build_evidence(session.id)[0]
-
-        # 新カラムが使えることを確認
-        updated = repository.update_evidence_behavior_categories(
-            evidence.id,
-            behavior_categories={BehaviorCategory.COMPARE.value: 0.7},
-        )
-        assert updated.behavior_categories == {BehaviorCategory.COMPARE.value: 0.7}
-
-        fetched = repository.list_evidence(session.id)[0]
-        assert fetched.behavior_categories == {BehaviorCategory.COMPARE.value: 0.7}
-
 class TestMilestoneNarrativeCacheRepository:
     def test_save_and_get_milestone_narrative_cache(self, repository: DiscoveryRepository) -> None:
         session = repository.create_session("student-a")
@@ -1449,6 +1401,71 @@ class TestMilestoneNarrativeCacheRepository:
         result = repository.get_milestone_narrative_cache(session.id, 1)
         assert result is not None
         assert result.insight_text == "先に勝った"
+
+    def test_get_or_reserve_returns_existing_cache_as_non_owner(
+        self, repository: DiscoveryRepository
+    ) -> None:
+        session = repository.create_session("student-a")
+        repository.save_milestone_narrative_cache(session.id, 1, "生成済み")
+
+        cached, is_owner = repository.get_or_reserve_milestone_narrative_cache(
+            session.id, 1
+        )
+        assert cached.insight_text == "生成済み"
+        assert is_owner is False
+
+    def test_get_or_reserve_first_caller_becomes_owner(
+        self, repository: DiscoveryRepository
+    ) -> None:
+        session = repository.create_session("student-a")
+
+        cached, is_owner = repository.get_or_reserve_milestone_narrative_cache(
+            session.id, 1
+        )
+        assert cached.insight_text == ""
+        assert is_owner is True
+
+    def test_get_or_reserve_second_caller_returns_winner_as_non_owner(
+        self, repository: DiscoveryRepository
+    ) -> None:
+        session = repository.create_session("student-a")
+
+        first, first_owner = repository.get_or_reserve_milestone_narrative_cache(
+            session.id, 1
+        )
+        assert first_owner is True
+
+        second, second_owner = repository.get_or_reserve_milestone_narrative_cache(
+            session.id, 1
+        )
+        assert second_owner is False
+        assert second.id == first.id
+
+    def test_wait_for_milestone_narrative_cache_returns_populated_cache(
+        self, repository: DiscoveryRepository
+    ) -> None:
+        session = repository.create_session("student-a")
+        cached, is_owner = repository.get_or_reserve_milestone_narrative_cache(
+            session.id, 1
+        )
+        assert is_owner is True
+
+        repository.save_milestone_narrative_cache(session.id, 1, "確定テキスト")
+        waited = repository.wait_for_milestone_narrative_cache(session.id, 1)
+        assert waited is not None
+        assert waited.insight_text == "確定テキスト"
+
+    def test_release_milestone_reservation_removes_placeholder(
+        self, repository: DiscoveryRepository
+    ) -> None:
+        session = repository.create_session("student-a")
+        cached, is_owner = repository.get_or_reserve_milestone_narrative_cache(
+            session.id, 1
+        )
+        assert is_owner is True
+
+        repository.release_milestone_reservation(session.id, 1)
+        assert repository.get_milestone_narrative_cache(session.id, 1) is None
 
 
 class TestSchemaMigrationRepository:

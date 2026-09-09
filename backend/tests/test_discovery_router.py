@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 import datetime
+import os
+import tempfile
+import threading
+import time
 from unittest.mock import MagicMock
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.pool import NullPool, StaticPool
 from sqlmodel import SQLModel, create_engine
 
 from discovery.gemini_prompts import DiscoveryGeminiClient
@@ -1765,6 +1771,114 @@ class TestMilestoneNarrativeEndpoints:
         assert response_2.json()["milestone"] == 2
 
         assert mock_client.generate_milestone_narrative.call_count == 1
+
+    def test_get_milestone_narrative_with_explicit_milestone(
+        self, test_client: TestClient
+    ) -> None:
+        session_id = self._create_session_with_signals(test_client, 25)
+
+        mock_client = MagicMock(spec=DiscoveryGeminiClient)
+        mock_client.generate_milestone_narrative.return_value = {
+            "insight_text": "10件目のマイルストーン",
+        }
+        app.dependency_overrides[get_gemini_client] = lambda: mock_client
+
+        response = test_client.get(
+            f"/sessions/{session_id}/report/milestone-narrative?milestone=1"
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["milestone"] == 1
+        assert data["insight_text"] == "10件目のマイルストーン"
+
+        call_args = mock_client.generate_milestone_narrative.call_args
+        assert call_args.kwargs["milestone"] == 1
+
+    def test_get_milestone_narrative_explicit_milestone_too_high_returns_404(
+        self, test_client: TestClient
+    ) -> None:
+        session_id = self._create_session_with_signals(test_client, 10)
+
+        response = test_client.get(
+            f"/sessions/{session_id}/report/milestone-narrative?milestone=2"
+        )
+        assert response.status_code == 404
+
+    def test_get_milestone_narrative_concurrent_requests_call_gemini_once(
+        self,
+    ) -> None:
+        """同一 session_id × milestone への並行リクエストで Gemini は1回だけ呼ばれる。
+
+        FastAPI の非同期並行処理を使い、同一SQLiteファイルDBを参照する1つの
+        ASGIアプリへ2リクエストを同時に送る。
+        """
+        db_path = tempfile.mktemp(suffix="_milestone_concurrent.db")
+        engine = create_engine(
+            f"sqlite:///{db_path}",
+            echo=False,
+            connect_args={"check_same_thread": False},
+            poolclass=NullPool,
+        )
+        SQLModel.metadata.create_all(engine)
+        repo = DiscoveryRepository(engine)
+
+        session = repo.create_session("student-a")
+        session_id = session.id
+        now = datetime.datetime.now(datetime.timezone.utc)
+        for i in range(10):
+            repo.add_signal(
+                session_id,
+                action_type="search",
+                domain=DomainType.TECH,
+                content_summary=f"Python tutorial {i}",
+                source="search_history",
+                occurred_at=now,
+            )
+
+        call_count = 0
+        lock = threading.Lock()
+
+        def slow_generate(**_kwargs):
+            nonlocal call_count
+            with lock:
+                call_count += 1
+            # 生成に時間がかかる状況を再現
+            time.sleep(0.3)
+            return {"insight_text": "並行生成結果"}
+
+        mock_client = MagicMock(spec=DiscoveryGeminiClient)
+        mock_client.generate_milestone_narrative.side_effect = slow_generate
+        app.dependency_overrides[get_repository] = lambda: repo
+        app.dependency_overrides[get_gemini_client] = lambda: mock_client
+
+        async def send_requests() -> dict[str, tuple[int, dict]]:
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                responses = await asyncio.gather(
+                    client.get(f"/sessions/{session_id}/report/milestone-narrative"),
+                    client.get(f"/sessions/{session_id}/report/milestone-narrative"),
+                )
+                return {
+                    "a": (responses[0].status_code, responses[0].json()),
+                    "b": (responses[1].status_code, responses[1].json()),
+                }
+
+        try:
+            results = asyncio.run(send_requests())
+        finally:
+            app.dependency_overrides.clear()
+            try:
+                os.unlink(db_path)
+            except OSError:
+                pass
+
+        assert all(status == 200 for status, _ in results.values()), results
+        assert all(
+            data["insight_text"] == "並行生成結果"
+            for _, data in results.values()
+        ), results
+        assert call_count == 1, f"Gemini called {call_count} times"
 
 
 class TestEvidenceEndpoints:

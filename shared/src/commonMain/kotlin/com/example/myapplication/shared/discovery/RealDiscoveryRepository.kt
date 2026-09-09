@@ -353,9 +353,14 @@ class RealDiscoveryRepository(
         return response.body<MonthlyNarrativeResponseDto>().toUiModel()
     }
 
-    override suspend fun getMilestoneNarrative(): MilestoneNarrative {
+    override suspend fun getMilestoneNarrative(milestone: Int): MilestoneNarrative {
         val id = ensureSession()
-        val response = client.get("/sessions/$id/report/milestone-narrative")
+        val url = if (milestone > 0) {
+            "/sessions/$id/report/milestone-narrative?milestone=$milestone"
+        } else {
+            "/sessions/$id/report/milestone-narrative"
+        }
+        val response = client.get(url)
         if (!response.status.isSuccess()) {
             throw DiscoveryApiException("マイルストーンレポートの取得に失敗しました (HTTP ${response.status.value})")
         }
