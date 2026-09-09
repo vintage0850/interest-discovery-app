@@ -5579,3 +5579,26 @@ Codexが`discovery-backend`ブランチ全体をレビュー。判定: **FAIL**�
 **影響ファイル(想定):** `app/src/main/java/com/example/myapplication/data/account/GoogleAccountManager.kt`(新規)、`app/src/main/java/com/example/myapplication/MainActivity.kt`、`shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/App.kt`、`shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/discovery/SettingsTabScreen.kt`、`SettingsUiState`定義箇所、`app/build.gradle.kts`(Credential Manager / googleid依存追加)、対応するテスト。
 
 **ディスパッチ方針:** 新規worktree `.worktrees/google-account-link`(ブランチ`feature/google-account-link`、`discovery-backend`から分岐、作成済み)でKimiに実装させる。単一レーンのため他ブランチ(進行中の`feature/signal-milestone-report`)とのファイル競合なし。TDD必須。完了後、報告ファイルを`docs/quality-review/2026-09-09-案件32-google-account-link-report.md`に作成させる。完了後、Codexにゲートレビューを依頼する。
+
+---
+
+## 案件33: シグナル蓄積トリガー・レポート(マイルストーンナラティブ)
+
+**発覚経緯(2026-09-09、Claudeが調査):** `feature/signal-milestone-report`ブランチに、TASK.md未記録の中断タスクを発見。`_ai-routing\logs\kimi\20260909_074728_0.json`・`20260909_074958_0.json`により経緯が判明した。
+
+**経緯:**
+1. 2026-09-09 07:47、Kimiに本タスクをディスパッチ。Kimiはスパルタン規約のオフィスアワー3質問(解決する痛み/最小出荷バージョン/間違っている可能性のある前提)に回答を求めて終了(実装未着手、正常終了)。
+2. 07:49、3質問への回答(設計裁定者Claude承認済みとして)を含めて再ディスパッチ。598秒・132ターン・$8.09消費の末、`backend/discovery/models.py`(`MilestoneNarrativeCache`テーブル・`MilestoneNarrativeResponse`スキーマ)とそのテストのみをコミット(`7989fd9`)した時点で **`[Tool use interrupted]`により中断**。それ以降の実装(repository.py・gemini_prompts.py・router.py・Android側・TASK.md記録)は未着手のまま放置されていた。
+3. **もともとこの中断タスクも「案件32」を名乗っていたが、番号が同時進行中のGoogleアカウント連携タスクと衝突していたため、Claudeの判断で本タスクを「案件33」に採番し直した。** 実装コード自体に案件番号の埋め込みは無いため、リナンバーによる実装への影響はない。
+
+**再開時の対応:** discovery-backendの最新化(案件32のTASK.md更新等)を`feature/signal-milestone-report`へマージ済み(コンフリクトなし)。中断時点までの差分(`backend/discovery/models.py`・テスト)はそのまま活かし、続きから再開する。
+
+**要件(2026-09-09 07:49時点でオフィスアワー承認済み、変更なし):**
+- セッションのInterestSignal累積件数が10の倍数に達するたびに新レポート(マイルストーンナラティブ)を生成するトリガーを追加。`milestone = 総件数 // 10`、9件以下(milestone=0)はレポート対象外。
+- バックエンド: `discovery/repository.py`にmilestone用キャッシュCRUD+シグナル件数取得ヘルパー、`discovery/gemini_prompts.py`に`generate_milestone_narrative()`、`discovery/router.py`に`GET /sessions/{session_id}/report/milestone-narrative`(milestone=0は404、キャッシュ優先)。
+- Android: `ReportType`に`MILESTONE`追加、`DiscoverySettingsStorage`に`getLastNotifiedMilestone`/`saveLastNotifiedMilestone`、`RealDiscoveryRepository.getMilestoneNarrative()`、`DiscoveryPeriodicReportWorker`にマイルストーンチェック追加。
+- 既存の週次/月次レポートのAPI契約・挙動は変更しない(後方互換)。同一session_id×同一milestoneのキャッシュを必ず機能させ、Geminiの重複呼び出しを避ける。
+- スコープ外: フロントエンドの新規UI、週次/月次レポートの改修、閾値(10固定)の可変化、push/email等の外部通知配信。
+- 完了条件: `./gradlew testDebugUnitTest`と`python -m pytest`(backend)がともにGREEN。
+
+**ディスパッチ方針:** 既存worktree `.worktrees/signal-milestone-report`(ブランチ`feature/signal-milestone-report`)でKimiに続きを実装させる。TDD必須。完了後、報告ファイルを`docs/quality-review/2026-09-09-案件33-milestone-narrative-report.md`に作成させ、本セクションに実装結果を追記させる。完了後、Codexにゲートレビューを依頼する。
