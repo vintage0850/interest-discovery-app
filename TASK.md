@@ -5702,3 +5702,20 @@ Codexが`discovery-backend`ブランチ全体をレビュー。判定: **FAIL**�
 
 - Android エミュレータ/実機がないため、`connectedDebugAndroidTest` は未実行。`:app:compileDebugAndroidTestKotlin` でのコンパイル成功は確認済み。
 - `feature/signal-milestone-report` ブランチ上でのみ検証済み。`main` ブランチへのマージ前に通常のコンフリクト確認が必要。
+
+---
+
+## 案件32・33 マージ完了(2026-09-09、ユーザー指示によりCodex再レビューを省略)
+
+**ユーザー判断:** 案件32(再修正後)・案件33(修正後)ともに、Codexへの再ゲートレビューを行わずマージしてよいとの明示的な指示があった。AGENTS.mdの標準フロー(Codexの`PASS`をもって完了)を今回はユーザー権限で省略している。Claudeが代わりに以下の独立検証を実施した。
+
+**マージ内容:**
+- `feature/google-account-link` → `discovery-backend`: コンフリクトなし、自動マージ成功。
+- `feature/signal-milestone-report` → `discovery-backend`: `TASK.md`のみ機械的コンフリクト(両ブランチが同じ位置に追記)、両方の内容を保持して解決。それ以外はコンフリクトなし。
+
+**Claudeによる独立検証(Codexレビューの代替):**
+- backend: `python -m pytest` — 398 passed。
+- Android/KMP(結合ビルド): `./gradlew :app:testDebugUnitTest :shared:testDebugUnitTest :app:assembleDebug --rerun-tasks` — **BUILD SUCCESSFUL**(92 actionable tasks, 92 executed)、14分50秒。
+- 案件32単体・案件33単体でも同様のフルビルド確認済み(それぞれ`.worktrees/google-account-link`・`.worktrees/signal-milestone-report`で実施)。
+
+**本件クローズ。** worktree(`.worktrees/google-account-link`, `.worktrees/signal-milestone-report`)とマージ済みブランチは不要になったため削除予定。
