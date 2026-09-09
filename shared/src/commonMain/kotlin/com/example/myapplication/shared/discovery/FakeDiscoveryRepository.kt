@@ -419,11 +419,21 @@ class FakeDiscoveryRepository(
         )
     }
 
+    override suspend fun getMilestoneNarrative(): MilestoneNarrative {
+        simulateLatency()
+        checkErrorState()
+        return MilestoneNarrative(
+            milestone = 2,
+            insightText = "シグナルが20件に達し、分析と比較を組み合わせて考える傾向が強まっています。"
+        )
+    }
+
     override suspend fun getReportData(): ReportData {
         simulateLatency()
         checkErrorState()
         val weeklyNarrative = getWeeklyNarrative()
         val monthlyNarrative = getMonthlyNarrative()
+        val milestoneNarrative = getMilestoneNarrative()
         return ReportData(
             totalCompletedCount = completedCount,
             totalMinutesSpent = completedCount * 7,
@@ -436,7 +446,8 @@ class FakeDiscoveryRepository(
                 "つくる" to 2,
                 "整理する" to 1
             ),
-            monthlyNarrative = monthlyNarrative
+            monthlyNarrative = monthlyNarrative,
+            milestoneNarrative = milestoneNarrative
         )
     }
 

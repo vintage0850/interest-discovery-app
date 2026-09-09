@@ -103,6 +103,13 @@ class DiscoveryPeriodicReportRulesTest {
     }
 
     @Test
+    fun buildReportNotificationContent_マイルストーン固定文言の検証() {
+        val (title, body) = buildReportNotificationContent(ReportType.MILESTONE)
+        assertEquals("🎯 シグナルが10件溜まりました", title)
+        assertEquals("新しく見えてきた自分の傾向を確認できます", body)
+    }
+
+    @Test
     fun notificationIdAndRequestCode_週次と月次で衝突しない() {
         val sessionId = 1
         val weeklyId = reportNotificationIdFor(sessionId, ReportType.WEEKLY)
@@ -128,5 +135,23 @@ class DiscoveryPeriodicReportRulesTest {
             reportRequestCodeFor(1, ReportType.MONTHLY),
             reportRequestCodeFor(10_001, ReportType.WEEKLY)
         )
+    }
+
+    @Test
+    fun notificationIdAndRequestCode_3種類すべてで衝突しない() {
+        val sessionId = 1
+        val weeklyId = reportNotificationIdFor(sessionId, ReportType.WEEKLY)
+        val monthlyId = reportNotificationIdFor(sessionId, ReportType.MONTHLY)
+        val milestoneId = reportNotificationIdFor(sessionId, ReportType.MILESTONE)
+        assertNotEquals(weeklyId, monthlyId)
+        assertNotEquals(monthlyId, milestoneId)
+        assertNotEquals(milestoneId, weeklyId)
+
+        val weeklyRequestCode = reportRequestCodeFor(sessionId, ReportType.WEEKLY)
+        val monthlyRequestCode = reportRequestCodeFor(sessionId, ReportType.MONTHLY)
+        val milestoneRequestCode = reportRequestCodeFor(sessionId, ReportType.MILESTONE)
+        assertNotEquals(weeklyRequestCode, monthlyRequestCode)
+        assertNotEquals(monthlyRequestCode, milestoneRequestCode)
+        assertNotEquals(milestoneRequestCode, weeklyRequestCode)
     }
 }

@@ -89,6 +89,24 @@ class MonthlyNarrativeCandidate(BaseModel):
         return trimmed
 
 
+class MilestoneNarrativeCandidate(BaseModel):
+    """Gemini が生成するマイルストーンナラティブ。"""
+
+    insight_text: str = Field(..., min_length=1, max_length=200)
+
+    @field_validator("insight_text")
+    @classmethod
+    def _validate_text(cls, value: str) -> str:
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("field must not be empty or whitespace only")
+        if len(trimmed) > 200:
+            raise ValueError("field must be 200 characters or less after trimming")
+        if "\n" in trimmed or "\r" in trimmed:
+            raise ValueError("field must not contain line breaks")
+        return trimmed
+
+
 class BehaviorCategoryClassification(BaseModel):
     """1件のエビデンスに対する行動分類（Action Taxonomy）結果。"""
 
@@ -276,6 +294,34 @@ class DiscoveryGeminiClient:
         except APIError as exc:
             raise RuntimeError(_sanitize_gemini_error_message(exc)) from exc
         candidate = self._parse_monthly_narrative_response(response.text or "")
+        return candidate.model_dump()
+
+    def generate_milestone_narrative(
+        self,
+        signal_count: int,
+        milestone: int,
+        top_domain: str,
+    ) -> dict[str, Any]:
+        """シグナル蓄積件数に応じたマイルストーンナラティブを生成する。"""
+        from google.genai.errors import APIError
+
+        client = self._ensure_client()
+        prompt = self._build_milestone_narrative_prompt(
+            signal_count, milestone, top_domain
+        )
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=_MILESTONE_NARRATIVE_SYSTEM_INSTRUCTION,
+                    response_mime_type="application/json",
+                    response_schema=MilestoneNarrativeCandidate,
+                ),
+            )
+        except APIError as exc:
+            raise RuntimeError(_sanitize_gemini_error_message(exc)) from exc
+        candidate = self._parse_milestone_narrative_response(response.text or "")
         return candidate.model_dump()
 
     def _build_experiment_prompt(
@@ -508,6 +554,32 @@ class DiscoveryGeminiClient:
             raise ValueError("Gemini 応答がオブジェクトではありません")
         return MonthlyNarrativeCandidate.model_validate(data)
 
+    def _build_milestone_narrative_prompt(
+        self,
+        signal_count: int,
+        milestone: int,
+        top_domain: str,
+    ) -> str:
+        return (
+            "以下は高校生の興味発見アクティビティにおける、シグナル蓄積のマイルストーン情報です。\n\n"
+            f"- 累計シグナル件数: {signal_count}件\n"
+            f"- 到達マイルストーン: {milestone}（10件ごとに1つ）\n"
+            f"- 最も活動が多かったドメイン: {top_domain}\n\n"
+            "この節目にふさわしい、短い気づきを日本語で1つ出力してください。"
+        )
+
+    def _parse_milestone_narrative_response(self, raw: str) -> MilestoneNarrativeCandidate:
+        if not raw:
+            raise ValueError("Gemini から空の応答が返りました")
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Gemini 応答の JSON パースに失敗しました: {exc}") from exc
+
+        if isinstance(data, list):
+            raise ValueError("Gemini 応答がオブジェクトではありません")
+        return MilestoneNarrativeCandidate.model_validate(data)
+
 
 _EXPERIMENT_SYSTEM_INSTRUCTION = """\
 あなたは高校生の興味発見を支援するアシスタントです。
@@ -601,6 +673,27 @@ _MONTHLY_NARRATIVE_SYSTEM_INSTRUCTION = """\
 - monthly_insights: 直近30日間の全体気づき（200文字以内、改行なし）
 - progress_wave: 進み方の波（200文字以内、改行なし）
 - continuity_insight: 継続のペースに関する気づき（200文字以内、改行なし）
+"""
+
+_MILESTONE_NARRATIVE_SYSTEM_INSTRUCTION = """\
+あなたは高校生の興味発見を支援するアシスタントです。
+生徒の興味シグナルが10件ごとに到達するマイルストーンを祝い、短い気づきを生成してください。
+
+【あなたの役割】
+- 累計シグナル件数と到達したマイルストーンを受け取る
+- 最も活動が多かったドメインを考慮する
+- この節目にふさわしい、前向きで具体的な気づきを1つ述べる
+
+【絶対にやらないこと】
+- データに基づかない断定はしない
+- 生徒の能力や将来を決めつけない
+- 診断、優劣評価、失敗扱い、他ユーザーとの比較をしない
+- 件数や因果関係を捏造しない
+- 精神疾患、発達障害、IQ、性的指向、政治思想、宗教、医療状態について、推論・言及・示唆をしない
+
+【出力形式】
+以下の JSON スキーマに厳密に従ってください。余計な説明は不要です。
+- insight_text: マイルストーン到達に対する短い気づき（200文字以内、改行なし）
 """
 
 _BEHAVIOR_CATEGORY_SYSTEM_INSTRUCTION = """\

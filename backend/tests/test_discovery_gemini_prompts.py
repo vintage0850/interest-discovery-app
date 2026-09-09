@@ -11,6 +11,7 @@ from discovery.gemini_prompts import (
     _BEHAVIOR_CATEGORY_SYSTEM_INSTRUCTION,
     _EXPERIMENT_SYSTEM_INSTRUCTION,
     _HYPOTHESIS_SYSTEM_INSTRUCTION,
+    _MILESTONE_NARRATIVE_SYSTEM_INSTRUCTION,
     _MONTHLY_NARRATIVE_SYSTEM_INSTRUCTION,
     _WEEKLY_NARRATIVE_SYSTEM_INSTRUCTION,
 )
@@ -470,6 +471,131 @@ class TestSystemInstructionsIncludeSafetyConstraints:
         assert "精神疾患" in _MONTHLY_NARRATIVE_SYSTEM_INSTRUCTION
         assert "医療状態" in _MONTHLY_NARRATIVE_SYSTEM_INSTRUCTION
 
+    def test_milestone_narrative_system_instruction_includes_sensitive_attributes(self) -> None:
+        assert "精神疾患" in _MILESTONE_NARRATIVE_SYSTEM_INSTRUCTION
+        assert "医療状態" in _MILESTONE_NARRATIVE_SYSTEM_INSTRUCTION
+
     def test_behavior_category_system_instruction_includes_sensitive_attributes(self) -> None:
         assert "精神疾患" in _BEHAVIOR_CATEGORY_SYSTEM_INSTRUCTION
         assert "医療状態" in _BEHAVIOR_CATEGORY_SYSTEM_INSTRUCTION
+
+
+class TestGenerateMilestoneNarrative:
+    def test_returns_milestone_narrative(self, client: DiscoveryGeminiClient) -> None:
+        response = MagicMock()
+        response.text = """{
+            "insight_text": "10件のシグナルから分析の傾向が見え始めました"
+        }"""
+        client._client.models.generate_content.return_value = response
+
+        result = client.generate_milestone_narrative(
+            signal_count=10,
+            milestone=1,
+            top_domain="tech",
+        )
+        assert result["insight_text"] == "10件のシグナルから分析の傾向が見え始めました"
+
+    def test_rejects_overlong_insight_text(self, client: DiscoveryGeminiClient) -> None:
+        response = MagicMock()
+        response.text = f"""{{
+            "insight_text": "{'あ' * 201}"
+        }}"""
+        client._client.models.generate_content.return_value = response
+
+        with pytest.raises(ValueError):
+            client.generate_milestone_narrative(
+                signal_count=10,
+                milestone=1,
+                top_domain="tech",
+            )
+
+    def test_rejects_empty_insight_text(self, client: DiscoveryGeminiClient) -> None:
+        response = MagicMock()
+        response.text = """{
+            "insight_text": ""
+        }"""
+        client._client.models.generate_content.return_value = response
+
+        with pytest.raises(ValueError):
+            client.generate_milestone_narrative(
+                signal_count=10,
+                milestone=1,
+                top_domain="tech",
+            )
+
+    def test_rejects_whitespace_only_insight_text(self, client: DiscoveryGeminiClient) -> None:
+        response = MagicMock()
+        response.text = """{
+            "insight_text": "   "
+        }"""
+        client._client.models.generate_content.return_value = response
+
+        with pytest.raises(ValueError):
+            client.generate_milestone_narrative(
+                signal_count=10,
+                milestone=1,
+                top_domain="tech",
+            )
+
+    def test_rejects_multiline_insight_text(self, client: DiscoveryGeminiClient) -> None:
+        response = MagicMock()
+        response.text = """{
+            "insight_text": "1行目\\n2行目"
+        }"""
+        client._client.models.generate_content.return_value = response
+
+        with pytest.raises(ValueError):
+            client.generate_milestone_narrative(
+                signal_count=10,
+                milestone=1,
+                top_domain="tech",
+            )
+
+    def test_rejects_malformed_json(self, client: DiscoveryGeminiClient) -> None:
+        response = MagicMock()
+        response.text = "not valid json"
+        client._client.models.generate_content.return_value = response
+
+        with pytest.raises(ValueError):
+            client.generate_milestone_narrative(
+                signal_count=10,
+                milestone=1,
+                top_domain="tech",
+            )
+
+    def test_sdk_exception_is_wrapped(self, client: DiscoveryGeminiClient) -> None:
+        from google.genai.errors import APIError
+
+        client._client.models.generate_content.side_effect = APIError(
+            code=500, response_json={"error": "network error"}
+        )
+        with pytest.raises(RuntimeError) as exc_info:
+            client.generate_milestone_narrative(
+                signal_count=10,
+                milestone=1,
+                top_domain="tech",
+            )
+        assert "network error" not in str(exc_info.value)
+        assert "Gemini API" in str(exc_info.value)
+
+    def test_request_includes_signal_count_milestone_and_domain(
+        self, client: DiscoveryGeminiClient
+    ) -> None:
+        response = MagicMock()
+        response.text = """{
+            "insight_text": "10件のシグナルから分析の傾向が見え始めました"
+        }"""
+        client._client.models.generate_content.return_value = response
+
+        client.generate_milestone_narrative(
+            signal_count=25,
+            milestone=2,
+            top_domain="art",
+        )
+
+        call_args = client._client.models.generate_content.call_args
+        prompt = call_args.kwargs["contents"]
+        assert "25" in prompt
+        assert "2" in prompt
+        assert "art" in prompt
+        assert "マイルストーン" in prompt

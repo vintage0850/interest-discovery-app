@@ -54,9 +54,10 @@ fun shouldNotifyPeriodReport(savedKey: String?, currentKey: String): Boolean {
  * 24時間間隔で起動し、以下を順に判定・実行する:
  * 1. Discovery 通知 ON / OS 通知権限あり
  * 2. 有効な永続化済みセッションあり
- * 3. 週次・月次をそれぞれ独立判定:
+ * 3. 週次・月次・マイルストーンをそれぞれ独立判定:
  *    - 週次: 対象キー未通知なら既存週次APIを事前取得し、成功後に通知・キー更新
  *    - 月次: 対象キー未通知なら月次APIを事前取得し、成功後に通知・キー更新
+ *    - マイルストーン: 到達済みマイルストーンが未通知ならAPIを事前取得し、成功後に通知・キー更新
  * 4. API失敗・通信エラー・通知発行エラー時は送信フラグを更新せず次回へ委ねる
  * 5. 安全に Result.success() で終了する
  */
@@ -117,6 +118,19 @@ class DiscoveryPeriodicReportWorker @JvmOverloads constructor(
             } catch (_: Exception) {
                 // 通信エラーや503時はキー保存せず次回再試行
             }
+        }
+
+        // 6. マイルストーン通知の独立判定と実行
+        val lastNotifiedMilestone = settingsStorage.getLastNotifiedMilestone(sessionId)
+        try {
+            val milestoneNarrative = repository.getMilestoneNarrative()
+            if (lastNotifiedMilestone == null || milestoneNarrative.milestone > lastNotifiedMilestone) {
+                if (notifier.notifyReport(ReportType.MILESTONE, sessionId)) {
+                    settingsStorage.saveLastNotifiedMilestone(sessionId, milestoneNarrative.milestone)
+                }
+            }
+        } catch (_: Exception) {
+            // 通信エラーや503時はキー保存せず次回再試行
         }
 
         return Result.success()

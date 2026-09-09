@@ -19,6 +19,7 @@ from discovery.models import (
     HypothesisReaction,
     InterestSignal,
     InterestSignalSource,
+    MilestoneNarrativeCache,
     MonthlyNarrativeCache,
     PsychAxis,
     PsychAxisResult,
@@ -1237,6 +1238,217 @@ class TestMonthlyNarrativeCacheRepository:
         result = repository.get_monthly_narrative_cache(session.id, "2026-09")
         assert result is not None
         assert result.monthly_insights == "先に勝った"
+
+
+class TestSchemaMigrationRepository:
+    def test_migration_adds_behavior_categories_column_to_existing_db(
+        self,
+    ) -> None:
+        """既存DBにbehavior_categories列が無い場合、マイグレーションで追加される。"""
+        from sqlalchemy.pool import StaticPool
+        from sqlmodel import create_engine
+
+        engine = create_engine(
+            "sqlite:///:memory:?cache=shared",
+            echo=False,
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        SQLModel.metadata.create_all(engine)
+
+        # 旧スキーマに戻す: behavior_categories 列を削除
+        with engine.connect() as conn:
+            conn.exec_driver_sql(
+                "ALTER TABLE evidence DROP COLUMN behavior_categories"
+            )
+            conn.commit()
+
+        # マイグレーションを含むリポジトリ初期化（旧スキーマから列を追加）
+        repository = DiscoveryRepository(engine)
+
+        # 旧スキーマではORMからINSERTできないため、マイグレーション後にレコードを作成
+        session = repository.create_session("student-a")
+        repository.add_signal(
+            session.id,
+            action_type=ActionType.SEARCH.value,
+            domain=DomainType.TECH,
+            content_summary="Python tutorial",
+            source=InterestSignalSource.SEARCH_HISTORY.value,
+            occurred_at=datetime.datetime.now(datetime.timezone.utc),
+        )
+        evidence = repository.build_evidence(session.id)[0]
+
+        # 新カラムが使えることを確認
+        updated = repository.update_evidence_behavior_categories(
+            evidence.id,
+            behavior_categories={BehaviorCategory.COMPARE.value: 0.7},
+        )
+        assert updated.behavior_categories == {BehaviorCategory.COMPARE.value: 0.7}
+
+        fetched = repository.list_evidence(session.id)[0]
+        assert fetched.behavior_categories == {BehaviorCategory.COMPARE.value: 0.7}
+
+class TestMilestoneNarrativeCacheRepository:
+    def test_save_and_get_milestone_narrative_cache(self, repository: DiscoveryRepository) -> None:
+        session = repository.create_session("student-a")
+        saved = repository.save_milestone_narrative_cache(
+            session_id=session.id,
+            milestone=1,
+            insight_text="10件のシグナルから分析の傾向が見え始めました",
+        )
+        assert saved.session_id == session.id
+        assert saved.milestone == 1
+        assert saved.insight_text == "10件のシグナルから分析の傾向が見え始めました"
+
+        fetched = repository.get_milestone_narrative_cache(session.id, 1)
+        assert fetched is not None
+        assert fetched.insight_text == "10件のシグナルから分析の傾向が見え始めました"
+
+    def test_get_milestone_narrative_cache_not_found(self, repository: DiscoveryRepository) -> None:
+        session = repository.create_session("student-a")
+        assert repository.get_milestone_narrative_cache(session.id, 1) is None
+
+    def test_save_milestone_narrative_cache_overwrites_same_milestone(
+        self, repository: DiscoveryRepository
+    ) -> None:
+        session = repository.create_session("student-a")
+        repository.save_milestone_narrative_cache(
+            session_id=session.id,
+            milestone=1,
+            insight_text="最初",
+        )
+        updated = repository.save_milestone_narrative_cache(
+            session_id=session.id,
+            milestone=1,
+            insight_text="更新後",
+        )
+        assert updated.insight_text == "更新後"
+
+        fetched = repository.get_milestone_narrative_cache(session.id, 1)
+        assert fetched is not None
+        assert fetched.insight_text == "更新後"
+
+    def test_milestone_narrative_cache_isolated_per_session(
+        self, repository: DiscoveryRepository
+    ) -> None:
+        session_a = repository.create_session("student-a")
+        session_b = repository.create_session("student-b")
+        repository.save_milestone_narrative_cache(session_a.id, 1, "A")
+        repository.save_milestone_narrative_cache(session_b.id, 1, "B")
+
+        fetched_a = repository.get_milestone_narrative_cache(session_a.id, 1)
+        fetched_b = repository.get_milestone_narrative_cache(session_b.id, 1)
+        assert fetched_a is not None
+        assert fetched_b is not None
+        assert fetched_a.insight_text == "A"
+        assert fetched_b.insight_text == "B"
+
+    def test_milestone_narrative_cache_isolated_per_milestone(
+        self, repository: DiscoveryRepository
+    ) -> None:
+        session = repository.create_session("student-a")
+        repository.save_milestone_narrative_cache(session.id, 1, "1つ目")
+        repository.save_milestone_narrative_cache(session.id, 2, "2つ目")
+
+        fetched_1 = repository.get_milestone_narrative_cache(session.id, 1)
+        fetched_2 = repository.get_milestone_narrative_cache(session.id, 2)
+        assert fetched_1 is not None
+        assert fetched_1.insight_text == "1つ目"
+        assert fetched_2 is not None
+        assert fetched_2.insight_text == "2つ目"
+
+    def test_count_signals(self, repository: DiscoveryRepository) -> None:
+        session = repository.create_session("student-a")
+        assert repository.count_signals(session.id) == 0
+
+        for i in range(10):
+            repository.add_signal(
+                session.id,
+                action_type=ActionType.SEARCH.value,
+                domain=DomainType.TECH,
+                content_summary=f"Python tutorial {i}",
+                source=InterestSignalSource.SEARCH_HISTORY.value,
+                occurred_at=datetime.datetime.now(datetime.timezone.utc),
+            )
+        assert repository.count_signals(session.id) == 10
+
+    def test_count_signals_does_not_count_other_sessions(self, repository: DiscoveryRepository) -> None:
+        session_a = repository.create_session("student-a")
+        session_b = repository.create_session("student-b")
+
+        for i in range(5):
+            repository.add_signal(
+                session_a.id,
+                action_type=ActionType.SEARCH.value,
+                domain=DomainType.TECH,
+                content_summary=f"Python tutorial {i}",
+                source=InterestSignalSource.SEARCH_HISTORY.value,
+                occurred_at=datetime.datetime.now(datetime.timezone.utc),
+            )
+        for i in range(3):
+            repository.add_signal(
+                session_b.id,
+                action_type=ActionType.SEARCH.value,
+                domain=DomainType.ART,
+                content_summary=f"Art tutorial {i}",
+                source=InterestSignalSource.SEARCH_HISTORY.value,
+                occurred_at=datetime.datetime.now(datetime.timezone.utc),
+            )
+
+        assert repository.count_signals(session_a.id) == 5
+        assert repository.count_signals(session_b.id) == 3
+
+    def test_delete_session_cascade_removes_milestone_narrative_cache(
+        self, repository: DiscoveryRepository
+    ) -> None:
+        session = repository.create_session("student-a")
+        session_id = session.id
+        repository.save_milestone_narrative_cache(session_id, 1, "insight")
+
+        assert repository.delete_session_cascade(session_id) is True
+        assert repository.get_milestone_narrative_cache(session_id, 1) is None
+
+    def test_save_milestone_narrative_cache_concurrent_insert_returns_winner(
+        self, repository: DiscoveryRepository
+    ) -> None:
+        session = repository.create_session("student-a")
+        with Session(repository._engine) as db:
+            winner = MilestoneNarrativeCache(
+                session_id=session.id,
+                milestone=1,
+                insight_text="先に勝った",
+            )
+            db.add(winner)
+            db.commit()
+
+        original_exec = Session.exec
+        call_count = [0]
+
+        class _FirstProxy:
+            def __init__(self, value):
+                self._value = value
+
+            def first(self):
+                return self._value
+
+        def fake_exec(self, statement, *args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return _FirstProxy(None)
+            if call_count[0] == 2:
+                return _FirstProxy(winner)
+            return original_exec(self, statement, *args, **kwargs)
+
+        with patch.object(Session, "exec", fake_exec):
+            repository.save_milestone_narrative_cache(
+                session_id=session.id,
+                milestone=1,
+                insight_text="後から",
+            )
+
+        result = repository.get_milestone_narrative_cache(session.id, 1)
+        assert result is not None
+        assert result.insight_text == "先に勝った"
 
 
 class TestSchemaMigrationRepository:

@@ -76,6 +76,16 @@ class AndroidDiscoverySettingsStorage(private val prefs: SharedPreferences) : Di
             .commit()
     }
 
+    override fun getLastNotifiedMilestone(sessionId: Int): Int? =
+        prefs.getInt("last_notified_milestone_$sessionId", -1)
+            .takeIf { it >= 0 }
+
+    override fun saveLastNotifiedMilestone(sessionId: Int, milestone: Int) {
+        prefs.edit()
+            .putInt("last_notified_milestone_$sessionId", milestone)
+            .commit()
+    }
+
     companion object {
         fun get(context: Context): AndroidDiscoverySettingsStorage =
             AndroidDiscoverySettingsStorage(

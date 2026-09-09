@@ -353,6 +353,15 @@ class RealDiscoveryRepository(
         return response.body<MonthlyNarrativeResponseDto>().toUiModel()
     }
 
+    override suspend fun getMilestoneNarrative(): MilestoneNarrative {
+        val id = ensureSession()
+        val response = client.get("/sessions/$id/report/milestone-narrative")
+        if (!response.status.isSuccess()) {
+            throw DiscoveryApiException("マイルストーンレポートの取得に失敗しました (HTTP ${response.status.value})")
+        }
+        return response.body<MilestoneNarrativeResponseDto>().toUiModel()
+    }
+
     override suspend fun getReportData(): ReportData {
         val summary = fetchSummary().behaviorSummary
         val weeklyNarrative = try {
@@ -372,6 +381,13 @@ class RealDiscoveryRepository(
         } catch (_: Exception) {
             null to "月次レポートは現在取得できません。"
         }
+        val (milestoneNarrative, milestoneErrorMessage) = try {
+            getMilestoneNarrative() to null
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null to "マイルストーンレポートは現在取得できません。"
+        }
         val signalCounts = resolveSignalCounts(summary)
         val topSignal = signalCounts.maxByOrNull { it.value }?.key ?: BehaviorSignal.ANALYZE
         return ReportData(
@@ -382,7 +398,9 @@ class RealDiscoveryRepository(
             changeFromPast = weeklyNarrative.changeFromPast,
             signalDistribution = signalCounts.mapKeys { it.key.japaneseLabel },
             monthlyNarrative = monthlyNarrative,
-            monthlyErrorMessage = monthlyErrorMessage
+            monthlyErrorMessage = monthlyErrorMessage,
+            milestoneNarrative = milestoneNarrative,
+            milestoneErrorMessage = milestoneErrorMessage
         )
     }
 
@@ -728,6 +746,17 @@ private fun MonthlyNarrativeResponseDto.toUiModel(): MonthlyNarrative = MonthlyN
 )
 
 @Serializable
+private data class MilestoneNarrativeResponseDto(
+    val milestone: Int,
+    val insightText: String
+)
+
+private fun MilestoneNarrativeResponseDto.toUiModel(): MilestoneNarrative = MilestoneNarrative(
+    milestone = milestone,
+    insightText = insightText
+)
+
+@Serializable
 private data class HypothesisFeedbackRequest(val reaction: String)
 
 @Serializable
@@ -807,18 +836,22 @@ interface DiscoverySettingsStorage {
     fun saveLastNotifiedWeekKey(sessionId: Int, key: String) {}
     fun getLastNotifiedMonthKey(sessionId: Int): String? = null
     fun saveLastNotifiedMonthKey(sessionId: Int, key: String) {}
+    fun getLastNotifiedMilestone(sessionId: Int): Int? = null
+    fun saveLastNotifiedMilestone(sessionId: Int, milestone: Int) {}
 }
 
 fun DiscoverySettingsStorage.getLastNotifiedPeriodKey(sessionId: Int, reportType: ReportType): String? =
     when (reportType) {
         ReportType.WEEKLY -> getLastNotifiedWeekKey(sessionId)
         ReportType.MONTHLY -> getLastNotifiedMonthKey(sessionId)
+        ReportType.MILESTONE -> error("マイルストーンは Int キーで個別管理してください")
     }
 
 fun DiscoverySettingsStorage.saveLastNotifiedPeriodKey(sessionId: Int, reportType: ReportType, key: String) {
     when (reportType) {
         ReportType.WEEKLY -> saveLastNotifiedWeekKey(sessionId, key)
         ReportType.MONTHLY -> saveLastNotifiedMonthKey(sessionId, key)
+        ReportType.MILESTONE -> error("マイルストーンは Int キーで個別管理してください")
     }
 }
 
@@ -828,6 +861,7 @@ class InMemoryDiscoverySettingsStorage : DiscoverySettingsStorage {
     private var notificationLog = NotificationLog()
     private val weekKeys = mutableMapOf<Int, String>()
     private val monthKeys = mutableMapOf<Int, String>()
+    private val milestones = mutableMapOf<Int, Int>()
 
     override fun load(): MyDataSettings = current
     override fun save(settings: MyDataSettings) {
@@ -844,6 +878,10 @@ class InMemoryDiscoverySettingsStorage : DiscoverySettingsStorage {
     override fun getLastNotifiedMonthKey(sessionId: Int): String? = monthKeys[sessionId]
     override fun saveLastNotifiedMonthKey(sessionId: Int, key: String) {
         monthKeys[sessionId] = key
+    }
+    override fun getLastNotifiedMilestone(sessionId: Int): Int? = milestones[sessionId]
+    override fun saveLastNotifiedMilestone(sessionId: Int, milestone: Int) {
+        milestones[sessionId] = milestone
     }
 }
 

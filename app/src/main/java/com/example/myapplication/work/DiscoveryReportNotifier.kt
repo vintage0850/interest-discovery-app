@@ -40,6 +40,10 @@ fun buildReportNotificationContent(reportType: ReportType): Pair<String, String>
         ReportType.MONTHLY ->
             "🌱 1か月の気付きレポートができました" to
                 "この30日間の進み方と、続けられたペースを振り返れます"
+
+        ReportType.MILESTONE ->
+            "🎯 シグナルが10件溜まりました" to
+                "新しく見えてきた自分の傾向を確認できます"
     }
 }
 
@@ -59,7 +63,7 @@ fun reportRequestCodeFor(sessionId: Int, reportType: ReportType): Int {
 }
 
 private fun reportIdentityFor(sessionId: Int, reportType: ReportType): Int =
-    30_000 + sessionId * 2 + if (reportType == ReportType.MONTHLY) 1 else 0
+    30_000 + sessionId * 3 + reportType.ordinal
 
 /**
  * 本番用の気付きレポート通知発行クラス。

@@ -1614,6 +1614,159 @@ class TestSessionSummaryWithPsychAxis:
         assert data["psych_axis_scores"] == scores
 
 
+class TestMilestoneNarrativeEndpoints:
+    def _create_session_with_signals(
+        self, test_client: TestClient, signal_count: int
+    ) -> int:
+        session = test_client.post("/sessions", json={"student_label": "student-a"}).json()
+        session_id = session["id"]
+        for i in range(signal_count):
+            test_client.post(
+                f"/sessions/{session_id}/signals",
+                json={
+                    "action_type": "search",
+                    "domain": "tech",
+                    "content_summary": f"Python tutorial {i}",
+                    "source": "search_history",
+                    "occurred_at": "2026-09-01T10:00:00Z",
+                },
+            )
+        return session_id
+
+    def test_get_milestone_narrative(self, test_client: TestClient) -> None:
+        session_id = self._create_session_with_signals(test_client, 10)
+
+        mock_client = MagicMock(spec=DiscoveryGeminiClient)
+        mock_client.generate_milestone_narrative.return_value = {
+            "insight_text": "10件のシグナルから分析の傾向が見え始めました",
+        }
+        app.dependency_overrides[get_gemini_client] = lambda: mock_client
+
+        response = test_client.get(f"/sessions/{session_id}/report/milestone-narrative")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["milestone"] == 1
+        assert data["insight_text"] == "10件のシグナルから分析の傾向が見え始めました"
+
+    def test_get_milestone_narrative_session_not_found(self, test_client: TestClient) -> None:
+        response = test_client.get("/sessions/999/report/milestone-narrative")
+        assert response.status_code == 404
+
+    def test_get_milestone_narrative_below_threshold_returns_404(
+        self, test_client: TestClient
+    ) -> None:
+        session_id = self._create_session_with_signals(test_client, 9)
+
+        response = test_client.get(f"/sessions/{session_id}/report/milestone-narrative")
+        assert response.status_code == 404
+        assert "milestone" in response.json()["detail"].lower() or "シグナル" in response.json()["detail"]
+
+    def test_get_milestone_narrative_gemini_error(self, test_client: TestClient) -> None:
+        session_id = self._create_session_with_signals(test_client, 10)
+
+        mock_client = MagicMock(spec=DiscoveryGeminiClient)
+        mock_client.generate_milestone_narrative.side_effect = ValueError("malformed json")
+        app.dependency_overrides[get_gemini_client] = lambda: mock_client
+
+        response = test_client.get(f"/sessions/{session_id}/report/milestone-narrative")
+        assert response.status_code == 503
+        assert "Milestone narrative generation is currently unavailable" in response.json()["detail"]
+
+    def test_get_milestone_narrative_returns_503_when_api_key_missing(
+        self,
+        test_client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        session_id = self._create_session_with_signals(test_client, 10)
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+        app.dependency_overrides[get_gemini_client] = lambda: DiscoveryGeminiClient(api_key=None)
+
+        response = test_client.get(f"/sessions/{session_id}/report/milestone-narrative")
+        assert response.status_code == 503
+        assert "GEMINI_API_KEY" not in response.text
+
+    def test_get_milestone_narrative_calls_client_with_signal_count_and_milestone(
+        self, test_client: TestClient
+    ) -> None:
+        session_id = self._create_session_with_signals(test_client, 25)
+
+        mock_client = MagicMock(spec=DiscoveryGeminiClient)
+        mock_client.generate_milestone_narrative.return_value = {
+            "insight_text": "25件のシグナルから新たな傾向が見えました",
+        }
+        app.dependency_overrides[get_gemini_client] = lambda: mock_client
+
+        test_client.get(f"/sessions/{session_id}/report/milestone-narrative")
+
+        call_args = mock_client.generate_milestone_narrative.call_args
+        assert call_args.kwargs["signal_count"] == 25
+        assert call_args.kwargs["milestone"] == 2
+        assert call_args.kwargs["top_domain"] == "tech"
+
+    def test_get_milestone_narrative_uses_cache_on_second_call(
+        self, test_client: TestClient
+    ) -> None:
+        session_id = self._create_session_with_signals(test_client, 10)
+
+        mock_client = MagicMock(spec=DiscoveryGeminiClient)
+        mock_client.generate_milestone_narrative.return_value = {
+            "insight_text": "10件のシグナルから分析の傾向が見え始めました",
+        }
+        app.dependency_overrides[get_gemini_client] = lambda: mock_client
+
+        response1 = test_client.get(f"/sessions/{session_id}/report/milestone-narrative")
+        assert response1.status_code == 200
+        data1 = response1.json()
+
+        response2 = test_client.get(f"/sessions/{session_id}/report/milestone-narrative")
+        assert response2.status_code == 200
+        data2 = response2.json()
+
+        assert mock_client.generate_milestone_narrative.call_count == 1
+        assert data1 == data2
+
+    def test_get_milestone_narrative_cache_isolated_per_session(
+        self, test_client: TestClient
+    ) -> None:
+        session_id_a = self._create_session_with_signals(test_client, 10)
+        session_id_b = self._create_session_with_signals(test_client, 10)
+
+        mock_client = MagicMock(spec=DiscoveryGeminiClient)
+        mock_client.generate_milestone_narrative.return_value = {
+            "insight_text": "キャッシュ分離テスト",
+        }
+        app.dependency_overrides[get_gemini_client] = lambda: mock_client
+
+        response_a = test_client.get(f"/sessions/{session_id_a}/report/milestone-narrative")
+        assert response_a.status_code == 200
+
+        response_b = test_client.get(f"/sessions/{session_id_b}/report/milestone-narrative")
+        assert response_b.status_code == 200
+
+        assert mock_client.generate_milestone_narrative.call_count == 2
+
+    def test_get_milestone_narrative_cache_isolated_per_milestone(
+        self, test_client: TestClient
+    ) -> None:
+        session_id = self._create_session_with_signals(test_client, 20)
+
+        mock_client = MagicMock(spec=DiscoveryGeminiClient)
+        mock_client.generate_milestone_narrative.return_value = {
+            "insight_text": "マイルストーン別キャッシュ",
+        }
+        app.dependency_overrides[get_gemini_client] = lambda: mock_client
+
+        response_1 = test_client.get(f"/sessions/{session_id}/report/milestone-narrative")
+        assert response_1.status_code == 200
+        assert response_1.json()["milestone"] == 2
+
+        response_2 = test_client.get(f"/sessions/{session_id}/report/milestone-narrative")
+        assert response_2.status_code == 200
+        assert response_2.json()["milestone"] == 2
+
+        assert mock_client.generate_milestone_narrative.call_count == 1
+
+
 class TestEvidenceEndpoints:
     def test_get_evidence_empty(self, test_client: TestClient) -> None:
         session = test_client.post("/sessions", json={"student_label": "student-a"}).json()

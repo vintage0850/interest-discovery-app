@@ -45,6 +45,7 @@ from discovery.models import (
     InterestHypothesis,
     InterestSignal,
     InterestSignalSource,
+    MilestoneNarrativeCache,
     MonthlyNarrativeCache,
     PsychAxis,
     PsychAxisResult,
@@ -754,6 +755,67 @@ class DiscoveryRepository:
             db.refresh(cache)
             return cache
 
+    def count_signals(self, session_id: int) -> int:
+        """指定セッションの興味シグナル総件数を返す。"""
+        with Session(self._engine) as db:
+            statement = select(InterestSignal).where(InterestSignal.session_id == session_id)
+            return len(list(db.exec(statement).all()))
+
+    def get_milestone_narrative_cache(
+        self, session_id: int, milestone: int
+    ) -> MilestoneNarrativeCache | None:
+        """指定セッション・マイルストーンのキャッシュ済みナラティブを取得する。"""
+        with Session(self._engine) as db:
+            statement = select(MilestoneNarrativeCache).where(
+                MilestoneNarrativeCache.session_id == session_id,
+                MilestoneNarrativeCache.milestone == milestone,
+            )
+            return db.exec(statement).first()
+
+    def save_milestone_narrative_cache(
+        self,
+        session_id: int,
+        milestone: int,
+        insight_text: str,
+    ) -> MilestoneNarrativeCache:
+        """マイルストーンナラティブをキャッシュとして保存する（同一マイルストーンなら上書き）。"""
+        with Session(self._engine) as db:
+            existing = db.exec(
+                select(MilestoneNarrativeCache).where(
+                    MilestoneNarrativeCache.session_id == session_id,
+                    MilestoneNarrativeCache.milestone == milestone,
+                )
+            ).first()
+            if existing is not None:
+                existing.insight_text = insight_text
+                db.add(existing)
+                db.commit()
+                db.refresh(existing)
+                return existing
+
+            cache = MilestoneNarrativeCache(
+                session_id=session_id,
+                milestone=milestone,
+                insight_text=insight_text,
+            )
+            db.add(cache)
+            try:
+                db.commit()
+            except IntegrityError:
+                # 同時リクエストで先に他方がINSERTした場合はそちらを正とする。
+                db.rollback()
+                winner = db.exec(
+                    select(MilestoneNarrativeCache).where(
+                        MilestoneNarrativeCache.session_id == session_id,
+                        MilestoneNarrativeCache.milestone == milestone,
+                    )
+                ).first()
+                if winner is not None:
+                    return winner
+                raise
+            db.refresh(cache)
+            return cache
+
     def get_summary_data(self, session_id: int) -> dict[str, Any]:
         with Session(self._engine) as db:
             signals = list(
@@ -901,6 +963,11 @@ class DiscoveryRepository:
             db.exec(
                 delete(MonthlyNarrativeCache).where(
                     MonthlyNarrativeCache.session_id == session_id
+                )
+            )
+            db.exec(
+                delete(MilestoneNarrativeCache).where(
+                    MilestoneNarrativeCache.session_id == session_id
                 )
             )
 

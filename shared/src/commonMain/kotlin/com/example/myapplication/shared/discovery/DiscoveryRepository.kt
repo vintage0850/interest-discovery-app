@@ -29,6 +29,7 @@ interface DiscoveryRepository {
     suspend fun getDomainFields(): List<DomainField>
     suspend fun getWeeklyNarrative(): WeeklyNarrative
     suspend fun getMonthlyNarrative(): MonthlyNarrative = throw NotImplementedError("getMonthlyNarrative is not implemented")
+    suspend fun getMilestoneNarrative(): MilestoneNarrative = throw NotImplementedError("getMilestoneNarrative is not implemented")
     suspend fun getReportData(): ReportData
     suspend fun getSettings(): MyDataSettings
     suspend fun updateSettings(settings: MyDataSettings)

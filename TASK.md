@@ -5602,3 +5602,12 @@ Codexが`discovery-backend`ブランチ全体をレビュー。判定: **FAIL**�
 - 完了条件: `./gradlew testDebugUnitTest`と`python -m pytest`(backend)がともにGREEN。
 
 **ディスパッチ方針:** 既存worktree `.worktrees/signal-milestone-report`(ブランチ`feature/signal-milestone-report`)でKimiに続きを実装させる。TDD必須。完了後、報告ファイルを`docs/quality-review/2026-09-09-案件33-milestone-narrative-report.md`に作成させ、本セクションに実装結果を追記させる。完了後、Codexにゲートレビューを依頼する。
+
+### 実装結果(2026-09-09)
+
+案件33の残り実装をTDDで完了した。
+
+- バックエンド: `discovery/repository.py`・`discovery/gemini_prompts.py`・`discovery/router.py` にマイルストーンキャッシュCRUD・Gemini生成・`GET /sessions/{session_id}/report/milestone-narrative` を追加。`milestone = 総件数 // 10`、milestone=0 は404、キャッシュ優先。
+- Android/KMP: `ReportType.MILESTONE`・`MilestoneNarrative`・`RealDiscoveryRepository.getMilestoneNarrative()`・`DiscoverySettingsStorage` のマイルストーンキー永続化・`DiscoveryPeriodicReportWorker` のマイルストーン判定・`DiscoveryReportNotifier` の3種別衝突しないID符号化を追加。
+- テスト: バックエンド390件、Android/KMP unit test `./gradlew testDebugUnitTest` ともにGREEN。Android instrumented test ソースもコンパイル成功。
+- 品質レビュー: `docs/quality-review/2026-09-09-案件33-milestone-narrative-report.md` を作成。

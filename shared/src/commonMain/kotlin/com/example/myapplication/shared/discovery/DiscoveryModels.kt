@@ -215,12 +215,22 @@ data class MonthlyNarrative(
 )
 
 /**
- * 気付きレポートの種別（週次／月次）。
+ * シグナル蓄積件数に応じたマイルストーンナラティブ。
+ */
+@Serializable
+data class MilestoneNarrative(
+    val milestone: Int,
+    val insightText: String
+)
+
+/**
+ * 気付きレポートの種別（週次／月次／マイルストーン）。
  */
 @Serializable
 enum class ReportType(val value: String) {
     WEEKLY("weekly"),
-    MONTHLY("monthly");
+    MONTHLY("monthly"),
+    MILESTONE("milestone");
 
     companion object {
         fun fromValue(value: String?): ReportType? =
@@ -229,7 +239,7 @@ enum class ReportType(val value: String) {
 }
 
 /**
- * 週次・月次レポートデータ
+ * 週次・月次・マイルストーンレポートデータ
  */
 @Serializable
 data class ReportData(
@@ -245,7 +255,9 @@ data class ReportData(
         "整理する" to 1
     ),
     val monthlyNarrative: MonthlyNarrative? = null,
-    val monthlyErrorMessage: String? = null
+    val monthlyErrorMessage: String? = null,
+    val milestoneNarrative: MilestoneNarrative? = null,
+    val milestoneErrorMessage: String? = null
 )
 
 /**

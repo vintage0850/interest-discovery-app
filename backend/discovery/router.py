@@ -35,6 +35,7 @@ from discovery.models import (
     InterestSignal,
     InterestSignalCreate,
     InterestSignalResponse,
+    MilestoneNarrativeResponse,
     MonthlyNarrativeResponse,
     NotificationCandidateResponse,
     OnboardingUpdateRequest,
@@ -661,4 +662,64 @@ def get_monthly_narrative(
         "monthly_insights": saved.monthly_insights,
         "progress_wave": saved.progress_wave,
         "continuity_insight": saved.continuity_insight,
+    }
+
+
+@router.get(
+    "/sessions/{session_id}/report/milestone-narrative",
+    response_model=MilestoneNarrativeResponse,
+)
+def get_milestone_narrative(
+    session_id: int,
+    repo: Annotated[DiscoveryRepository, Depends(get_repository)],
+    client: Annotated[DiscoveryGeminiClient, Depends(get_gemini_client)],
+) -> dict[str, Any]:
+    """シグナル蓄積件数に応じたマイルストーンAIナラティブを取得する。
+
+    シグナル総件数が10件未満（milestone=0）の場合はレポート対象外。
+    同一マイルストーン内ではセッション単位でキャッシュを再利用する。
+    """
+    _require_session(repo, session_id)
+    signal_count = repo.count_signals(session_id)
+    milestone = signal_count // 10
+    if milestone == 0:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Not enough signals to generate a milestone narrative",
+        )
+
+    cached = repo.get_milestone_narrative_cache(session_id, milestone)
+    if cached is not None:
+        return {
+            "milestone": milestone,
+            "insight_text": cached.insight_text,
+        }
+
+    data = repo.get_summary_data(session_id)
+    behavior_summary = build_behavior_summary(
+        data["signals"], data["experiments"], data["results"]
+    ).model_dump()
+    top_domain = _compute_top_domain(behavior_summary)
+
+    try:
+        narrative_data = client.generate_milestone_narrative(
+            signal_count=signal_count,
+            milestone=milestone,
+            top_domain=top_domain,
+        )
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Milestone narrative generation is currently unavailable",
+        ) from exc
+
+    saved = repo.save_milestone_narrative_cache(
+        session_id,
+        milestone,
+        narrative_data["insight_text"],
+    )
+
+    return {
+        "milestone": milestone,
+        "insight_text": saved.insight_text,
     }

@@ -238,6 +238,97 @@ class DiscoveryPeriodicReportWorkerTest {
         assertEquals("2026-09", settingsStorage.getLastNotifiedMonthKey(1))
     }
 
+    @Test
+    fun 正常系でマイルストーンも通知されキーが保存される() = runBlocking {
+        val settingsStorage = InMemoryDiscoverySettingsStorage().apply {
+            save(MyDataSettings(notificationsEnabled = true))
+        }
+        val notifier = FakeDiscoveryReportNotifier()
+        val worker = buildWorker(
+            repository = FakeDiscoveryRepository(enableArtificialDelay = false),
+            settingsStorage = settingsStorage,
+            notifier = notifier
+        )
+
+        val result = worker.doWork()
+
+        assertTrue(result is ListenableWorker.Result.Success)
+        assertEquals(3, notifier.notifiedReports.size)
+        assertEquals(ReportType.WEEKLY to 1, notifier.notifiedReports[0])
+        assertEquals(ReportType.MONTHLY to 1, notifier.notifiedReports[1])
+        assertEquals(ReportType.MILESTONE to 1, notifier.notifiedReports[2])
+        assertEquals("2026-09-07", settingsStorage.getLastNotifiedWeekKey(1))
+        assertEquals("2026-09", settingsStorage.getLastNotifiedMonthKey(1))
+        assertEquals(2, settingsStorage.getLastNotifiedMilestone(1))
+    }
+
+    @Test
+    fun マイルストーン未取得の場合のみ通知される() = runBlocking {
+        val settingsStorage = InMemoryDiscoverySettingsStorage().apply {
+            save(MyDataSettings(notificationsEnabled = true))
+            saveLastNotifiedMilestone(1, 1)
+        }
+        val notifier = FakeDiscoveryReportNotifier()
+        val worker = buildWorker(
+            repository = FakeDiscoveryRepository(enableArtificialDelay = false),
+            settingsStorage = settingsStorage,
+            notifier = notifier
+        )
+
+        val result = worker.doWork()
+
+        assertTrue(result is ListenableWorker.Result.Success)
+        assertEquals(3, notifier.notifiedReports.size)
+        assertEquals(ReportType.MILESTONE to 1, notifier.notifiedReports[2])
+        assertEquals(2, settingsStorage.getLastNotifiedMilestone(1))
+    }
+
+    @Test
+    fun 既に到達済みマイルストーンは通知されない() = runBlocking {
+        val settingsStorage = InMemoryDiscoverySettingsStorage().apply {
+            save(MyDataSettings(notificationsEnabled = true))
+            saveLastNotifiedMilestone(1, 2)
+        }
+        val notifier = FakeDiscoveryReportNotifier()
+        val worker = buildWorker(
+            repository = FakeDiscoveryRepository(enableArtificialDelay = false),
+            settingsStorage = settingsStorage,
+            notifier = notifier
+        )
+
+        val result = worker.doWork()
+
+        assertTrue(result is ListenableWorker.Result.Success)
+        assertEquals(2, notifier.notifiedReports.size)
+        assertTrue(notifier.notifiedReports.none { it.first == ReportType.MILESTONE })
+        assertEquals(2, settingsStorage.getLastNotifiedMilestone(1))
+    }
+
+    @Test
+    fun マイルストーンAPIが失敗しても他の通知は継続する() = runBlocking {
+        val settingsStorage = InMemoryDiscoverySettingsStorage().apply {
+            save(MyDataSettings(notificationsEnabled = true))
+        }
+        val failingRepo = object : DiscoveryRepository by FakeDiscoveryRepository(enableArtificialDelay = false) {
+            override suspend fun getMilestoneNarrative(): com.example.myapplication.shared.discovery.MilestoneNarrative {
+                throw RuntimeException("Milestone narrative failed (e.g. 503)")
+            }
+        }
+        val notifier = FakeDiscoveryReportNotifier()
+        val worker = buildWorker(
+            repository = failingRepo,
+            settingsStorage = settingsStorage,
+            notifier = notifier
+        )
+
+        val result = worker.doWork()
+
+        assertTrue(result is ListenableWorker.Result.Success)
+        assertEquals(2, notifier.notifiedReports.size)
+        assertTrue(notifier.notifiedReports.none { it.first == ReportType.MILESTONE })
+        assertNull(settingsStorage.getLastNotifiedMilestone(1))
+    }
+
     private class FakeDiscoveryReportNotifier(
         private val failingType: ReportType? = null,
         private val refuseType: ReportType? = null
