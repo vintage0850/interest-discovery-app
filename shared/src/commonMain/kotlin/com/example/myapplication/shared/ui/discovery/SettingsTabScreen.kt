@@ -31,6 +31,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.myapplication.shared.discovery.SettingsUiState
+import com.example.myapplication.shared.ui.LocalGoogleAccountLinkHandler
 import com.example.myapplication.shared.ui.LocalGoogleCalendarLinkHandler
 import com.example.myapplication.shared.ui.LocalLineLinkHandler
 
@@ -73,11 +74,14 @@ fun SettingsTabScreen(
             // 1. アカウント
             SectionHeader(title = "アカウント")
             SettingsCard {
+                val onLinkGoogleAccount = LocalGoogleAccountLinkHandler.current
+                val accountDisplayName = settingsState.googleAccountDisplayName
+                val isAccountLinked = accountDisplayName != null
                 SettingsRow(
                     icon = "👤",
-                    title = "アカウントを作成",
-                    subtitle = "未ログイン",
-                    onClick = { activeModal = "account" }
+                    title = if (isAccountLinked) "Google アカウント" else "アカウントを作成",
+                    subtitle = accountDisplayName ?: "未ログイン",
+                    onClick = { if (!isAccountLinked) onLinkGoogleAccount?.invoke() }
                 )
             }
 

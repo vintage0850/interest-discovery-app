@@ -5579,3 +5579,10 @@ Codexが`discovery-backend`ブランチ全体をレビュー。判定: **FAIL**�
 **影響ファイル(想定):** `app/src/main/java/com/example/myapplication/data/account/GoogleAccountManager.kt`(新規)、`app/src/main/java/com/example/myapplication/MainActivity.kt`、`shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/App.kt`、`shared/src/commonMain/kotlin/com/example/myapplication/shared/ui/discovery/SettingsTabScreen.kt`、`SettingsUiState`定義箇所、`app/build.gradle.kts`(Credential Manager / googleid依存追加)、対応するテスト。
 
 **ディスパッチ方針:** 新規worktree `.worktrees/google-account-link`(ブランチ`feature/google-account-link`、`discovery-backend`から分岐、作成済み)でKimiに実装させる。単一レーンのため他ブランチ(進行中の`feature/signal-milestone-report`)とのファイル競合なし。TDD必須。完了後、報告ファイルを`docs/quality-review/2026-09-09-案件32-google-account-link-report.md`に作成させる。完了後、Codexにゲートレビューを依頼する。
+
+**実装結果(2026-09-09):**
+- 全ての設計判断に沿って実装済み。`GoogleAccountManager`を新規作成し、Credential ManagerでGoogleサインインを行う。取得情報はSharedPreferencesにのみ保存し、バックエンドには送信しない。
+- `MainActivity`で`LocalGoogleAccountLinkHandler`を提供し、`SettingsTabScreen`の「アカウントを作成」行タップでサインインフローを開始する。
+- 連携済みの場合は設定画面にGoogleアカウントの表示名を表示する。
+- `SettingsTabGoogleAccountLinkJvmTest`を含む`:app:testDebugUnitTest`、`:shared:testDebugUnitTest`は全てPASS。
+- 詳細は`docs/quality-review/2026-09-09-案件32-google-account-link-report.md`を参照。

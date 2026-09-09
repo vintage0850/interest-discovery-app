@@ -146,6 +146,11 @@ dependencies {
     // Google 認可（AuthorizationClient で Calendar スコープの認可コードを取得する）
     implementation(libs.play.services.auth)
 
+    // Google アカウント連携（Credential Manager + googleid）
+    implementation(libs.androidx.credentials)
+    implementation(libs.androidx.credentials.play.services.auth)
+    implementation(libs.google.id)
+
     // Google Calendar REST API クライアント
     implementation(libs.retrofit)
     implementation(libs.retrofit.kotlinx.serialization.converter)

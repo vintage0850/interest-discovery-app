@@ -12,6 +12,8 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.lifecycleScope
+import com.example.myapplication.data.account.GoogleAccountManager
+import com.example.myapplication.data.account.GoogleAccountState
 import com.example.myapplication.data.calendar.AuthorizationStep
 import com.example.myapplication.data.calendar.CalendarAuthState
 import com.example.myapplication.data.calendar.GoogleAuthManager
@@ -19,6 +21,7 @@ import com.example.myapplication.shared.db.AndroidDatabaseDriverFactory
 import com.example.myapplication.shared.discovery.AndroidDiscoverySettingsStorage
 import com.example.myapplication.shared.discovery.AndroidOnboardingStorage
 import com.example.myapplication.shared.ui.App
+import com.example.myapplication.shared.ui.LocalGoogleAccountLinkHandler
 import com.example.myapplication.shared.ui.LocalGoogleCalendarLinkHandler
 import com.example.myapplication.shared.ui.LocalLineLinkHandler
 import com.example.myapplication.work.DiscoveryNotificationScheduler
@@ -33,6 +36,7 @@ class MainActivity : ComponentActivity() {
     private val reportIntentState = MutableStateFlow<Pair<String?, Int?>?>(null)
 
     private val googleAuthManager by lazy { GoogleAuthManager.get(application) }
+    private val googleAccountManager by lazy { GoogleAccountManager.get(application) }
 
     private val authorizationLauncher = registerForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
@@ -63,7 +67,9 @@ class MainActivity : ComponentActivity() {
         // 認可状態を KMP UI へ反映し、設定行タップで OAuth 同意画面を起動する。
         setContent {
             val authState by googleAuthManager.authState.collectAsState()
-            val isLinked = authState is CalendarAuthState.Authorized
+            val isCalendarLinked = authState is CalendarAuthState.Authorized
+            val accountState by googleAccountManager.accountState.collectAsState()
+            val googleAccountDisplayName = (accountState as? GoogleAccountState.Linked)?.displayName
             val reportIntent by reportIntentState.collectAsState()
 
             CompositionLocalProvider(
@@ -76,6 +82,11 @@ class MainActivity : ComponentActivity() {
                             }
                             else -> Unit
                         }
+                    }
+                },
+                LocalGoogleAccountLinkHandler provides {
+                    lifecycleScope.launch {
+                        googleAccountManager.signIn()
                     }
                 },
                 LocalLineLinkHandler provides {
@@ -93,7 +104,8 @@ class MainActivity : ComponentActivity() {
                     notificationExperimentId = notificationExperimentId,
                     notificationReportType = reportIntent?.first,
                     notificationSessionId = reportIntent?.second,
-                    isGoogleCalendarLinked = isLinked
+                    isGoogleCalendarLinked = isCalendarLinked,
+                    googleAccountDisplayName = googleAccountDisplayName
                 )
             }
         }

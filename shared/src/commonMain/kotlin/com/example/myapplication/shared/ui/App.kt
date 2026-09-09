@@ -64,6 +64,14 @@ import kotlinx.serialization.Serializable
 @Serializable object EvidenceList
 
 /**
+ * Google アカウント連携開始を Android ホスト側に委譲する CompositionLocal。
+ *
+ * Credential Manager による Google サインインは Android 専用 API なため、shared から直接呼ばず、
+ * MainActivity 経由で [GoogleAccountManager] を操作する。
+ */
+val LocalGoogleAccountLinkHandler = staticCompositionLocalOf<(() -> Unit)?> { null }
+
+/**
  * Google Calendar 連携開始を Android ホスト側に委譲する CompositionLocal。
  *
  * OAuth 同意画面の起動は Android 専用 API なため、shared から直接呼ばず、
@@ -91,6 +99,7 @@ fun App(
     notificationReportType: String? = null,
     notificationSessionId: Int? = null,
     isGoogleCalendarLinked: Boolean = false,
+    googleAccountDisplayName: String? = null,
     modifier: Modifier = Modifier
 ) {
     MaterialTheme {
@@ -143,6 +152,10 @@ fun App(
 
         LaunchedEffect(isGoogleCalendarLinked) {
             discoveryState.setGoogleCalendarLinked(isGoogleCalendarLinked)
+        }
+
+        LaunchedEffect(googleAccountDisplayName) {
+            discoveryState.setGoogleAccountDisplayName(googleAccountDisplayName)
         }
 
         val startDestination = if (onboardingStorage.hasCompletedOnboarding()) {

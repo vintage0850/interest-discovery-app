@@ -89,7 +89,8 @@ data class SettingsUiState(
     val isLoading: Boolean = false,
     val settings: MyDataSettings = MyDataSettings(),
     val isResetting: Boolean = false,
-    val googleCalendarLinked: Boolean = false
+    val googleCalendarLinked: Boolean = false,
+    val googleAccountDisplayName: String? = null
 )
 
 /** Reflection 一覧画面の UI ステート。 */
@@ -528,6 +529,14 @@ class DiscoveryState(
      */
     fun setGoogleCalendarLinked(linked: Boolean) {
         _settingsState.update { it.copy(googleCalendarLinked = linked) }
+    }
+
+    /**
+     * 設定画面に表示する Google アカウント連携状態（表示名）を更新する。
+     * サインイン自体は Android ホスト側で行い、[shared] は UI 表示用の状態だけを持つ。
+     */
+    fun setGoogleAccountDisplayName(displayName: String?) {
+        _settingsState.update { it.copy(googleAccountDisplayName = displayName) }
     }
 
     /**
