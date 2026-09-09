@@ -21,17 +21,26 @@ interface DiscoveryReportNotifier {
     /**
      * 通知を発行する。
      *
+     * @param reachedSignalCount マイルストーン通知の場合の到達シグナル件数。
      * @return 通知が実際に発行された場合 true。権限が無いなどで発行されなかった場合 false。
      */
-    fun notifyReport(reportType: ReportType, sessionId: Int): Boolean
+    fun notifyReport(
+        reportType: ReportType,
+        sessionId: Int,
+        reachedSignalCount: Int = 0
+    ): Boolean
 }
 
 /**
  * 固定通知文言を組み立てる。
  *
- * 仕様確定第5節に従い、AI生成本文・個人データ・数値を含まない固定テンプレートを使用する。
+ * 仕様確定第5節に従い、AI生成本文・個人データを含まない固定テンプレートを使用する。
+ * マイルストーンのみ、到達件数を反映する。
  */
-fun buildReportNotificationContent(reportType: ReportType): Pair<String, String> {
+fun buildReportNotificationContent(
+    reportType: ReportType,
+    reachedSignalCount: Int = 0
+): Pair<String, String> {
     return when (reportType) {
         ReportType.WEEKLY ->
             "📊 1週間の気付きレポートができました" to
@@ -40,6 +49,12 @@ fun buildReportNotificationContent(reportType: ReportType): Pair<String, String>
         ReportType.MONTHLY ->
             "🌱 1か月の気付きレポートができました" to
                 "この30日間の進み方と、続けられたペースを振り返れます"
+
+        ReportType.MILESTONE -> {
+            val count = if (reachedSignalCount > 0) reachedSignalCount else 10
+            "🎯 シグナルが${count}件溜まりました" to
+                "新しく見えてきた自分の傾向を確認できます"
+        }
     }
 }
 
@@ -58,8 +73,19 @@ fun reportRequestCodeFor(sessionId: Int, reportType: ReportType): Int {
     return reportIdentityFor(sessionId, reportType)
 }
 
+// 案件27の週次・月次通知ID領域を維持する。
+// MILESTONE は ordinal に依存せず、別領域へ明示的に割り当てる。
+private const val WEEKLY_MONTHLY_BASE = 30_000
+private const val WEEKLY_OFFSET = 0
+private const val MONTHLY_OFFSET = 1
+private const val MILESTONE_BASE = 1_000_000
+
 private fun reportIdentityFor(sessionId: Int, reportType: ReportType): Int =
-    30_000 + sessionId * 2 + if (reportType == ReportType.MONTHLY) 1 else 0
+    when (reportType) {
+        ReportType.WEEKLY -> WEEKLY_MONTHLY_BASE + sessionId * 2 + WEEKLY_OFFSET
+        ReportType.MONTHLY -> WEEKLY_MONTHLY_BASE + sessionId * 2 + MONTHLY_OFFSET
+        ReportType.MILESTONE -> MILESTONE_BASE + sessionId
+    }
 
 /**
  * 本番用の気付きレポート通知発行クラス。
@@ -68,12 +94,16 @@ class AndroidDiscoveryReportNotifier(context: Context) : DiscoveryReportNotifier
 
     private val appContext = context.applicationContext
 
-    override fun notifyReport(reportType: ReportType, sessionId: Int): Boolean {
+    override fun notifyReport(
+        reportType: ReportType,
+        sessionId: Int,
+        reachedSignalCount: Int
+    ): Boolean {
         ensureChannel()
         val manager = NotificationManagerCompat.from(appContext)
         if (!manager.areNotificationsEnabled()) return false
 
-        val (title, body) = buildReportNotificationContent(reportType)
+        val (title, body) = buildReportNotificationContent(reportType, reachedSignalCount)
 
         val notification = NotificationCompat.Builder(appContext, CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)

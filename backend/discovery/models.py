@@ -469,6 +469,33 @@ class MonthlyNarrativeCache(SQLModel, table=True):
     )
 
 
+class MilestoneNarrativeCache(SQLModel, table=True):
+    """マイルストーンナラティブ（Gemini生成）のセッション×マイルストーン単位のキャッシュ。
+
+    シグナルが10件たまるごとに1つのマイルストーンを生成し、同一マイルストーンでは
+    初回に確定したナラティブを再利用する。
+    """
+
+    __tablename__ = "milestone_narrative_cache"
+
+    id: Optional[int] = SQLField(default=None, primary_key=True)
+    session_id: int = SQLField(foreign_key="discovery_session.id", index=True)
+    milestone: int = SQLField(index=True)
+    insight_text: str = SQLField(sa_type=String(200))
+    created_at: datetime.datetime = SQLField(
+        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc),
+        sa_type=UTCDateTime(),
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "session_id",
+            "milestone",
+            name="uq_milestone_narrative_cache_session_milestone",
+        ),
+    )
+
+
 class Criterion(SQLModel, table=True):
     """生徒に同感された仮説から昇格した、意思決定の個人的な基準。"""
 
@@ -725,6 +752,23 @@ class MonthlyNarrativeResponse(SQLModel):
             raise ValueError("field must be 200 characters or less after trimming")
         if "\n" in trimmed or "\r" in trimmed:
             raise ValueError("field must not contain newlines")
+        return trimmed
+
+
+class MilestoneNarrativeResponse(SQLModel):
+    milestone: int = Field(..., ge=1)
+    insight_text: str = Field(..., min_length=1, max_length=200)
+
+    @field_validator("insight_text")
+    @classmethod
+    def _validate_insight_text(cls, value: str) -> str:
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("insight_text must not be empty or whitespace only")
+        if len(trimmed) > 200:
+            raise ValueError("insight_text must be 200 characters or less after trimming")
+        if "\n" in trimmed or "\r" in trimmed:
+            raise ValueError("insight_text must not contain newlines")
         return trimmed
 
 

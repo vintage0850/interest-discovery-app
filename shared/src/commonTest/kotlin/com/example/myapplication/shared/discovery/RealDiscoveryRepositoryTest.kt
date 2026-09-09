@@ -217,6 +217,11 @@ private val MONTHLY_NARRATIVE_BODY = """
      "continuity_insight": "週2回以上のペースで振り返りを完了できており、着実に行動習慣が定着しています。"}
 """.trimIndent()
 
+private val MILESTONE_NARRATIVE_BODY = """
+    {"milestone": 2,
+     "insight_text": "20件のシグナルから新たな傾向が見えました。"}
+""".trimIndent()
+
 private val SUMMARY_BODY_WITH_SUPPORTING_EVIDENCE = """
     {"session": {"id": 1, "student_label": "test_user", "status": "active",
      "created_at": "2026-09-02T00:00:00+00:00", "updated_at": "2026-09-02T00:00:00+00:00"},
@@ -248,7 +253,9 @@ private val EVIDENCE_LIST_BODY = """
 private fun mockClient(handler: (path: String) -> Pair<HttpStatusCode, String>): Pair<HttpClient, MutableList<String>> {
     val requestedPaths = mutableListOf<String>()
     val engine = MockEngine { request ->
-        val path = request.url.encodedPath
+        val path = request.url.run {
+            encodedPath + encodedQuery.takeIf { it.isNotEmpty() }?.let { "?$it" }.orEmpty()
+        }
         requestedPaths.add(path)
         val (status, body) = handler(path)
         respond(
@@ -987,6 +994,123 @@ class RealDiscoveryRepositoryTest {
     }
 
     @Test
+    fun getMilestoneNarrative_deserializesSnakeCaseResponse() = runTest {
+        val (client, paths) = mockClient { path ->
+            when (path) {
+                "/sessions" -> HttpStatusCode.Created to SESSION_BODY
+                "/sessions/1/report/milestone-narrative" -> HttpStatusCode.OK to MILESTONE_NARRATIVE_BODY
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client)
+
+        val narrative = repo.getMilestoneNarrative()
+
+        assertEquals(2, narrative.milestone)
+        assertEquals("20件のシグナルから新たな傾向が見えました。", narrative.insightText)
+        assertEquals(listOf("/sessions", "/sessions/1/report/milestone-narrative"), paths)
+    }
+
+    @Test
+    fun getMilestoneNarrative_withExplicitMilestone_appendsQueryParameter() = runTest {
+        val (client, paths) = mockClient { path ->
+            when (path) {
+                "/sessions" -> HttpStatusCode.Created to SESSION_BODY
+                "/sessions/1/report/milestone-narrative?milestone=1" -> HttpStatusCode.OK to """
+                    {"milestone": 1, "insight_text": "10件のシグナルから分析の傾向が見え始めました。"}
+                """.trimIndent()
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client)
+
+        val narrative = repo.getMilestoneNarrative(1)
+
+        assertEquals(1, narrative.milestone)
+        assertEquals("10件のシグナルから分析の傾向が見え始めました。", narrative.insightText)
+        assertEquals(listOf("/sessions", "/sessions/1/report/milestone-narrative?milestone=1"), paths)
+    }
+
+    @Test
+    fun getMilestoneNarrative_throwsWhenServerReturnsError() = runTest {
+        val (client, _) = mockClient { path ->
+            when (path) {
+                "/sessions" -> HttpStatusCode.Created to SESSION_BODY
+                "/sessions/1/report/milestone-narrative" -> HttpStatusCode.ServiceUnavailable to """{"detail":"Milestone narrative generation is currently unavailable"}"""
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client)
+
+        val exception = runCatching { repo.getMilestoneNarrative() }.exceptionOrNull()
+
+        assertTrue(exception is DiscoveryApiException)
+        assertTrue(exception.message?.contains("503") == true)
+    }
+
+    @Test
+    fun getReportData_includesMilestoneNarrative() = runTest {
+        val (client, _) = mockClient { path ->
+            when (path) {
+                "/sessions" -> HttpStatusCode.Created to SESSION_BODY
+                "/sessions/1/summary" -> HttpStatusCode.OK to SUMMARY_BODY_WITH_ACTION_TYPE_COUNTS
+                "/sessions/1/report/weekly-narrative" -> HttpStatusCode.OK to WEEKLY_NARRATIVE_BODY
+                "/sessions/1/report/monthly-narrative" -> HttpStatusCode.OK to MONTHLY_NARRATIVE_BODY
+                "/sessions/1/report/milestone-narrative" -> HttpStatusCode.OK to MILESTONE_NARRATIVE_BODY
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client)
+
+        val report = repo.getReportData()
+
+        assertNotNull(report.milestoneNarrative)
+        assertEquals(2, report.milestoneNarrative?.milestone)
+        assertEquals("20件のシグナルから新たな傾向が見えました。", report.milestoneNarrative?.insightText)
+        assertNull(report.milestoneErrorMessage)
+    }
+
+    @Test
+    fun getReportData_fallsBackWhenMilestoneNarrativeFailsOnly() = runTest {
+        val (client, _) = mockClient { path ->
+            when (path) {
+                "/sessions" -> HttpStatusCode.Created to SESSION_BODY
+                "/sessions/1/summary" -> HttpStatusCode.OK to SUMMARY_BODY_WITH_HYPOTHESIS
+                "/sessions/1/report/weekly-narrative" -> HttpStatusCode.OK to WEEKLY_NARRATIVE_BODY
+                "/sessions/1/report/monthly-narrative" -> HttpStatusCode.OK to MONTHLY_NARRATIVE_BODY
+                "/sessions/1/report/milestone-narrative" -> HttpStatusCode.ServiceUnavailable to """{"detail":"Milestone narrative generation is currently unavailable"}"""
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client)
+
+        val report = repo.getReportData()
+
+        assertNull(report.milestoneNarrative)
+        assertEquals("マイルストーンレポートは現在取得できません。", report.milestoneErrorMessage)
+    }
+
+    @Test
+    fun getReportData_fallsBackWhenMilestoneNarrativeResponseCannotBeDecoded() = runTest {
+        val (client, _) = mockClient { path ->
+            when (path) {
+                "/sessions" -> HttpStatusCode.Created to SESSION_BODY
+                "/sessions/1/summary" -> HttpStatusCode.OK to SUMMARY_BODY_WITH_HYPOTHESIS
+                "/sessions/1/report/weekly-narrative" -> HttpStatusCode.OK to WEEKLY_NARRATIVE_BODY
+                "/sessions/1/report/monthly-narrative" -> HttpStatusCode.OK to MONTHLY_NARRATIVE_BODY
+                "/sessions/1/report/milestone-narrative" -> HttpStatusCode.OK to "{}"
+                else -> error("unexpected path: $path")
+            }
+        }
+        val repo = RealDiscoveryRepository(httpClient = client)
+
+        val report = repo.getReportData()
+
+        assertNull(report.milestoneNarrative)
+        assertEquals("マイルストーンレポートは現在取得できません。", report.milestoneErrorMessage)
+    }
+
+    @Test
     fun getSettings_overridesSavedSignalCountFromTotalSignals() = runTest {
         val (client, _) = mockClient { path ->
             when (path) {
@@ -1482,7 +1606,7 @@ class RealDiscoveryRepositoryTest {
     fun getSessionList_fetchesSessionsForStudentLabel() = runTest {
         val (client, paths) = mockClient { path ->
             when (path) {
-                "/sessions" -> HttpStatusCode.OK to """
+                "/sessions?student_label=test_user" -> HttpStatusCode.OK to """
                     [{"id": 2, "student_label": "test_user", "status": "active",
                       "created_at": "2026-09-02T00:00:00+00:00", "updated_at": "2026-09-03T00:00:00+00:00"},
                      {"id": 1, "student_label": "test_user", "status": "active",
@@ -1495,7 +1619,7 @@ class RealDiscoveryRepositoryTest {
 
         val sessions = repo.getSessionList()
 
-        assertEquals(listOf("/sessions"), paths)
+        assertEquals(listOf("/sessions?student_label=test_user"), paths)
         assertEquals(2, sessions.size)
         assertEquals(2, sessions[0].id)
         assertEquals(1, sessions[1].id)

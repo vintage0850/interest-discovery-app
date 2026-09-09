@@ -1,4 +1,4 @@
-﻿package com.example.myapplication.work
+package com.example.myapplication.work
 
 import android.content.Context
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -121,8 +121,8 @@ class DiscoveryPeriodicReportWorkerTest {
         val result = worker.doWork()
         assertTrue(result is ListenableWorker.Result.Success)
         assertEquals(2, notifier.notifiedReports.size)
-        assertEquals(ReportType.WEEKLY to 1, notifier.notifiedReports[0])
-        assertEquals(ReportType.MONTHLY to 1, notifier.notifiedReports[1])
+        assertEquals(ReportType.WEEKLY to 1, notifier.notifiedReports[0].typeAndSession)
+        assertEquals(ReportType.MONTHLY to 1, notifier.notifiedReports[1].typeAndSession)
 
         assertEquals("2026-09-07", settingsStorage.getLastNotifiedWeekKey(1))
         assertEquals("2026-09", settingsStorage.getLastNotifiedMonthKey(1))
@@ -167,7 +167,7 @@ class DiscoveryPeriodicReportWorkerTest {
         val result = worker.doWork()
         assertTrue(result is ListenableWorker.Result.Success)
         assertEquals(1, notifier.notifiedReports.size)
-        assertEquals(ReportType.MONTHLY to 1, notifier.notifiedReports[0])
+        assertEquals(ReportType.MONTHLY to 1, notifier.notifiedReports[0].typeAndSession)
 
         assertNull(settingsStorage.getLastNotifiedWeekKey(1))
         assertEquals("2026-09", settingsStorage.getLastNotifiedMonthKey(1))
@@ -193,7 +193,7 @@ class DiscoveryPeriodicReportWorkerTest {
         val result = worker.doWork()
 
         assertTrue(result is ListenableWorker.Result.Success)
-        assertEquals(listOf(ReportType.WEEKLY to 1), notifier.notifiedReports)
+        assertEquals(listOf(ReportType.WEEKLY to 1), notifier.notifiedReports.map { it.typeAndSession })
         assertEquals("2026-09-07", settingsStorage.getLastNotifiedWeekKey(1))
         assertNull(settingsStorage.getLastNotifiedMonthKey(1))
     }
@@ -213,7 +213,7 @@ class DiscoveryPeriodicReportWorkerTest {
         val result = worker.doWork()
 
         assertTrue(result is ListenableWorker.Result.Success)
-        assertEquals(listOf(ReportType.MONTHLY to 1), notifier.notifiedReports)
+        assertEquals(listOf(ReportType.MONTHLY to 1), notifier.notifiedReports.map { it.typeAndSession })
         assertNull(settingsStorage.getLastNotifiedWeekKey(1))
         assertEquals("2026-09", settingsStorage.getLastNotifiedMonthKey(1))
     }
@@ -233,20 +233,190 @@ class DiscoveryPeriodicReportWorkerTest {
         val result = worker.doWork()
 
         assertTrue(result is ListenableWorker.Result.Success)
-        assertEquals(listOf(ReportType.MONTHLY to 1), notifier.notifiedReports)
+        assertEquals(listOf(ReportType.MONTHLY to 1), notifier.notifiedReports.map { it.typeAndSession })
         assertNull(settingsStorage.getLastNotifiedWeekKey(1))
         assertEquals("2026-09", settingsStorage.getLastNotifiedMonthKey(1))
     }
 
+    @Test
+    fun 正常系でマイルストーンも通知されキーが保存される() = runBlocking {
+        val settingsStorage = InMemoryDiscoverySettingsStorage().apply {
+            save(MyDataSettings(notificationsEnabled = true))
+        }
+        val notifier = FakeDiscoveryReportNotifier()
+        val repo = FakeDiscoveryRepository(enableArtificialDelay = false).apply {
+            milestone = 1
+        }
+        val worker = buildWorker(
+            repository = repo,
+            settingsStorage = settingsStorage,
+            notifier = notifier
+        )
+
+        val result = worker.doWork()
+
+        assertTrue(result is ListenableWorker.Result.Success)
+        assertEquals(3, notifier.notifiedReports.size)
+        assertEquals(ReportType.WEEKLY to 1, notifier.notifiedReports[0].typeAndSession)
+        assertEquals(ReportType.MONTHLY to 1, notifier.notifiedReports[1].typeAndSession)
+        assertEquals(ReportType.MILESTONE to 1, notifier.notifiedReports[2].typeAndSession)
+        assertEquals(10, notifier.notifiedReports[2].reachedSignalCount)
+        assertEquals("2026-09-07", settingsStorage.getLastNotifiedWeekKey(1))
+        assertEquals("2026-09", settingsStorage.getLastNotifiedMonthKey(1))
+        assertEquals(1, settingsStorage.getLastNotifiedMilestone(1))
+    }
+
+    @Test
+    fun 中間マイルストーンも欠落なく通知される() = runBlocking {
+        val settingsStorage = InMemoryDiscoverySettingsStorage().apply {
+            save(MyDataSettings(notificationsEnabled = true))
+            saveLastNotifiedMilestone(1, 1)
+        }
+        val notifier = FakeDiscoveryReportNotifier()
+        val repo = FakeDiscoveryRepository(enableArtificialDelay = false).apply {
+            milestone = 3
+        }
+        val worker = buildWorker(
+            repository = repo,
+            settingsStorage = settingsStorage,
+            notifier = notifier
+        )
+
+        val result = worker.doWork()
+
+        assertTrue(result is ListenableWorker.Result.Success)
+        assertEquals(4, notifier.notifiedReports.size)
+        assertEquals(ReportType.WEEKLY to 1, notifier.notifiedReports[0].typeAndSession)
+        assertEquals(ReportType.MONTHLY to 1, notifier.notifiedReports[1].typeAndSession)
+        assertEquals(ReportType.MILESTONE to 1, notifier.notifiedReports[2].typeAndSession)
+        assertEquals(ReportType.MILESTONE to 1, notifier.notifiedReports[3].typeAndSession)
+        assertEquals(20, notifier.notifiedReports[2].reachedSignalCount)
+        assertEquals(30, notifier.notifiedReports[3].reachedSignalCount)
+        assertEquals(3, settingsStorage.getLastNotifiedMilestone(1))
+    }
+
+    @Test
+    fun マイルストーン未取得の場合のみ通知される() = runBlocking {
+        val settingsStorage = InMemoryDiscoverySettingsStorage().apply {
+            save(MyDataSettings(notificationsEnabled = true))
+            saveLastNotifiedMilestone(1, 1)
+        }
+        val notifier = FakeDiscoveryReportNotifier()
+        val repo = FakeDiscoveryRepository(enableArtificialDelay = false).apply {
+            milestone = 2
+        }
+        val worker = buildWorker(
+            repository = repo,
+            settingsStorage = settingsStorage,
+            notifier = notifier
+        )
+
+        val result = worker.doWork()
+
+        assertTrue(result is ListenableWorker.Result.Success)
+        assertEquals(3, notifier.notifiedReports.size)
+        assertEquals(ReportType.MILESTONE to 1, notifier.notifiedReports[2].typeAndSession)
+        assertEquals(20, notifier.notifiedReports[2].reachedSignalCount)
+        assertEquals(2, settingsStorage.getLastNotifiedMilestone(1))
+    }
+
+    @Test
+    fun 既に到達済みマイルストーンは通知されない() = runBlocking {
+        val settingsStorage = InMemoryDiscoverySettingsStorage().apply {
+            save(MyDataSettings(notificationsEnabled = true))
+            saveLastNotifiedMilestone(1, 2)
+        }
+        val notifier = FakeDiscoveryReportNotifier()
+        val repo = FakeDiscoveryRepository(enableArtificialDelay = false).apply {
+            milestone = 2
+        }
+        val worker = buildWorker(
+            repository = repo,
+            settingsStorage = settingsStorage,
+            notifier = notifier
+        )
+
+        val result = worker.doWork()
+
+        assertTrue(result is ListenableWorker.Result.Success)
+        assertEquals(2, notifier.notifiedReports.size)
+        assertTrue(notifier.notifiedReports.none { it.typeAndSession.first == ReportType.MILESTONE })
+        assertEquals(2, settingsStorage.getLastNotifiedMilestone(1))
+    }
+
+    @Test
+    fun マイルストーンAPIが失敗しても他の通知は継続する() = runBlocking {
+        val settingsStorage = InMemoryDiscoverySettingsStorage().apply {
+            save(MyDataSettings(notificationsEnabled = true))
+        }
+        val failingRepo = object : DiscoveryRepository by FakeDiscoveryRepository(enableArtificialDelay = false) {
+            override suspend fun getMilestoneNarrative(): com.example.myapplication.shared.discovery.MilestoneNarrative {
+                throw RuntimeException("Milestone narrative failed (e.g. 503)")
+            }
+        }
+        val notifier = FakeDiscoveryReportNotifier()
+        val worker = buildWorker(
+            repository = failingRepo,
+            settingsStorage = settingsStorage,
+            notifier = notifier
+        )
+
+        val result = worker.doWork()
+
+        assertTrue(result is ListenableWorker.Result.Success)
+        assertEquals(2, notifier.notifiedReports.size)
+        assertTrue(notifier.notifiedReports.none { it.typeAndSession.first == ReportType.MILESTONE })
+        assertNull(settingsStorage.getLastNotifiedMilestone(1))
+    }
+
+    @Test
+    fun マイルストーン通知失敗時は後続マイルストーンを処理しない() = runBlocking {
+        val settingsStorage = InMemoryDiscoverySettingsStorage().apply {
+            save(MyDataSettings(notificationsEnabled = true))
+            saveLastNotifiedMilestone(1, 1)
+        }
+        val notifier = FakeDiscoveryReportNotifier(refuseMilestone = true)
+        val repo = FakeDiscoveryRepository(enableArtificialDelay = false).apply {
+            milestone = 3
+        }
+        val worker = buildWorker(
+            repository = repo,
+            settingsStorage = settingsStorage,
+            notifier = notifier
+        )
+
+        val result = worker.doWork()
+
+        assertTrue(result is ListenableWorker.Result.Success)
+        assertEquals(3, notifier.notifiedReports.size)
+        assertEquals(ReportType.WEEKLY to 1, notifier.notifiedReports[0].typeAndSession)
+        assertEquals(ReportType.MONTHLY to 1, notifier.notifiedReports[1].typeAndSession)
+        assertEquals(ReportType.MILESTONE to 1, notifier.notifiedReports[2].typeAndSession)
+        // 通知拒否されたため、前回通知値は更新されない
+        assertEquals(1, settingsStorage.getLastNotifiedMilestone(1))
+    }
+
     private class FakeDiscoveryReportNotifier(
         private val failingType: ReportType? = null,
-        private val refuseType: ReportType? = null
+        private val refuseType: ReportType? = null,
+        private val refuseMilestone: Boolean = false
     ) : DiscoveryReportNotifier {
-        val notifiedReports = mutableListOf<Pair<ReportType, Int>>()
-        override fun notifyReport(reportType: ReportType, sessionId: Int): Boolean {
+        data class Notification(
+            val typeAndSession: Pair<ReportType, Int>,
+            val reachedSignalCount: Int
+        )
+
+        val notifiedReports = mutableListOf<Notification>()
+
+        override fun notifyReport(
+            reportType: ReportType,
+            sessionId: Int,
+            reachedSignalCount: Int
+        ): Boolean {
             if (reportType == failingType) throw IllegalStateException("notification failed")
             if (reportType == refuseType) return false
-            notifiedReports.add(reportType to sessionId)
+            if (reportType == ReportType.MILESTONE && refuseMilestone) return false
+            notifiedReports.add(Notification(reportType to sessionId, reachedSignalCount))
             return true
         }
     }

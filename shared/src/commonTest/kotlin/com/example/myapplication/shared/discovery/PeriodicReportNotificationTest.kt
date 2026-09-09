@@ -27,6 +27,8 @@ class PeriodicReportNotificationTest {
         assertEquals(ReportType.WEEKLY, ReportType.fromValue("WEEKLY"))
         assertEquals(ReportType.MONTHLY, ReportType.fromValue("monthly"))
         assertEquals(ReportType.MONTHLY, ReportType.fromValue("MONTHLY"))
+        assertEquals(ReportType.MILESTONE, ReportType.fromValue("milestone"))
+        assertEquals(ReportType.MILESTONE, ReportType.fromValue("MILESTONE"))
         assertNull(ReportType.fromValue("daily"))
         assertNull(ReportType.fromValue("unknown"))
         assertNull(ReportType.fromValue(null))
@@ -67,6 +69,26 @@ class PeriodicReportNotificationTest {
             assertEquals(AppTab.REPORT, state.currentTab.value)
             assertEquals(ReportType.MONTHLY, state.focusedReportType.value)
             assertEquals("2026-08-02", state.reportState.value.reportData?.monthlyNarrative?.periodStart)
+        } finally {
+            state.close()
+        }
+    }
+
+    @Test
+    fun onReportNotificationTapped_milestone_transitionsToReportTabAndFocusesMilestone() = runTest {
+        val repo = FakeDiscoveryRepository(FakeScenario.NORMAL, enableArtificialDelay = false)
+        val state = createState(repo)
+        try {
+            var navigatedHome = false
+            state.onReportNotificationTapped("milestone", 1) {
+                navigatedHome = true
+            }
+            advanceUntilIdle()
+
+            assertTrue(navigatedHome)
+            assertEquals(AppTab.REPORT, state.currentTab.value)
+            assertEquals(ReportType.MILESTONE, state.focusedReportType.value)
+            assertEquals(2, state.reportState.value.reportData?.milestoneNarrative?.milestone)
         } finally {
             state.close()
         }

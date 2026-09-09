@@ -12,6 +12,8 @@ from discovery.models import (
     ExperimentSelectRequest,
     InterestSignalCreate,
     InterestSignalSource,
+    MilestoneNarrativeCache,
+    MilestoneNarrativeResponse,
     MonthlyNarrativeResponse,
     OnboardingUpdateRequest,
     PsychAxis,
@@ -524,5 +526,69 @@ class TestMonthlyNarrativeResponseValidation:
                 monthly_insights="1行目\r2行目",
                 progress_wave="進み方の波",
                 continuity_insight="継続率",
+            )
+
+
+class TestMilestoneNarrativeCache:
+    def test_cache_table_exists_with_required_columns(self) -> None:
+        cache = MilestoneNarrativeCache(
+            session_id=1,
+            milestone=1,
+            insight_text="シグナル10件の気づき",
+        )
+        assert cache.session_id == 1
+        assert cache.milestone == 1
+        assert cache.insight_text == "シグナル10件の気づき"
+
+
+class TestMilestoneNarrativeResponseValidation:
+    def test_valid_milestone_narrative_response_passes(self) -> None:
+        response = MilestoneNarrativeResponse(
+            milestone=1,
+            insight_text="シグナル10件たまったタイミングの気づき",
+        )
+        assert response.milestone == 1
+        assert response.insight_text == "シグナル10件たまったタイミングの気づき"
+
+    def test_milestone_must_be_positive(self) -> None:
+        with pytest.raises(ValidationError):
+            MilestoneNarrativeResponse(
+                milestone=0,
+                insight_text="シグナル10件の気づき",
+            )
+
+    def test_rejects_empty_insight_text(self) -> None:
+        with pytest.raises(ValidationError):
+            MilestoneNarrativeResponse(
+                milestone=1,
+                insight_text="",
+            )
+
+    def test_rejects_whitespace_only_insight_text(self) -> None:
+        with pytest.raises(ValidationError):
+            MilestoneNarrativeResponse(
+                milestone=1,
+                insight_text="   ",
+            )
+
+    def test_rejects_too_long_insight_text(self) -> None:
+        with pytest.raises(ValidationError):
+            MilestoneNarrativeResponse(
+                milestone=1,
+                insight_text="あ" * 201,
+            )
+
+    def test_rejects_newlines_in_insight_text(self) -> None:
+        with pytest.raises(ValidationError):
+            MilestoneNarrativeResponse(
+                milestone=1,
+                insight_text="1行目\n2行目",
+            )
+
+    def test_rejects_carriage_returns_in_insight_text(self) -> None:
+        with pytest.raises(ValidationError):
+            MilestoneNarrativeResponse(
+                milestone=1,
+                insight_text="1行目\r2行目",
             )
 

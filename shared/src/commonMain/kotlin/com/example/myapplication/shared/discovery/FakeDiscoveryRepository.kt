@@ -29,6 +29,9 @@ class FakeDiscoveryRepository(
 
     var activeSessionId: Int? = 1
 
+    /** Worker テスト用: getMilestoneNarrative() が返す最新マイルストーン。 */
+    var milestone: Int = 2
+
     override suspend fun getActiveSessionId(): Int? = activeSessionId
 
     // 5つの初期実験プール
@@ -419,11 +422,22 @@ class FakeDiscoveryRepository(
         )
     }
 
+    override suspend fun getMilestoneNarrative(milestone: Int): MilestoneNarrative {
+        simulateLatency()
+        checkErrorState()
+        val resolved = if (milestone > 0) milestone else this.milestone
+        return MilestoneNarrative(
+            milestone = resolved,
+            insightText = "シグナルが${resolved * 10}件に達し、新しい傾向が見えてきました。"
+        )
+    }
+
     override suspend fun getReportData(): ReportData {
         simulateLatency()
         checkErrorState()
         val weeklyNarrative = getWeeklyNarrative()
         val monthlyNarrative = getMonthlyNarrative()
+        val milestoneNarrative = getMilestoneNarrative()
         return ReportData(
             totalCompletedCount = completedCount,
             totalMinutesSpent = completedCount * 7,
@@ -436,7 +450,8 @@ class FakeDiscoveryRepository(
                 "つくる" to 2,
                 "整理する" to 1
             ),
-            monthlyNarrative = monthlyNarrative
+            monthlyNarrative = monthlyNarrative,
+            milestoneNarrative = milestoneNarrative
         )
     }
 

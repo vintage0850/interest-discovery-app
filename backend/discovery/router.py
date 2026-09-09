@@ -35,6 +35,7 @@ from discovery.models import (
     InterestSignal,
     InterestSignalCreate,
     InterestSignalResponse,
+    MilestoneNarrativeResponse,
     MonthlyNarrativeResponse,
     NotificationCandidateResponse,
     OnboardingUpdateRequest,
@@ -661,4 +662,88 @@ def get_monthly_narrative(
         "monthly_insights": saved.monthly_insights,
         "progress_wave": saved.progress_wave,
         "continuity_insight": saved.continuity_insight,
+    }
+
+
+@router.get(
+    "/sessions/{session_id}/report/milestone-narrative",
+    response_model=MilestoneNarrativeResponse,
+)
+def get_milestone_narrative(
+    session_id: int,
+    repo: Annotated[DiscoveryRepository, Depends(get_repository)],
+    client: Annotated[DiscoveryGeminiClient, Depends(get_gemini_client)],
+    milestone: Annotated[int | None, Query(ge=1)] = None,
+) -> dict[str, Any]:
+    """シグナル蓄積件数に応じたマイルストーンAIナラティブを取得する。
+
+    シグナル総件数が10件未満（milestone=0）の場合はレポート対象外。
+    同一マイルストーン内ではセッション単位でキャッシュを再利用する。
+
+    milestone クエリパラメータを省略すると、現在のシグナル総件数から
+    最新マイルストーンを自動算出する。Android Worker は未通知の過去
+    マイルストーンを指定して取得するためにこのパラメータを使う。
+    """
+    _require_session(repo, session_id)
+    signal_count = repo.count_signals(session_id)
+    current_milestone = signal_count // 10
+    if milestone is None:
+        milestone = current_milestone
+    if milestone == 0 or milestone > current_milestone:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Not enough signals to generate a milestone narrative",
+        )
+
+    cached, is_owner = repo.get_or_reserve_milestone_narrative_cache(
+        session_id, milestone
+    )
+    if cached.insight_text:
+        return {
+            "milestone": milestone,
+            "insight_text": cached.insight_text,
+        }
+
+    if not is_owner:
+        # 他リクエストが生成中。勝者のキャッシュが確定するまで待つ。
+        winner_cache = repo.wait_for_milestone_narrative_cache(session_id, milestone)
+        if winner_cache is None or not winner_cache.insight_text:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Milestone narrative generation is currently unavailable",
+            )
+        return {
+            "milestone": milestone,
+            "insight_text": winner_cache.insight_text,
+        }
+
+    data = repo.get_summary_data(session_id)
+    behavior_summary = build_behavior_summary(
+        data["signals"], data["experiments"], data["results"]
+    ).model_dump()
+    top_domain = _compute_top_domain(behavior_summary)
+
+    try:
+        narrative_data = client.generate_milestone_narrative(
+            signal_count=signal_count,
+            milestone=milestone,
+            top_domain=top_domain,
+        )
+    except (ValueError, RuntimeError) as exc:
+        # 生成失敗時は placeholder 予約を解除し、次回リクエストが再生成できるようにする。
+        repo.release_milestone_reservation(session_id, milestone)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Milestone narrative generation is currently unavailable",
+        ) from exc
+
+    saved = repo.save_milestone_narrative_cache(
+        session_id,
+        milestone,
+        narrative_data["insight_text"],
+    )
+
+    return {
+        "milestone": milestone,
+        "insight_text": saved.insight_text,
     }
