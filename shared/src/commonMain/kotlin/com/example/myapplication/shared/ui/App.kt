@@ -22,6 +22,7 @@ import androidx.navigation.compose.rememberNavController
 import com.example.myapplication.shared.db.DatabaseDriverFactory
 import com.example.myapplication.shared.discovery.DiscoverySettingsStorage
 import com.example.myapplication.shared.discovery.DiscoveryState
+import com.example.myapplication.shared.discovery.GoogleAccountState
 import com.example.myapplication.shared.discovery.InMemoryDiscoverySettingsStorage
 import com.example.myapplication.shared.discovery.InMemoryOnboardingStorage
 import com.example.myapplication.shared.discovery.InMemorySessionStorage
@@ -72,6 +73,13 @@ import kotlinx.serialization.Serializable
 val LocalGoogleAccountLinkHandler = staticCompositionLocalOf<(() -> Unit)?> { null }
 
 /**
+ * Google アカウント連携解除を Android ホスト側に委譲する CompositionLocal。
+ *
+ * [LocalGoogleAccountLinkHandler] と対で、連携済み行のタップ時に呼ばれる。
+ */
+val LocalGoogleAccountSignOutHandler = staticCompositionLocalOf<(() -> Unit)?> { null }
+
+/**
  * Google Calendar 連携開始を Android ホスト側に委譲する CompositionLocal。
  *
  * OAuth 同意画面の起動は Android 専用 API なため、shared から直接呼ばず、
@@ -99,7 +107,7 @@ fun App(
     notificationReportType: String? = null,
     notificationSessionId: Int? = null,
     isGoogleCalendarLinked: Boolean = false,
-    googleAccountDisplayName: String? = null,
+    googleAccountState: GoogleAccountState = GoogleAccountState.NotLinked,
     modifier: Modifier = Modifier
 ) {
     MaterialTheme {
@@ -154,8 +162,8 @@ fun App(
             discoveryState.setGoogleCalendarLinked(isGoogleCalendarLinked)
         }
 
-        LaunchedEffect(googleAccountDisplayName) {
-            discoveryState.setGoogleAccountDisplayName(googleAccountDisplayName)
+        LaunchedEffect(googleAccountState) {
+            discoveryState.setGoogleAccountState(googleAccountState)
         }
 
         val startDestination = if (onboardingStorage.hasCompletedOnboarding()) {

@@ -73,6 +73,44 @@ class DiscoveryStateTest {
     }
 
     @Test
+    fun setGoogleAccountState_updatesSettingsUiState() = runTest {
+        val repo = FakeDiscoveryRepository(FakeScenario.NORMAL, enableArtificialDelay = false)
+        val state = createState(repo)
+        try {
+            assertEquals(GoogleAccountState.NotLinked, state.settingsState.value.googleAccountState)
+
+            state.setGoogleAccountState(
+                GoogleAccountState.Linked(displayName = "Test User", email = "test@example.com", photoUrl = "https://example.com/photo.jpg")
+            )
+            assertEquals(
+                GoogleAccountState.Linked(displayName = "Test User", email = "test@example.com", photoUrl = "https://example.com/photo.jpg"),
+                state.settingsState.value.googleAccountState
+            )
+
+            state.setGoogleAccountState(GoogleAccountState.NotConfigured)
+            assertEquals(GoogleAccountState.NotConfigured, state.settingsState.value.googleAccountState)
+        } finally {
+            state.close()
+        }
+    }
+
+    @Test
+    fun setGoogleAccountState_linkedWithNullDisplayNameIsStillLinked() = runTest {
+        val repo = FakeDiscoveryRepository(FakeScenario.NORMAL, enableArtificialDelay = false)
+        val state = createState(repo)
+        try {
+            state.setGoogleAccountState(
+                GoogleAccountState.Linked(displayName = null, email = "test@example.com", photoUrl = null)
+            )
+            val accountState = state.settingsState.value.googleAccountState
+            assertTrue(accountState is GoogleAccountState.Linked)
+            assertEquals("test@example.com", (accountState as GoogleAccountState.Linked).email)
+        } finally {
+            state.close()
+        }
+    }
+
+    @Test
     fun reflectionSubmission_updatesRatingsAndCompletes() = runTest {
         val repo = FakeDiscoveryRepository(FakeScenario.NORMAL, enableArtificialDelay = false)
         val state = createState(repo)

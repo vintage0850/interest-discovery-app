@@ -5586,3 +5586,16 @@ Codexが`discovery-backend`ブランチ全体をレビュー。判定: **FAIL**�
 - 連携済みの場合は設定画面にGoogleアカウントの表示名を表示する。
 - `SettingsTabGoogleAccountLinkJvmTest`を含む`:app:testDebugUnitTest`、`:shared:testDebugUnitTest`は全てPASS。
 - 詳細は`docs/quality-review/2026-09-09-案件32-google-account-link-report.md`を参照。
+
+**ゲートレビュー指摘と修正(2026-09-09):**
+- `docs/quality-review/2026-09-09-案件32-gate-review.md` (Codex, CHANGES REQUIRED) の 3 件を修正。
+- **Finding 1:** `GoogleAccountManager.signIn()` に前面 Activity context を渡すよう変更。`MainActivity` から `this@MainActivity` を注入。
+- **Finding 2:** `LocalGoogleAccountSignOutHandler` を追加し、設定画面の連携済み行タップで `signOut()` を呼び出す。解除後は `GoogleAccountState.NotLinked` に戻る。
+- **Finding 3:**
+  - `GoogleAccountState` sealed interface を shared モジュールに移動・拡張 (`NotConfigured` / `NotLinked` / `Linked(displayName, email, photoUrl)` / `LinkFailed(message)`)。
+  - `SettingsUiState` は `googleAccountState: GoogleAccountState` を保持するように変更。
+  - `SettingsTabScreen.kt` は state 型に応じて未設定(非表示) / 未連携 / 連携済み / エラー を表示。
+  - `GetCredentialCancellationException` と他の `GetCredentialException` / 一般例外を区別し、失敗時は `LinkFailed`、キャンセル時は `NotLinked` に戻す。
+  - `GoogleCredentialProvider` と `GoogleIdTokenParser` を注入可能にし、`GoogleAccountManagerTest` で TDD 的に save/restore/sign-out/error 分類を網羅。
+- 修正後の `./gradlew.bat :shared:testDebugUnitTest :app:testDebugUnitTest :app:assembleDebug` は BUILD SUCCESSFUL、`:app:testDebugUnitTest` は 128 tests completed, 0 failed。
+- コミット予定: `fix(discovery): 案件32 Googleアカウント連携のゲートレビュー指摘を修正`。

@@ -13,7 +13,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.lifecycleScope
 import com.example.myapplication.data.account.GoogleAccountManager
-import com.example.myapplication.data.account.GoogleAccountState
+import com.example.myapplication.shared.discovery.GoogleAccountState
 import com.example.myapplication.data.calendar.AuthorizationStep
 import com.example.myapplication.data.calendar.CalendarAuthState
 import com.example.myapplication.data.calendar.GoogleAuthManager
@@ -22,6 +22,7 @@ import com.example.myapplication.shared.discovery.AndroidDiscoverySettingsStorag
 import com.example.myapplication.shared.discovery.AndroidOnboardingStorage
 import com.example.myapplication.shared.ui.App
 import com.example.myapplication.shared.ui.LocalGoogleAccountLinkHandler
+import com.example.myapplication.shared.ui.LocalGoogleAccountSignOutHandler
 import com.example.myapplication.shared.ui.LocalGoogleCalendarLinkHandler
 import com.example.myapplication.shared.ui.LocalLineLinkHandler
 import com.example.myapplication.work.DiscoveryNotificationScheduler
@@ -69,7 +70,6 @@ class MainActivity : ComponentActivity() {
             val authState by googleAuthManager.authState.collectAsState()
             val isCalendarLinked = authState is CalendarAuthState.Authorized
             val accountState by googleAccountManager.accountState.collectAsState()
-            val googleAccountDisplayName = (accountState as? GoogleAccountState.Linked)?.displayName
             val reportIntent by reportIntentState.collectAsState()
 
             CompositionLocalProvider(
@@ -86,7 +86,12 @@ class MainActivity : ComponentActivity() {
                 },
                 LocalGoogleAccountLinkHandler provides {
                     lifecycleScope.launch {
-                        googleAccountManager.signIn()
+                        googleAccountManager.signIn(this@MainActivity)
+                    }
+                },
+                LocalGoogleAccountSignOutHandler provides {
+                    lifecycleScope.launch {
+                        googleAccountManager.signOut()
                     }
                 },
                 LocalLineLinkHandler provides {
@@ -105,7 +110,7 @@ class MainActivity : ComponentActivity() {
                     notificationReportType = reportIntent?.first,
                     notificationSessionId = reportIntent?.second,
                     isGoogleCalendarLinked = isCalendarLinked,
-                    googleAccountDisplayName = googleAccountDisplayName
+                    googleAccountState = accountState
                 )
             }
         }

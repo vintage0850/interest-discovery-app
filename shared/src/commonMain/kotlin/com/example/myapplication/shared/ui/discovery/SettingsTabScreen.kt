@@ -30,8 +30,10 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.myapplication.shared.discovery.GoogleAccountState
 import com.example.myapplication.shared.discovery.SettingsUiState
 import com.example.myapplication.shared.ui.LocalGoogleAccountLinkHandler
+import com.example.myapplication.shared.ui.LocalGoogleAccountSignOutHandler
 import com.example.myapplication.shared.ui.LocalGoogleCalendarLinkHandler
 import com.example.myapplication.shared.ui.LocalLineLinkHandler
 
@@ -72,20 +74,53 @@ fun SettingsTabScreen(
             Spacer(modifier = Modifier.height(DiscoverySpacing.xl))
 
             // 1. アカウント
-            SectionHeader(title = "アカウント")
-            SettingsCard {
-                val onLinkGoogleAccount = LocalGoogleAccountLinkHandler.current
-                val accountDisplayName = settingsState.googleAccountDisplayName
-                val isAccountLinked = accountDisplayName != null
-                SettingsRow(
-                    icon = "👤",
-                    title = if (isAccountLinked) "Google アカウント" else "アカウントを作成",
-                    subtitle = accountDisplayName ?: "未ログイン",
-                    onClick = { if (!isAccountLinked) onLinkGoogleAccount?.invoke() }
-                )
-            }
+            val accountState = settingsState.googleAccountState
+            if (accountState !is GoogleAccountState.NotConfigured) {
+                SectionHeader(title = "アカウント")
+                SettingsCard {
+                    val onLinkGoogleAccount = LocalGoogleAccountLinkHandler.current
+                    val onUnlinkGoogleAccount = LocalGoogleAccountSignOutHandler.current
+                    when (accountState) {
+                        is GoogleAccountState.NotLinked -> SettingsRow(
+                            icon = "👤",
+                            title = "アカウントを作成",
+                            subtitle = "未ログイン",
+                            onClick = { onLinkGoogleAccount?.invoke() }
+                        )
 
-            Spacer(modifier = Modifier.height(DiscoverySpacing.lg))
+                        is GoogleAccountState.Linked -> {
+                            val subtitle = accountState.displayName
+                                ?: accountState.email
+                                ?: "連携済み"
+                            val description = when {
+                                accountState.displayName != null && accountState.email != null -> accountState.email
+                                accountState.photoUrl != null -> accountState.photoUrl
+                                else -> "タップして連携を解除"
+                            }
+                            SettingsRow(
+                                icon = "👤",
+                                title = "Google アカウント",
+                                subtitle = subtitle,
+                                badge = "連携済み",
+                                description = description,
+                                onClick = { onUnlinkGoogleAccount?.invoke() }
+                            )
+                        }
+
+                        is GoogleAccountState.LinkFailed -> SettingsRow(
+                            icon = "👤",
+                            title = "Google アカウント",
+                            subtitle = accountState.message,
+                            badge = "エラー",
+                            onClick = { onLinkGoogleAccount?.invoke() }
+                        )
+
+                        GoogleAccountState.NotConfigured -> Unit
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(DiscoverySpacing.lg))
+            }
 
             // 2. 連携
             SectionHeader(title = "連携")
