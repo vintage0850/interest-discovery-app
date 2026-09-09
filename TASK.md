@@ -5580,6 +5580,12 @@ Codexが`discovery-backend`ブランチ全体をレビュー。判定: **FAIL**�
 
 **ディスパッチ方針:** 新規worktree `.worktrees/google-account-link`(ブランチ`feature/google-account-link`、`discovery-backend`から分岐、作成済み)でKimiに実装させる。単一レーンのため他ブランチ(進行中の`feature/signal-milestone-report`)とのファイル競合なし。TDD必須。完了後、報告ファイルを`docs/quality-review/2026-09-09-案件32-google-account-link-report.md`に作成させる。完了後、Codexにゲートレビューを依頼する。
 
+**ゲートレビュー結果(2026-09-09、Codex):**
+- 1回目: CHANGES REQUIRED(指摘1〜3、`docs/quality-review/2026-09-09-案件32-gate-review.md`)→ Kimiが修正(`b94dfe5`, `77d23f0`)。
+- 2回目(再レビュー): CHANGES REQUIRED(`docs/quality-review/2026-09-09-案件32-gate-review-2.md`)。指摘1・2は解消。指摘3(状態伝播)は部分解消 — `displayName`と`email`が両方存在する通常ケースで`photoUrl`が画面に表示されない。またTDDのRED実行証跡が記録されていない。
+
+**追加の設計判断(Claude、2026-09-09):** `photoUrl`は画像として描画しない。プロジェクトに画像読み込みライブラリ(Coil等)が存在せず、「プロフィール表示のみの軽量連携」という当初スコープに対して新規ライブラリ追加は過剰。代わりに、`photoUrl`が存在する場合は説明文に「プロフィール画像あり」等のテキスト表示を追加し、`displayName`/`email`の組み合わせに関わらず欠落しないようにする(email等を上書きするのではなく併記する)。
+
 ---
 
 ## 案件33: シグナル蓄積トリガー・レポート(マイルストーンナラティブ)
@@ -5611,3 +5617,10 @@ Codexが`discovery-backend`ブランチ全体をレビュー。判定: **FAIL**�
 - Android/KMP: `ReportType.MILESTONE`・`MilestoneNarrative`・`RealDiscoveryRepository.getMilestoneNarrative()`・`DiscoverySettingsStorage` のマイルストーンキー永続化・`DiscoveryPeriodicReportWorker` のマイルストーン判定・`DiscoveryReportNotifier` の3種別衝突しないID符号化を追加。
 - テスト: バックエンド390件、Android/KMP unit test `./gradlew testDebugUnitTest` ともにGREEN。Android instrumented test ソースもコンパイル成功。
 - 品質レビュー: `docs/quality-review/2026-09-09-案件33-milestone-narrative-report.md` を作成。
+
+**ゲートレビュー結果(2026-09-09、Codex): CHANGES REQUIRED**(`docs/quality-review/2026-09-09-案件33-gate-review.md`)。
+- 指摘1: 並行リクエストでGeminiが重複呼び出しされ得る(排他制御なし)。
+- 指摘2(重大): 前回通知milestoneから複数milestoneを跨ぐと中間milestoneの生成・通知が欠落する(例: 1→3で2が飛ぶ)。受入条件違反。
+- 指摘3(重大): 通知ID計算式を`sessionId * 2 + 種別`から`sessionId * 3 + reportType.ordinal`へ変更しており、既存週次/月次の通知IDが変わる。「既存の週次/月次レポートのAPI契約・挙動は変更しない」に反する。`ordinal`依存も将来のenum順序変更に弱い。
+- 指摘4: 案件33と無関係な`behavior_categories`マイグレーションテストが混入・重複。TASK.mdの「テスト結果」「引き継ぎメモ」欄が未記入。
+- 指摘5: Codexのサンドボックス制約で`./gradlew testDebugUnitTest`を独立実行できず(Claude側で別途`BUILD SUCCESSFUL`を確認済みのため実質解消)。
