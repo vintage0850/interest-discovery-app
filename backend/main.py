@@ -6,6 +6,8 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from sqlmodel import SQLModel, create_engine
 
 from discovery.router import router as discovery_router
@@ -22,6 +24,11 @@ load_dotenv()
 app = FastAPI(title="Reverse FAQ Backend")
 app.include_router(discovery_router)
 app.include_router(line_router)
+
+# Play Console のプライバシーポリシーURL登録用に静的ページを配信する。
+# main.py の場所からの絶対パスで解決する（uvicorn を --app-dir 付きで起動するため cwd がコード位置と異なる）。
+_STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
 
 _line_engine = create_engine(
     "sqlite:///line.db",
@@ -74,6 +81,11 @@ def get_client() -> GeminiClient:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/privacy-policy", include_in_schema=False)
+def privacy_policy() -> RedirectResponse:
+    return RedirectResponse(url="/static/privacy-policy.html")
 
 
 @app.post("/cases/analyze", response_model=AnalyzeResponse)
