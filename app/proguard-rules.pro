@@ -26,27 +26,27 @@
 # 実機でのみ CalendarEventRequest/Response のシリアライズが失敗する（ビルドは通ってしまう）ため、
 # 通信に使う DTO は明示的に温存する。
 -keepattributes *Annotation*, InnerClasses, Signature
--keep,includedescriptorclasses class com.example.myapplication.data.calendar.**$$serializer { *; }
--keepclassmembers class com.example.myapplication.data.calendar.** {
+-keep,includedescriptorclasses class com.mikke.discovery.data.calendar.**$$serializer { *; }
+-keepclassmembers class com.mikke.discovery.data.calendar.** {
     *** Companion;
 }
--keepclasseswithmembers class com.example.myapplication.data.calendar.** {
+-keepclasseswithmembers class com.mikke.discovery.data.calendar.** {
     kotlinx.serialization.KSerializer serializer(...);
 }
--keep,allowobfuscation,allowshrinking interface com.example.myapplication.data.calendar.GoogleCalendarApi
+-keep,allowobfuscation,allowshrinking interface com.mikke.discovery.data.calendar.GoogleCalendarApi
 
 # ---- WorkManager（空き時間検知）----
 # WorkManager の既定 WorkerFactory は (Context, WorkerParameters) の2引数コンストラクタを
 # リフレクションで探す。@JvmOverloads で生成されるその2引数コンストラクタが release ビルドで
 # 剥がれると実機でのみ Worker の生成に失敗するため、明示的に温存する。
--keep class com.example.myapplication.work.FreeTimeCheckWorker {
+-keep class com.mikke.discovery.work.FreeTimeCheckWorker {
     public <init>(android.content.Context, androidx.work.WorkerParameters);
 }
 
--keep class com.example.myapplication.work.DiscoveryFreeTimeWorker {
+-keep class com.mikke.discovery.work.DiscoveryFreeTimeWorker {
     public <init>(android.content.Context, androidx.work.WorkerParameters);
 }
 
--keep class com.example.myapplication.work.DiscoveryPeriodicReportWorker {
+-keep class com.mikke.discovery.work.DiscoveryPeriodicReportWorker {
     public <init>(android.content.Context, androidx.work.WorkerParameters);
 }

@@ -71,7 +71,7 @@ kotlin {
 }
 
 android {
-    namespace = "com.example.myapplication.shared"
+    namespace = "com.mikke.discovery.shared"
     compileSdk = 36
 
     defaultConfig {
@@ -97,7 +97,7 @@ android {
 sqldelight {
     databases {
         create("SharedDatabase") {
-            packageName.set("com.example.myapplication.shared.db")
+            packageName.set("com.mikke.discovery.shared.db")
             schemaOutputDirectory.set(file("src/commonMain/sqldelight/databases"))
             verifyMigrations.set(true)
         }
@@ -105,5 +105,5 @@ sqldelight {
 }
 
 compose.resources {
-    packageOfResClass = "com.example.myapplication.shared.resources"
+    packageOfResClass = "com.mikke.discovery.shared.resources"
 }

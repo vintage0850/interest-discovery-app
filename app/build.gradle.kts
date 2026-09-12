@@ -37,11 +37,11 @@ val hasReleaseSigningConfig: Boolean =
         !releaseKeyPassword.isNullOrBlank()
 
 android {
-    namespace = "com.example.myapplication"
+    namespace = "com.mikke.discovery"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.example.myapplication"
+        applicationId = "com.mikke.discovery"
         minSdk = 26
         targetSdk = 36
         versionCode = 1

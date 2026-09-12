@@ -5,7 +5,7 @@
 
 初めての方は上から順にそのまま進めてください。所要時間はおよそ 20〜30 分です。
 
-- 対象パッケージ名: `com.example.myapplication`
+- 対象パッケージ名: `com.mikke.discovery`
 - 使用スコープ: `https://www.googleapis.com/auth/calendar.events`
 
 > **この手順書は 2026-08 時点の Console 画面に合わせてあります。**
@@ -224,7 +224,7 @@ release キーストアの SHA-1 は次で取得できます:
    - 選択して初めて、名前・パッケージ名・SHA-1 の入力欄が現れます。
 3. 以下を入力します。
    - **名前**: 任意（例: `MyApplication Android debug`）。既定値は `Android クライアント 1` です
-   - **パッケージ名**: `com.example.myapplication`
+   - **パッケージ名**: `com.mikke.discovery`
    - **SHA-1 証明書のフィンガープリント**: 手順 4 で取得した値（コロン区切りのまま貼り付け可）
 4. 「**アプリの所有権を確認する（省略可）**」は**スキップして構いません**。開発・テストには不要です。
 5. 「**作成**」をクリックします。
@@ -320,7 +320,7 @@ public static final String GOOGLE_OAUTH_CLIENT_ID = "123456789012-xxxx.apps.goog
 
 **チェックリスト:**
 
-- パッケージ名は `com.example.myapplication` で登録したか（`applicationIdSuffix` を使っていないか）
+- パッケージ名は `com.mikke.discovery` で登録したか（`applicationIdSuffix` を使っていないか）
 - SHA-1 は今ビルドしている PC の `debug.keystore` のものか（別 PC の値ではないか）
 - release ビルドを debug 用のクライアント ID で動かそうとしていないか
 - Android 用（ウェブ用ではない）クライアントとして作成したか
