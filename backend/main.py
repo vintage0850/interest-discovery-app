@@ -78,6 +78,11 @@ def get_client() -> GeminiClient:
     return _client
 
 
+@app.get("/", include_in_schema=False)
+def root() -> dict[str, str]:
+    return {"service": "Mikke Discovery Backend", "status": "ok"}
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
