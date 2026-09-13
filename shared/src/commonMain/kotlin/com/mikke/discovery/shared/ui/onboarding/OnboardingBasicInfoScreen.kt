@@ -32,8 +32,8 @@ import com.mikke.discovery.shared.ui.discovery.DiscoveryColors
 import com.mikke.discovery.shared.ui.discovery.DiscoveryRadius
 import com.mikke.discovery.shared.ui.discovery.DiscoverySpacing
 
-private val AGE_RANGES = listOf("12歳以下", "13〜15歳", "16〜18歳", "19歳以上")
-private val SCHOOL_STAGES = listOf("小学", "中学", "高校", "大学・専門", "その他")
+private val AGE_RANGES = listOf("13〜15歳", "16〜18歳", "19歳以上")
+private val SCHOOL_STAGES = listOf("中学", "高校", "大学・専門", "その他")
 private val INTEREST_OPTIONS = listOf(
     "テクノロジー",
     "アート",
