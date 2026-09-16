@@ -12,8 +12,6 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.lifecycleScope
-import com.mikke.discovery.data.account.GoogleAccountManager
-import com.mikke.discovery.shared.discovery.GoogleAccountState
 import com.mikke.discovery.data.calendar.AuthorizationStep
 import com.mikke.discovery.data.calendar.CalendarAuthState
 import com.mikke.discovery.data.calendar.GoogleAuthManager
@@ -22,8 +20,6 @@ import com.mikke.discovery.shared.discovery.AndroidDiscoverySettingsStorage
 import com.mikke.discovery.shared.discovery.AndroidOnboardingStorage
 import com.mikke.discovery.shared.discovery.AndroidSessionStorage
 import com.mikke.discovery.shared.ui.App
-import com.mikke.discovery.shared.ui.LocalGoogleAccountLinkHandler
-import com.mikke.discovery.shared.ui.LocalGoogleAccountSignOutHandler
 import com.mikke.discovery.shared.ui.LocalGoogleCalendarLinkHandler
 import com.mikke.discovery.shared.ui.LocalLineLinkHandler
 import com.mikke.discovery.work.DiscoveryNotificationScheduler
@@ -38,7 +34,6 @@ class MainActivity : ComponentActivity() {
     private val reportIntentState = MutableStateFlow<Pair<String?, Int?>?>(null)
 
     private val googleAuthManager by lazy { GoogleAuthManager.get(application) }
-    private val googleAccountManager by lazy { GoogleAccountManager.get(application) }
 
     private val authorizationLauncher = registerForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
@@ -71,7 +66,6 @@ class MainActivity : ComponentActivity() {
         setContent {
             val authState by googleAuthManager.authState.collectAsState()
             val isCalendarLinked = authState is CalendarAuthState.Authorized
-            val accountState by googleAccountManager.accountState.collectAsState()
             val reportIntent by reportIntentState.collectAsState()
 
             CompositionLocalProvider(
@@ -84,16 +78,6 @@ class MainActivity : ComponentActivity() {
                             }
                             else -> Unit
                         }
-                    }
-                },
-                LocalGoogleAccountLinkHandler provides {
-                    lifecycleScope.launch {
-                        googleAccountManager.signIn(this@MainActivity)
-                    }
-                },
-                LocalGoogleAccountSignOutHandler provides {
-                    lifecycleScope.launch {
-                        googleAccountManager.signOut()
                     }
                 },
                 LocalLineLinkHandler provides {
@@ -112,8 +96,7 @@ class MainActivity : ComponentActivity() {
                     notificationExperimentId = notificationExperimentId,
                     notificationReportType = reportIntent?.first,
                     notificationSessionId = reportIntent?.second,
-                    isGoogleCalendarLinked = isCalendarLinked,
-                    googleAccountState = accountState
+                    isGoogleCalendarLinked = isCalendarLinked
                 )
             }
         }

@@ -30,10 +30,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.mikke.discovery.shared.discovery.GoogleAccountState
 import com.mikke.discovery.shared.discovery.SettingsUiState
-import com.mikke.discovery.shared.ui.LocalGoogleAccountLinkHandler
-import com.mikke.discovery.shared.ui.LocalGoogleAccountSignOutHandler
 import com.mikke.discovery.shared.ui.LocalGoogleCalendarLinkHandler
 import com.mikke.discovery.shared.ui.LocalLineLinkHandler
 
@@ -73,62 +70,7 @@ fun SettingsTabScreen(
 
             Spacer(modifier = Modifier.height(DiscoverySpacing.xl))
 
-            // 1. アカウント
-            val accountState = settingsState.googleAccountState
-            if (accountState !is GoogleAccountState.NotConfigured) {
-                SectionHeader(title = "アカウント")
-                SettingsCard {
-                    val onLinkGoogleAccount = LocalGoogleAccountLinkHandler.current
-                    val onUnlinkGoogleAccount = LocalGoogleAccountSignOutHandler.current
-                    when (accountState) {
-                        is GoogleAccountState.NotLinked -> SettingsRow(
-                            icon = "👤",
-                            title = "アカウントを作成",
-                            subtitle = "未ログイン",
-                            onClick = { onLinkGoogleAccount?.invoke() }
-                        )
-
-                        is GoogleAccountState.Linked -> {
-                            val subtitle = accountState.displayName
-                                ?: accountState.email
-                                ?: "連携済み"
-                            val baseDescription = when {
-                                accountState.displayName != null && accountState.email != null -> accountState.email
-                                accountState.email != null -> accountState.email
-                                else -> "タップして連携を解除"
-                            }
-                            // プロフィール画像のURLは画像ライブラリを追加せず、存在有無をテキストで示す。
-                            val description = if (accountState.photoUrl != null) {
-                                "$baseDescription\nプロフィール画像あり"
-                            } else {
-                                baseDescription
-                            }
-                            SettingsRow(
-                                icon = "👤",
-                                title = "Google アカウント",
-                                subtitle = subtitle,
-                                badge = "連携済み",
-                                description = description,
-                                onClick = { onUnlinkGoogleAccount?.invoke() }
-                            )
-                        }
-
-                        is GoogleAccountState.LinkFailed -> SettingsRow(
-                            icon = "👤",
-                            title = "Google アカウント",
-                            subtitle = accountState.message,
-                            badge = "エラー",
-                            onClick = { onLinkGoogleAccount?.invoke() }
-                        )
-
-                        GoogleAccountState.NotConfigured -> Unit
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(DiscoverySpacing.lg))
-            }
-
-            // 2. 連携
+            // 1. 連携
             SectionHeader(title = "連携")
             SettingsCard {
                 Column {
@@ -155,7 +97,7 @@ fun SettingsTabScreen(
 
             Spacer(modifier = Modifier.height(DiscoverySpacing.lg))
 
-            // 3. 通知
+            // 2. 通知
             SectionHeader(title = "通知")
             SettingsCard {
                 SettingsRow(
@@ -167,7 +109,7 @@ fun SettingsTabScreen(
 
             Spacer(modifier = Modifier.height(DiscoverySpacing.lg))
 
-            // 4. プライバシー
+            // 3. プライバシー
             SectionHeader(title = "プライバシー")
             SettingsCard {
                 SettingsRow(
@@ -179,7 +121,7 @@ fun SettingsTabScreen(
 
             Spacer(modifier = Modifier.height(DiscoverySpacing.lg))
 
-            // 5. データ・セッション
+            // 4. データ・セッション
             SectionHeader(title = "データ・セッション")
             SettingsCard {
                 Column {
@@ -201,7 +143,7 @@ fun SettingsTabScreen(
 
             Spacer(modifier = Modifier.height(DiscoverySpacing.lg))
 
-            // 6. その他
+            // 5. その他
             SectionHeader(title = "その他")
             SettingsCard {
                 Column {

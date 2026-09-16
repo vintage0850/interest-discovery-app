@@ -22,7 +22,6 @@ import androidx.navigation.compose.rememberNavController
 import com.mikke.discovery.shared.db.DatabaseDriverFactory
 import com.mikke.discovery.shared.discovery.DiscoverySettingsStorage
 import com.mikke.discovery.shared.discovery.DiscoveryState
-import com.mikke.discovery.shared.discovery.GoogleAccountState
 import com.mikke.discovery.shared.discovery.InMemoryDiscoverySettingsStorage
 import com.mikke.discovery.shared.discovery.InMemoryOnboardingStorage
 import com.mikke.discovery.shared.discovery.InMemorySessionStorage
@@ -65,21 +64,6 @@ import kotlinx.serialization.Serializable
 @Serializable object EvidenceList
 
 /**
- * Google アカウント連携開始を Android ホスト側に委譲する CompositionLocal。
- *
- * Credential Manager による Google サインインは Android 専用 API なため、shared から直接呼ばず、
- * MainActivity 経由で [GoogleAccountManager] を操作する。
- */
-val LocalGoogleAccountLinkHandler = staticCompositionLocalOf<(() -> Unit)?> { null }
-
-/**
- * Google アカウント連携解除を Android ホスト側に委譲する CompositionLocal。
- *
- * [LocalGoogleAccountLinkHandler] と対で、連携済み行のタップ時に呼ばれる。
- */
-val LocalGoogleAccountSignOutHandler = staticCompositionLocalOf<(() -> Unit)?> { null }
-
-/**
  * Google Calendar 連携開始を Android ホスト側に委譲する CompositionLocal。
  *
  * OAuth 同意画面の起動は Android 専用 API なため、shared から直接呼ばず、
@@ -107,7 +91,6 @@ fun App(
     notificationReportType: String? = null,
     notificationSessionId: Int? = null,
     isGoogleCalendarLinked: Boolean = false,
-    googleAccountState: GoogleAccountState = GoogleAccountState.NotLinked,
     modifier: Modifier = Modifier
 ) {
     MaterialTheme {
@@ -160,10 +143,6 @@ fun App(
 
         LaunchedEffect(isGoogleCalendarLinked) {
             discoveryState.setGoogleCalendarLinked(isGoogleCalendarLinked)
-        }
-
-        LaunchedEffect(googleAccountState) {
-            discoveryState.setGoogleAccountState(googleAccountState)
         }
 
         val startDestination = if (onboardingStorage.hasCompletedOnboarding()) {
