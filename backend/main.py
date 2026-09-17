@@ -6,7 +6,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlmodel import SQLModel, create_engine
 
@@ -91,6 +91,12 @@ def health() -> dict[str, str]:
 @app.get("/privacy-policy", include_in_schema=False)
 def privacy_policy() -> RedirectResponse:
     return RedirectResponse(url="/static/privacy-policy.html")
+
+
+# Google Search Console でのドメイン所有権確認用（OAuth 同意画面のブランディング検証に必要）。
+@app.get("/googlea56288377d4eb3d0.html", include_in_schema=False)
+def google_site_verification() -> PlainTextResponse:
+    return PlainTextResponse("google-site-verification: googlea56288377d4eb3d0.html")
 
 
 @app.post("/cases/analyze", response_model=AnalyzeResponse)
