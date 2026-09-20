@@ -2,12 +2,22 @@ import { useState, useEffect, useCallback } from 'react';
 import { Home as HomeIcon, Edit3, BarChart3, Settings as SettingsIcon } from 'lucide-react';
 import type { HomeResponse } from './types';
 import { fetchHome } from './api';
+import LandingTab from './tabs/LandingTab';
 import HomeTab from './tabs/HomeTab';
 import InputTab from './tabs/InputTab';
 import LogTab from './tabs/LogTab';
 import SettingsTab from './tabs/SettingsTab';
 
+const STARTED_STORAGE_KEY = 'mikke_started';
+
 export default function App(): JSX.Element {
+  const [started, setStarted] = useState(() => {
+    try {
+      return localStorage.getItem(STARTED_STORAGE_KEY) === 'true';
+    } catch {
+      return false;
+    }
+  });
   const [currentTab, setCurrentTab] = useState<'home' | 'input' | 'log' | 'settings'>('home');
   const [home, setHome] = useState<HomeResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -27,8 +37,19 @@ export default function App(): JSX.Element {
   }, []);
 
   useEffect(() => {
-    loadHome();
-  }, [loadHome]);
+    if (started) {
+      loadHome();
+    }
+  }, [started, loadHome]);
+
+  const handleStart = useCallback(() => {
+    try {
+      localStorage.setItem(STARTED_STORAGE_KEY, 'true');
+    } catch {
+      // localStorageが使えない場合も画面遷移は継続する
+    }
+    setStarted(true);
+  }, []);
 
   const handleSubmitted = useCallback(() => {
     // きろくタブから送信成功後、ホーム／じぶんログを再取得する
@@ -39,6 +60,16 @@ export default function App(): JSX.Element {
   const handleGoToLog = useCallback(() => {
     setCurrentTab('log');
   }, []);
+
+  if (!started) {
+    return (
+      <div className="flex-1 flex flex-col h-full relative">
+        <div className="flex-1 overflow-y-auto p-4">
+          <LandingTab onStart={handleStart} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex-1 flex flex-col h-full justify-between relative">
